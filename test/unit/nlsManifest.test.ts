@@ -49,7 +49,7 @@ describe('manifest NLS：两份 nls 文件键集契约', () => {
 })
 
 describe('manifest NLS：package.json 引用契约', () => {
- it('全部命令 title 为 %key% 引用（106 条全覆盖，无硬编码）', () => {
+ it('全部命令 title 为 %key% 引用（全量覆盖，无硬编码）', () => {
     const commands: { command: string; title: string }[] = pkg.contributes.commands
     // 命令清单基线（#97 工单口径 + #105 高亮 + #106 分割线 + #128 片段刷新 + #131 片段暂停/恢复
     // + #132 样式参考 + #145 导出样式参考 JSON + #139 HTML 注释 + #141 双态切换 + #162 复制块链接
@@ -65,9 +65,9 @@ describe('manifest NLS：package.json 引用契约', () => {
     // + T01/#621 PDF 导出一命令（当前文档导出模态）+ T03/#623 选区导出
     //  一命令 + T04/#624 批量导出一命令（批量清单模态）+ T06/#626 合并导出
     //  一命令（合并清单模态——T06 落地时漏同步本计数，110 为既有基线）
-    // + #638 跳转到行
+    // + #638 跳转到行 + #655 切换当前 callout 折叠（Callout T04）
     //  ——新增/删减命令须同步本断言）
-    expect(commands.length).toBe(111)
+    expect(commands.length).toBe(112)
     const literal = commands.filter((c) => !/^%.+%$/.test(c.title))
     expect(
       literal.map((c) => `${c.command}: ${c.title}`),

@@ -574,6 +574,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.callout.toggleFold",
+        "title": "%command.callout.toggleFold.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.heading.unfoldAll",
         "title": "%command.heading.unfoldAll.title%",
         "category": "Vsidian"

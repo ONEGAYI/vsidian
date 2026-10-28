@@ -264,6 +264,13 @@ export const UI_OPERATIONS = [
   // 源码模式不经 webview 键路由天然不涉及）；默认不占键位——按钮与点
   // 击是主入口，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'htmlEditSource', command: 'onegayi.vsidian.html.editSource', titleKey: 'command.html.editSource.title', mode: 'live', writes: false, defaults: [] },
+  // #655（Callout T04）「切换当前 callout 折叠」：视图态翻转零写回
+  //（writes: false，与 headingFold 族同口径）。**Live 与阅读双模式生效**
+  //（mode: 'both'，规格 §6.3——区别于 headingFold 的 live-only：callout
+  // 切换目标是「最内层 callout」而非光标辖域标题，阅读态以当前阅读锚点
+  // 解析目标，无锚点/无目标静默 no-op）。默认不占键位（箭头是主入口，
+  // 键位留给用户按需绑定，评估记录见 docs/specs/keybindings.md）。
+  { id: 'calloutToggleFold', command: 'onegayi.vsidian.callout.toggleFold', titleKey: 'command.callout.toggleFold.title', mode: 'both', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

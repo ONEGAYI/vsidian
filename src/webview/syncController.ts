@@ -51,6 +51,16 @@ import {
   unfoldAround,
   type HeadingFoldOperationId,
 } from './headingFold'
+import {
+  applyCalloutToggleAt,
+  calloutFoldField,
+  calloutFoldView,
+  collectCalloutFolds,
+  collectCalloutFoldPaint,
+  setCalloutFoldBindingHints,
+  toggleCalloutFoldAt,
+  unfoldCalloutAround,
+} from './calloutFold'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
 import { ToastChannel } from './toast'
@@ -1085,6 +1095,12 @@ export class WebviewSyncController {
         id === 'headingFoldAll' || id === 'headingUnfoldAll') {
         this.runHeadingFoldCommand(id)
       }
+      // #655（T04）切换当前 callout 折叠：本地分支直执行（视图态零写回，
+      // 不出站宿主往返；命令面板经 ui.command 回发共用 runCalloutToggleCommand
+      // ——router 已按注册表 mode: both 路由，阅读态同样生效）
+      else if (id === 'calloutToggleFold') {
+        this.runCalloutToggleCommand()
+      }
       // #567（T02）编辑当前 HTML 源码：本地分支直执行（纯选区事务零写
       // 回，不出站宿主往返）；命令面板经 ui.command 回发共用
       // runHtmlEditSourceCommand（目标按焦点实例光标解析，无命中静默）
@@ -1306,6 +1322,13 @@ export class WebviewSyncController {
       onFoldToggle: (key) => {
         if (this.view) {
           toggleHeadingFoldAt(this.view, key)
+        }
+      },
+      // #655（T04）callout 折叠交互回调：翻转主文 Live 的 callout 折叠
+      // StateField（同一状态源；呈现刷新经上方 callout 折叠侦测闭环）
+      onCalloutFoldToggle: (key) => {
+        if (this.view) {
+          toggleCalloutFoldAt(this.view, key)
         }
       },
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
@@ -1998,6 +2021,12 @@ export class WebviewSyncController {
             this.syncReadingFolds()
             return
           }
+          // #655（T04）callout 折叠集变化（阅读态箭头点击回环、键位或落点
+          // 展开的 effect 直驱）时重装饰阅读块的折叠呈现——同款侦测闭环
+          if (tr.startState.field(calloutFoldField, false) !== tr.state.field(calloutFoldField, false)) {
+            this.syncReadingCalloutFolds()
+            return
+          }
         }
       }),
     ]
@@ -2491,6 +2520,8 @@ export class WebviewSyncController {
         // #414 T03 折叠箭头/省略号的键位徽章数据源（同 quickBindingHints
         // 源注入：widget 与 marker 物化时读取）
         setHeadingFoldBindingHints((op) => getEffectiveBindings(overrides, op))
+        // #655（T04）callout 折叠箭头的键位徽章数据源（同款注入）
+        setCalloutFoldBindingHints(() => getEffectiveBindings(overrides, 'calloutToggleFold'))
         break
       }
       case 'addonPasteRules.snapshot': {
@@ -3202,6 +3233,10 @@ export class WebviewSyncController {
           case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
           case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
           case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
+          // #655（T04）切换当前 callout 折叠：命令面板入口（快捷键走 router
+          // 本地分支直达），两入口共用 runCalloutToggleCommand——Live 按光标、
+          // 阅读按当前锚点解析最内层目标，无目标静默
+          case 'calloutToggleFold': this.runCalloutToggleCommand(); break
           // #567（T02）编辑当前 HTML 源码：命令面板入口（快捷键走 router
           // 本地分支直达），两入口共用 runHtmlEditSourceCommand——目标按
           // 焦点实例光标解析（焦点在嵌入内部 Live 时落 B 的 html 块），
@@ -4375,7 +4410,7 @@ export class WebviewSyncController {
     // T04（#415）落点展开：modeAnchor 落在折叠隐藏区内时（阅读期间滚动/
     // 定位使锚点回到隐藏区）先展开再回切定位（U12）——折叠态本身随实例
     // 内存驻留保持（setViewMode 不销毁 StateField），此处只处理落点可见性
-    if (this.view) unfoldAround(this.view, pos)
+    if (this.view) this.unfoldAllAround(this.view, pos)
     this.view?.dispatch({
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: 'center' }),
@@ -4451,6 +4486,8 @@ export class WebviewSyncController {
     // 折叠态先行更新（rebuild:false——随后的 setDocument 统一重建消费，
     // 避免双重建；折叠状态未变时 setFoldState 内部短路）
     this.syncReadingFolds(false)
+    // #655（T04）callout 折叠态先行更新（状态集供随后的重建统一装饰）
+    this.syncReadingCalloutFolds()
     this.readingView.setDocument(this.view.state.doc.toString())
     if (keep !== null) {
       this.readingView.scrollToSrcStart(keep)
@@ -4477,6 +4514,24 @@ export class WebviewSyncController {
       keys,
       { rebuild },
     )
+  }
+
+  /**
+   * #655（T04）阅读态 callout 折叠消费同步：从主文 Live StateField 派生
+   * 有效折叠视图（区间派生单一事实源 calloutFold 纯函数族，阅读侧只消费
+   * 不复制）推给阅读视图（已挂块重装饰 + 高度重测——收起是 CSS 隐藏，
+   * 块序列不变）。与 syncReadingFolds 同款调用点（refreshReading 与侦测
+   * 闭环）。
+   */
+  private syncReadingCalloutFolds(): void {
+    const view = this.view
+    if (!view || !this.readingView) {
+      return
+    }
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const spans = collectCalloutFolds(view.state.doc, tree)
+    const overrides = view.state.field(calloutFoldField, false) ?? new Map()
+    this.readingView.setCalloutFoldState(calloutFoldView(overrides, spans))
   }
 
   // ---- 任务勾选（#9）：阅读视图的 checkbox 交互 ----
@@ -4547,7 +4602,7 @@ export class WebviewSyncController {
       // 展开后落点已进可见序列，锚点不再 floor 到折叠标题。语义与
       // Live 分支同款（reveal 族统一机制，规格「七」）
       if (this.view) {
-        unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
+        this.unfoldAllAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
       }
       const start = this.readingView.anchorStartFor(pos) ?? pos
       this.modeAnchor = start
@@ -4567,7 +4622,7 @@ export class WebviewSyncController {
       // 区间右端在折叠隐藏区内时，先永久展开包含它的全部折叠（嵌套全
       // 展开，effect 直驱）再定位；#419 起阅读分支同款（上方）
       if (this.view) {
-        unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
+        this.unfoldAllAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
       }
       // #57：定位离开表格选区语境时清选区（view.locate 与大纲跳转共用）
       if (this.view) selectTableRegion(this.view, null)
@@ -9808,7 +9863,7 @@ export class WebviewSyncController {
       // T04/#415 同款语义），展开的同步回环刷新块序列后再算锚点——命中
       // 块已进可见序列，锚点不再 floor 到折叠标题
       if (this.view) {
-        unfoldAround(this.view, this.clampToDoc(cur.from), this.clampToDoc(cur.to))
+        this.unfoldAllAround(this.view, this.clampToDoc(cur.from), this.clampToDoc(cur.to))
       }
       const start = this.readingView.anchorStartFor(this.clampToDoc(cur.from)) ?? cur.from
       this.modeAnchor = start
@@ -9832,7 +9887,7 @@ export class WebviewSyncController {
       // T04（#415）落点展开：查找下一个/上一个命中（含替换后定位）落在
       // 折叠隐藏区内时，该节自动展开并定位（U10）——匹配区间 [from, to]
       // 任一端在隐藏区即展开
-      if (this.view) unfoldAround(this.view, cur.from, cur.to)
+      if (this.view) this.unfoldAllAround(this.view, cur.from, cur.to)
       this.view?.dispatch({
         selection: { anchor: cur.from, head: cur.to },
         effects: EditorView.scrollIntoView(cur.from, { y: 'center' }),
@@ -10283,6 +10338,47 @@ export class WebviewSyncController {
       return
     }
     applyHeadingFoldOperation(resolved.view, op)
+  }
+
+  /** #655（T04）「切换当前 callout 折叠」执行口：键位本地分支与命令面板
+   *  共用。目标 = 焦点实例内解析位置所在的最内层可折叠 callout——Live
+   *  按光标主位；**阅读态按当前阅读锚点**（modeAnchor ?? 视口锚点——
+   *  规格 §6.3 的 Live/阅读双生效：callout 目标不依赖光标辖域，与
+   *  headingFold live-only 的定案差异依据）。门控不查 viewMode（阅读
+   *  合法），只拒只读/暂停；无目标静默 no-op。 */
+  private runCalloutToggleCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const view = resolved.view
+    if (view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      return
+    }
+    if (resolved.embed ? resolved.embed.isSuspended : this.suspended) {
+      return
+    }
+    let pos: number | null = null
+    if (resolved.embed) {
+      pos = view.state.selection.main.head
+    } else if (this.viewMode === 'live') {
+      pos = view.state.selection.main.head
+    } else {
+      // 阅读态：当前锚点（modeAnchor 用户滚动/定位维护）回退视口顶锚点
+      pos = this.modeAnchor ?? this.readingView?.currentAnchor() ?? null
+    }
+    if (pos === null) {
+      return
+    }
+    applyCalloutToggleAt(view, this.clampToDoc(pos))
+  }
+
+  /** #655（T04）落点展开的组合入口（reveal 族接线点统一消费——依次消费
+   *  标题折叠与 callout 折叠两者的展开能力，heading-fold.md「定位链依次
+   *  消费两者」约定）：先标题后 callout（两状态集独立，序无语义影响）。 */
+  private unfoldAllAround(view: EditorView, from: number, to?: number): void {
+    unfoldAround(view, from, to)
+    unfoldCalloutAround(view, from, to)
   }
 
   /** #567（T02）「编辑当前 HTML 源码」：光标所在 html 块 → 选中完整源码
@@ -11519,6 +11615,12 @@ export class WebviewSyncController {
       //  采集；Live 模式缺省不参与断言）
       ...(this.viewMode === 'reading' && this.readingView
         ? { readingFold: this.readingView.collectFoldPaint() }
+        : {}),
+      // #655（T04）callout 折叠绘制观测（Live 侧箭头/收起区间）与阅读侧
+      //  收起呈现（仅 reading 模式采集）
+      calloutFold: collectCalloutFoldPaint(view),
+      ...(this.viewMode === 'reading' && this.readingView
+        ? { readingCalloutFold: this.readingView.collectCalloutFoldPaint() }
         : {}),
       ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),

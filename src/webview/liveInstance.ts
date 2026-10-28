@@ -66,6 +66,7 @@ import {
   setHeadingFolds,
   type HeadingFoldOperationId,
 } from './headingFold'
+import { calloutFoldExtension, clampSelectionOutOfCalloutFolds } from './calloutFold'
 import { liveEmbed } from './liveEmbed'
 import { liveHtml } from './liveHtml'
 import { liveInlineHtml } from './liveInlineHtml'
@@ -1968,6 +1969,13 @@ export class LiveEditorInstance {
     if (foldClamped) {
       view.dispatch({ selection: foldClamped })
     }
+    // #655（T04）外部同步光标钳制的 callout 面：增量映射把光标带进收起
+    // callout 的正文区时钳到标题行行尾（与标题折叠同款 selection-only
+    // 补事务；正常进入已被落点展开链接住）
+    const calloutClamped = clampSelectionOutOfCalloutFolds(view)
+    if (calloutClamped) {
+      view.dispatch({ selection: calloutClamped })
+    }
   }
 
   /**
@@ -2806,6 +2814,11 @@ export class LiveEditorInstance {
       // （消费点经上方 liveDecorationsField 增量树直查派生区间；effect
       // 驱动无键位——T02/T03 在其上生长，#410 API 只消费派生视图）
       headingFoldExtension,
+      // #655（T04）Callout 折叠本体：手动翻转 StateField + 跨行隐藏 replace
+      // + 标题行箭头 widget（区间派生消费点直查 calloutOfBlockquote 同源
+      // 识别；effect 驱动，键位经 syncController 的 calloutToggleFold 汇入
+      // applyCalloutToggleAt；主文/嵌入实例统一装配——视图态随实例独立）
+      calloutFoldExtension,
       // #223/#247 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态只替换嵌入
       // 精确区间 [from, to] 呈卡片——#247 起不再整行替换，前后文与父结构
       // 保留 / 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，

@@ -136,6 +136,10 @@ export const LIVE_CLASS_NAMES = {
   /** 标题标记 widget 呈现的图标元素（.callout-icon） */
   calloutIcon: 'callout-icon',
   /** 首末行圆角（内部类：行级形态的容器视觉收边；非公开契约） */
+  /** #655（T04）可折叠状态类（T01 固定口径：Obsidian 原名 is-collapsible，
+   *  源码 +/- 声明在场的标题行挂；is-collapsed 收起态行类由 calloutFold
+   *  装饰发射——两者分属源文派生与视图态消费） */
+  calloutCollapsible: 'is-collapsible',
   calloutFirst: 'vsidian-callout-first',
   calloutLast: 'vsidian-callout-last',
   /** 该行最内层引用层为 callout（内部类）：静默该层引用紫条与引用底
@@ -1150,6 +1154,11 @@ function emitForRange(
             addLineCls(n, n === info.titleLineNo
               ? LIVE_CLASS_NAMES.calloutTitle
               : LIVE_CLASS_NAMES.calloutContent)
+            // #655（T04）：可折叠声明在场 → 标题行挂 is-collapsible（纯源文
+            // 派生；标题-only 也挂——占位与操作目标仍按「有正文」派生过滤）
+            if (info.decl.fold && n === info.titleLineNo) {
+              addLineCls(n, LIVE_CLASS_NAMES.calloutCollapsible)
+            }
             if (n === info.firstLineNo) {
               addLineCls(n, LIVE_CLASS_NAMES.calloutFirst)
             }

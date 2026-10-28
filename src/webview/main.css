@@ -2399,6 +2399,45 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
   font-weight: var(--callout-title-weight);
 }
 
+/* ---- #655（T04）折叠箭头 .callout-fold（T01 固定口径；Live 标题行行尾
+   widget 与阅读 .callout-title 尾部注入共用基座）与 is-collapsed 状态 ---- */
+#app .callout-fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  padding: 0;
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  color: var(--callout-color);
+  cursor: pointer;
+  vertical-align: -0.2em;
+  flex-shrink: 0;
+}
+
+#app .callout-fold svg {
+  transition: transform 0.12s ease;
+}
+
+/* 收起态：箭头右向（旋转 -90deg）+ is-collapsed 双挂口径的 fold 元素侧 */
+#app .callout-fold.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+#app .callout-fold:hover {
+  color: var(--vscode-foreground, inherit);
+}
+
+/* Live 行级形态：收起后容器末行已被隐藏——标题行补下圆角维持外框
+   收口（is-collapsed 行类由 calloutFold 装饰发射；is-collapsible 行类由
+   liveDecorations 源文派生发射） */
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout-title.is-collapsed {
+  border-bottom-left-radius: var(--callout-radius);
+  border-bottom-right-radius: var(--callout-radius);
+}
+
 /* 图标表（#654/T03）：按类型组分派 Lucide 内联 SVG mask（私有变量
    --_vsidian-callout-icon 承载，:where() 零特异性——用户片段任意规则即可
    覆盖）。SVG 取 lucide-static 0.462.0（版本锚定；取证 JSON 记 Obsidian
@@ -4032,6 +4071,12 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 #app .vsidian-view-reading .vsidian-reading-block .callout-content {
   padding: var(--callout-content-padding);
   background: var(--callout-content-background);
+}
+
+/* #655（T04）阅读态收起：正文不绘制（状态类是 calloutFold 状态源的呈现
+   消费面——不是状态源；恢复经箭头/键位翻转同一 effect 链路） */
+#app .vsidian-view-reading .vsidian-reading-block div.callout.is-collapsed > .callout-content {
+  display: none;
 }
 
 #app .vsidian-view-reading .vsidian-reading-block .callout-content > :first-child {

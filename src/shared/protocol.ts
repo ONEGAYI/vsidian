@@ -2872,6 +2872,44 @@ export interface HeadingFoldPaintProbe {
   hiddenLinePainted: boolean | null
 }
 
+/** #655（T04）Callout 折叠 UI 绘制观测（采集实体 src/webview/calloutFold.ts
+ *  的 collectCalloutFoldPaint）：可折叠箭头计数、收起区间数、首收起
+ *  callout 的箭头绘制态/标题可见、隐藏正文行是否仍被绘制。结构性字段
+ *  （计数/类判定）jsdom 可断言；visible 类字段只作真宿主/浏览器断言依据。 */
+export interface CalloutFoldPaintProbe {
+  /** 可折叠 callout 区间总数（派生视图口径——无符号与标题-only 不计） */
+  foldableCount: number
+  /** 收起中的区间数（默认 `-` + 手动收起） */
+  foldCount: number
+  /** 视口内已绘制箭头控件计数（.callout-fold DOM 实测；触及标题行的退场） */
+  arrowCount: number
+  /** 首收起 callout 箭头绘制态（中心点 elementFromPoint 命中） */
+  firstArrowVisible: boolean
+  /** 首收起箭头是否携带 is-collapsed 类（T01 固定口径） */
+  firstArrowCollapsedClass: boolean
+  /** 首收起 callout 标题文字是否可见（收起只隐正文；无收起为 null） */
+  titleVisible: boolean | null
+  /** 首收起区间隐藏正文行是否仍被绘制（不可见断言面：收起后应 false；
+   *  无收起为 null） */
+  hiddenBodyPainted: boolean | null
+}
+
+/** #655（T04）阅读态 callout 折叠绘制观测（采集实体 src/webview/
+ *  readingVirtualView.ts 的 collectCalloutFoldPaint）：阅读视图消费折叠
+ *  视图后的箭头/收起呈现——箭头计数、收起 callout 的 content 是否仍
+ *  绘制（CSS display:none 断言面）与标题可见。 */
+export interface ReadingCalloutFoldPaintProbe {
+  /** 已挂载块内注入的箭头控件计数 */
+  arrowCount: number
+  /** 收起中的 callout 计数（is-collapsed 类实测） */
+  foldCount: number
+  /** 首收起 callout 的 .callout-content 是否已隐藏（display:none 实测；
+   *  无收起为 null） */
+  contentHidden: boolean | null
+  /** 首收起 callout 标题元素是否可见（无收起为 null） */
+  titleVisible: boolean | null
+}
+
 /** #419 阅读态标题折叠绘制观测（采集实体 src/webview/readingVirtualView.ts
  *  的 collectFoldPaint）：阅读视图消费 Live 折叠状态集后的折叠呈现观测
  *  ——折叠区间数、可折叠标题箭头计数、首折叠标题的省略号/箭头绘制态、
@@ -2918,6 +2956,10 @@ export interface PaintProbe {
   /** #419 阅读态标题折叠绘制观测（仅 reading 模式采集；无折叠交互装配
    *  时缺省） */
   readingFold?: ReadingFoldPaintProbe
+  /** #655（T04）Callout 折叠绘制观测（无 Live 视图时缺省） */
+  calloutFold?: CalloutFoldPaintProbe
+  /** #655（T04）阅读态 callout 折叠绘制观测（仅 reading 模式采集） */
+  readingCalloutFold?: ReadingCalloutFoldPaintProbe
   /** #358 T09 渲染提供者接管绘制观测：文档内图形容器的生效提供者与
    *  绘制层证据（组件容器计算色/几何；SVG 在场数按容器所有权分桶）——
    *  「实际选中内容」的断言面（非 DOM 存在性）。无图形容器为空数组
@@ -4026,6 +4068,19 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       typeof v.readingFold.arrowCollapsed === 'boolean' &&
       (v.readingFold.hiddenTextInDom === null || typeof v.readingFold.hiddenTextInDom === 'boolean') &&
       (v.readingFold.hiddenLinePainted === null || typeof v.readingFold.hiddenLinePainted === 'boolean'))) &&
+    (v.calloutFold === undefined || (isObject(v.calloutFold) &&
+      typeof v.calloutFold.foldableCount === 'number' &&
+      typeof v.calloutFold.foldCount === 'number' &&
+      typeof v.calloutFold.arrowCount === 'number' &&
+      typeof v.calloutFold.firstArrowVisible === 'boolean' &&
+      typeof v.calloutFold.firstArrowCollapsedClass === 'boolean' &&
+      (v.calloutFold.titleVisible === null || typeof v.calloutFold.titleVisible === 'boolean') &&
+      (v.calloutFold.hiddenBodyPainted === null || typeof v.calloutFold.hiddenBodyPainted === 'boolean'))) &&
+    (v.readingCalloutFold === undefined || (isObject(v.readingCalloutFold) &&
+      typeof v.readingCalloutFold.arrowCount === 'number' &&
+      typeof v.readingCalloutFold.foldCount === 'number' &&
+      (v.readingCalloutFold.contentHidden === null || typeof v.readingCalloutFold.contentHidden === 'boolean') &&
+      (v.readingCalloutFold.titleVisible === null || typeof v.readingCalloutFold.titleVisible === 'boolean'))) &&
     (v.renderers === undefined || (isObject(v.renderers) &&
       Array.isArray(v.renderers.containers) &&
       v.renderers.containers.every((c: unknown) => isObject(c) &&

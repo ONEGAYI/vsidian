@@ -33,7 +33,8 @@ import {
   rangeFoldHidden,
   type HeadingFoldSpan,
 } from './headingFold'
-import type { ReadingFoldPaintProbe } from '../shared/protocol'
+import { createCalloutFoldArrow, type CalloutFoldSpan } from './calloutFold'
+import type { ReadingCalloutFoldPaintProbe, ReadingFoldPaintProbe } from '../shared/protocol'
 import type { DiagnosticEvent } from '../shared/testDiagnostics'
 import type { FindMatch } from './findSession'
 import { highlightReadingMatches } from './readingFind'
@@ -85,6 +86,10 @@ export interface VirtualReadingViewOptions {
    *  链路——阅读与 Live 共享同一折叠状态集）；缺省无折叠交互（引用
    *  内容等只读场景）。 */
   onFoldToggle?: (key: number) => void
+  /** #655（T04）callout 折叠交互回调：翻转主文 Live 的 callout 折叠
+   *  StateField（同一状态源——同实例 Live/阅读共享；缺省无 callout 折叠
+   *  交互，引用内容等只读场景不注入）。 */
+  onCalloutFoldToggle?: (key: number) => void
   /** #567（T02）文档身份标记（T01 探针 b2 隔离基座）：在场时 html 块
    *  渲染根挂 data-vsidian-doc-scope；嵌入实例接目标身份键随 T04 装载
    *  器落地，缺省不挂。 */
@@ -142,6 +147,11 @@ export class VirtualReadingView {
   /** foldSpans 的 key → span 索引（标题块装饰的 O(1) 命中） */
   private foldSpanByStart = new Map<number, HeadingFoldSpan>()
   private readonly onFoldToggle: ((key: number) => void) | undefined
+  /** #655（T04）callout 折叠消费状态：有效折叠视图（区间派生单一事实源
+   *  在 calloutFold 纯函数族——syncController 派生后推入；收起是 CSS
+   *  隐藏（.callout.is-collapsed > .callout-content），块序列不变） */
+  private calloutFolds: Array<{ span: CalloutFoldSpan; folded: boolean }> = []
+  private readonly onCalloutFoldToggle: ((key: number) => void) | undefined
 
   /** 当前挂载窗口与元素表（索引 → 元素） */
   private mounted: MountWindow | null = null
@@ -193,6 +203,7 @@ export class VirtualReadingView {
     this.fixedBufferPx = options.bufferPx
     this.hooks = options
     this.onFoldToggle = options.onFoldToggle
+    this.onCalloutFoldToggle = options.onCalloutFoldToggle
     this.onDiagnostic = options.onDiagnostic
     this.findSource = new ReadingFindSource(this.container)
     this.spacerTop = document.createElement('div')
@@ -267,6 +278,84 @@ export class VirtualReadingView {
     if (this.blocks.length > 0 || this.allBlocks.length > 0) {
       this.rebuildBlocks(true)
     }
+  }
+
+  /**
+   * #655（T04）callout 折叠状态更新：folds = 有效折叠视图
+   * （calloutFoldView 产出，区间派生单一事实源在 calloutFold 纯函数族）。
+   * 与标题折叠的块过滤不同——收起是块内 CSS 隐藏（标题/正文同块，块级
+   * 过滤粒度不适用），状态变化只重装饰已挂块的箭头/状态类并调度重测
+   * （display:none 改变块高，实测机制自然修正；不重建块序列、不重新
+   * 解析）。setDocument 前先行更新时同样只存状态（新块挂载时消费）。
+   */
+  setCalloutFoldState(folds: Array<{ span: CalloutFoldSpan; folded: boolean }>): void {
+    const same = folds.length === this.calloutFolds.length &&
+      folds.every((v, i) => v.span === this.calloutFolds[i]!.span && v.folded === this.calloutFolds[i]!.folded)
+    this.calloutFolds = folds
+    if (same || this.elements.size === 0) {
+      return
+    }
+    for (const [i, el] of this.elements) {
+      this.redecorateCalloutFolds(el, this.blocks[i]!)
+    }
+    this.scheduleUpdate()
+  }
+
+  /** 块内 callout 折叠装饰的清除（重装饰前置）：移除注入的箭头与状态类，
+   *  保留 readingMarkdown 渲染的原始结构（div.callout 家族不动） */
+  private stripCalloutFoldDecorations(el: HTMLElement): void {
+    for (const arrow of el.querySelectorAll('.callout-fold')) {
+      arrow.remove()
+    }
+    for (const dom of el.querySelectorAll('div.callout')) {
+      dom.classList.remove('is-collapsible', 'is-collapsed')
+    }
+  }
+
+  /**
+   * #655（T04）块内 callout 折叠装饰（挂载与状态变化重装饰共用）：块内
+   * div.callout 按文档序（querySelectorAll 先序 = markerFrom 升序）匹配
+   * 该块区间内的折叠视图——挂 is-collapsible/is-collapsed 状态类
+   * （T01 固定口径）、向 .callout-title 尾部注入箭头（click 回调走构造
+   * 注入的 onCalloutFoldToggle 翻转 Live StateField，呈现刷新由控制器
+   * 的折叠侦测闭环驱动）。数量不齐（渲染差异防御）时逐序尽力匹配，
+   * 超出部分不装饰不崩溃。
+   */
+  private decorateCalloutFoldControls(el: HTMLElement, block: ReadingBlock): void {
+    this.stripCalloutFoldDecorations(el)
+    if (this.calloutFolds.length === 0 || !this.onCalloutFoldToggle) {
+      return
+    }
+    const inBlock = this.calloutFolds.filter((v) =>
+      v.span.markerFrom >= block.start && v.span.markerFrom <= block.end)
+    if (inBlock.length === 0) {
+      return
+    }
+    const doms = el.querySelectorAll<HTMLElement>('div.callout')
+    inBlock.forEach((v, i) => {
+      const dom = doms[i]
+      if (!dom) {
+        return
+      }
+      dom.classList.add('is-collapsible')
+      const title = dom.querySelector<HTMLElement>('.callout-title')
+      if (!title) {
+        return
+      }
+      if (v.folded) {
+        dom.classList.add('is-collapsed')
+      }
+      title.appendChild(createCalloutFoldArrow({
+        folded: v.folded,
+        declFold: v.span.declFold,
+        onToggle: () => this.onCalloutFoldToggle?.(v.span.key),
+      }))
+    })
+  }
+
+  /** 状态变化时对已挂块重装饰（不重建块序列） */
+  private redecorateCalloutFolds(el: HTMLElement, block: ReadingBlock): void {
+    this.decorateCalloutFoldControls(el, block)
   }
 
   /** 可见块序列过滤：折叠隐藏区内的块不进入（#419）——隐藏判定经
@@ -778,6 +867,40 @@ export class VirtualReadingView {
     }
   }
 
+  /**
+   * #655（T04）callout 折叠绘制观测（view.state.paint 探针族的
+   * readingCalloutFold 字段采集体）：已挂块内注入的箭头计数、收起计数、
+   * 首收起 callout 的 .callout-content 是否已隐藏（display:none 实测——
+   * CSS 隐藏断言面）与标题可见。结构性字段 jsdom 可断言。
+   */
+  collectCalloutFoldPaint(): ReadingCalloutFoldPaintProbe {
+    const arrows = this.container.querySelectorAll<HTMLElement>('.callout-fold')
+    const collapsed = this.container.querySelectorAll<HTMLElement>('div.callout.is-collapsed')
+    let contentHidden: boolean | null = null
+    let titleVisible: boolean | null = null
+    if (collapsed.length > 0) {
+      const first = collapsed[0]!
+      const content = first.querySelector<HTMLElement>('.callout-content')
+      if (content) {
+        try {
+          contentHidden = getComputedStyle(content).display === 'none'
+        } catch {
+          contentHidden = false
+        }
+      }
+      const title = first.querySelector<HTMLElement>('.callout-title')
+      if (title) {
+        titleVisible = hitPainted(title)
+      }
+    }
+    return {
+      arrowCount: arrows.length,
+      foldCount: collapsed.length,
+      contentHidden,
+      titleVisible,
+    }
+  }
+
   /** 折叠区间隐藏侧首个非空行的文本采样（trim 后；全空白节取 null——
    *  可折叠判定保证有效折叠必有非空行，防御兜底） */
   private hiddenTextSample(span: HeadingFoldSpan): string | null {
@@ -926,6 +1049,8 @@ export class VirtualReadingView {
     const block = this.blocks[i]!
     const el = createReadingBlockElement(block, this.text, this.hooks.docScope)
     this.decorateFoldControls(el, block)
+    // #655（T04）callout 折叠装饰（挂载时消费当前折叠视图）
+    this.decorateCalloutFoldControls(el, block)
     if (block.start === this.highlightSrcStart) {
       // #14 查找命中块：滚动窗口平移导致重挂载后高亮保持
       el.classList.add(READING_CLASS_NAMES.findHit)

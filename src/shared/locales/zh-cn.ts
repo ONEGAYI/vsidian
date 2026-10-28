@@ -1201,6 +1201,10 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #414（#409 T03）折叠 UI 悬停词（箭头/省略号可访问形态） ----
   'headingfold.fold': '折叠此节',
   'headingfold.unfold': '展开此节',
+  // ---- #655（T04）Callout 折叠操作与箭头悬停词 ----
+  'command.callout.toggleFold.title': '切换当前 Callout 折叠',
+  'calloutfold.fold': '收起此提示块',
+  'calloutfold.unfold': '展开此提示块',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': '分词引擎',
   'setting.wordSegmentEngine.description': 'Ctrl+左/右箭头按词移动时对连续中文段的切分引擎。英文与数字段始终沿用内置分组语义。',

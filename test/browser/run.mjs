@@ -80,6 +80,10 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   // 三层嵌套与列表容器组合、列表内 callout 真实输入/拖选——T01 报告 §10
   // 声明的编辑态缺口）紧随 calloutPaint（同 callout 族）。
   'calloutTypes',
+  // #655（T04）合入列：calloutFold（按实例折叠状态机——真实点击/键位/
+  // 命令三入口、光标迁移、模式往返共享、阅读重挂、查找双重折叠展开、
+  // IME 组合不中断、零写回）。紧随 callout 族。
+  'calloutFold',
   'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
