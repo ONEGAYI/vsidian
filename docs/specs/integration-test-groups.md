@@ -72,6 +72,7 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 | --- | --- |
 | addonT10Commands | 同 run attempt 1 断言失败（10.3s）；本地定向单跑稳定通过——CI 时序敏感，根因未定（#446 条目 9） |
 | addonRendererTakeover | 同 run attempt 3 断言失败（16.9s），与条目 5 的初始化等待超时同套件（#446 条目 5/9）；本地全绿 |
+| tableInput | PR #650 run 40656739949 attempt 1/2 同位挂红（边沿 IME 用例 `waitForFunction` 30s 超时，非断言失败，2026-10-28）；本地单套件 3/3 与三并发全量双绿、与当期改动零交集、合并后 main 同代码 CI 通过——CI 时序敏感，根因未定（#552 条目登记；用户裁决入组） |
 
 tableCaret 的原始两次失败已确认是 `handle-hover` 读隐藏新增带 opacity 时得到空串，报告 `TIMEOUT=false`；约 70s 是套件总耗时。控件重建期间取到脱离 DOM 的节点可稳定复现同款失败。修复将查询与样式读取合在同一浏览器回调，补充重建期间的连续采样回归，并恢复 core；该候选须在同一提交两轮独立 CI 通过后合并，远端证据与勾销状态记录于修复 PR 和 #446 条目 9。根因与本地红绿证据见本文末节。
 
