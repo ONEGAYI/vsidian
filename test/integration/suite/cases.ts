@@ -1500,6 +1500,8 @@ async function waitViewState(
         graphic: paint?.['graphic'],
         html: paint?.['html'],
         docStyle: paint?.['docStyle'],
+        table: paint?.['table'],
+        tableGrid: s['tableGrid'],
         // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
         readingBlockCount: s['readingBlockCount'],
         readingMountedBlocks: s['readingMountedBlocks'],
@@ -5416,6 +5418,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
   ['表格行列选中在绘制层显示完整轮廓与高亮（#43）', async () => {
     await openWithEditor('table43-crlf.md')
     await waitSessionReady('table43-crlf.md')
+    // ready 只保证消息桥已接通；抓手由布局帧挂载，提前发送 click 会被丢弃。
+    await waitViewState('table43-crlf.md', (v) => v.viewMode === 'live' && v.tableGrid?.rowHandles === 3 &&
+      v.paint?.table?.cellVisible === true && v.paint.table.gridDisplay === 'grid')
     const uri = wsUri('table43-crlf.md').toString()
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'table.test.select', axis: 'row', index: 1 })

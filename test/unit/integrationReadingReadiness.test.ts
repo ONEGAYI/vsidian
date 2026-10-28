@@ -7,6 +7,46 @@ import ts from 'typescript'
 const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
   ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 
+it('表格行列绘制验收等待抓手挂载后再发送一次选择，不把会话就绪当作控件就绪', async () => {
+  let body: ts.Expression | undefined
+  const visit = (node: ts.Node): void => {
+    if (ts.isArrayLiteralExpression(node) && node.elements.length === 2 && ts.isStringLiteral(node.elements[0]!) &&
+      node.elements[0].text === '表格行列选中在绘制层显示完整轮廓与高亮（#43）') body = node.elements[1] as ts.Expression
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(body).toBeDefined()
+  const code = ts.transpile(`return (${body!.getText(source)})();`, { target: ts.ScriptTarget.ES2022 })
+  let mounted = false
+  let selected: string | undefined
+  const clicks: string[] = []
+  const table = {
+    cellVisible: true, gridDisplay: 'grid', cellBorderWidth: '1px',
+    rowOutlineColor: 'rgb(1, 2, 3)', rowOutlineWidth: '2px', rowBackgroundColor: 'rgb(1, 2, 3)',
+    regionCellCount: 2, regionBackgroundColor: 'rgb(1, 2, 3)',
+    regionTopBorderWidth: '2px', regionLeftBorderWidth: '2px',
+    columnBorderColor: 'rgb(1, 2, 3)', columnBorderWidth: '2px', columnRightBorderWidth: '2px',
+    columnTopBorderWidth: '2px', columnBottomBorderWidth: '2px', columnBackgroundColor: 'rgb(1, 2, 3)',
+  }
+  const run = new Function('openWithEditor', 'waitSessionReady', 'wsUri', 'vscode', 'CMD', 'waitViewState', 'assert', code)
+  await run(async () => {}, async () => {}, () => ({ toString: () => 'fixture:table43-crlf.md' }), {
+    commands: { executeCommand: async (_name: string, _uri: string, message: { axis: string }) => {
+      clicks.push(message.axis)
+      // 生产测试钩子在抓手尚未挂载时查不到按钮，本次 click 不会排队重放。
+      if (mounted) selected = message.axis
+    } },
+  }, { postToPanel: 'post' }, async (_file: string, match: (state: unknown) => boolean) => {
+    for (let sample = 0; sample < 2; sample++) {
+      const state = { viewMode: 'live', tableGrid: { rowHandles: mounted ? 3 : 0 },
+        paint: { table: selected ? table : { cellVisible: mounted, gridDisplay: mounted ? 'grid' : null } } }
+      if (match(state)) return state
+      mounted = true
+    }
+    throw new Error('表格已挂载，但就绪前发出的选择没有生效')
+  }, (condition: boolean, message: string) => expect(condition, message).toBe(true))
+  expect(clicks).toEqual(['row', 'column'])
+})
+
 function readingPoll(label: string): (state: unknown) => Promise<unknown> {
   const callbacks: ts.Expression[] = []
   const visit = (node: ts.Node): void => {
