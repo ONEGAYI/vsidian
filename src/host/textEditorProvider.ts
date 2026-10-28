@@ -121,6 +121,7 @@ import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { matchHostOffset, parseCopyMatch, SEARCH_REVEAL_SENTINEL, shouldShowSearchRevealHint } from './searchReveal'
 import { isValidGotoLineInput, parseGotoLineInput, gotoLineLfOffset } from './gotoLine'
+import { isValidCalloutTypeInput } from '../shared/calloutSyntax'
 import {
   readRefContentTarget,
   resolveHoverTargetTip,
@@ -3696,6 +3697,30 @@ export function createTextEditorProvider(
             [PASTE_ASK_BEFORE_KEY]: false }) ?? Promise.resolve({ ok: false })).then((result) => {
             void webviewPanel.webview.postMessage({ kind: 'paste.preferences.result', reqId: message.reqId, ok: result.ok })
           })
+          return
+        }
+        // #656（T05）Callout 自定义类型输入（gotoLine showInputBox 同款输入
+        // 框架的 webview 发起形态）：面板级无文档副作用交互——provider 层
+        // 拦截（不进会话消息管线），校验走 calloutSyntax 单一事实源（空白/
+        // 非单标识符给本地化提示，不写半个声明）；取消回 type:null（webview
+        // 侧零编辑）。会话身份校验与会话消息一致（sessionId/docUri 对板）
+        if (isWebviewToHost(message) && message.kind === 'callout.typeInput.request') {
+          if (message.sessionId !== sessionId || message.docUri !== document.uri.toString()) {
+            return
+          }
+          void (async (): Promise<void> => {
+            const input = await vscode.window.showInputBox({
+              prompt: t('host.calloutTypePrompt'),
+              placeHolder: t('host.calloutTypePlaceholder'),
+              value: message.current,
+              validateInput: (value: string): string | null =>
+                isValidCalloutTypeInput(value) ? null : t('host.calloutTypeInvalid'),
+            })
+            const type = input === undefined ? null : input.trim().toLowerCase()
+            void webviewPanel.webview.postMessage({
+              kind: 'callout.typeInput.result', sessionId: message.sessionId, reqId: message.reqId, type,
+            })
+          })()
           return
         }
         if (isWebviewToHost(message) && message.kind === 'keybindings.get') {

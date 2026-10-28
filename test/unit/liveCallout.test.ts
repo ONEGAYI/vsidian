@@ -374,3 +374,70 @@ describe('Live callout：增量维护（身份翻转扩展到容器边界）', (
     }
   })
 })
+
+// ---- #656/T05 目标解析：包含位置的最内层 callout（树消费，规划器输入） ----
+
+import { innermostCalloutAt } from '../../src/webview/liveDecorations'
+import { markdownTreeParser } from '../../src/shared/markdownDoc'
+import { docInput } from '../../src/shared/markdownDoc'
+
+describe('innermostCalloutAt：最内层目标解析（#656/T05）', () => {
+  const resolve = (doc: string, pos: number) => {
+    const text = Text.of(doc.split('\n'))
+    return innermostCalloutAt(text, markdownTreeParser.parse(docInput(text)), pos)
+  }
+
+  it('普通正文（无 callout）返回 null', () => {
+    expect(resolve('plain text\n\nother\n', 3)).toBeNull()
+  })
+
+  it('普通引用（无声明）返回 null', () => {
+    expect(resolve('> plain quote\n> more\n', 5)).toBeNull()
+  })
+
+  it('callout 内命中返回目标：类型、标题行与 markerFrom', () => {
+    const hit = resolve('> [!note] 标题\n> 正文\n', 16)!
+    expect(hit.decl.type).toBe('note')
+    expect(hit.decl.title).toBe('标题')
+    expect(hit.titleLineNo).toBe(1)
+    expect(hit.lastLineNo).toBe(2)
+    expect(hit.markerFrom).toBe(2)
+    expect(hit.hasBody).toBe(true)
+  })
+
+  it('嵌套时命中最内层：内层声明行区间严格更小', () => {
+    const doc = '> [!note] 外\n> > [!tip] 内\n> > inner\n'
+    const hit = resolve(doc, doc.indexOf('inner') + 2)!
+    expect(hit.decl.type).toBe('tip')
+    expect(hit.titleLineNo).toBe(2)
+    // 命中内层标题行同样取内层
+    const onTitle = resolve(doc, doc.indexOf('[!tip]') + 2)!
+    expect(onTitle.decl.type).toBe('tip')
+  })
+
+  it('外层标题行命中取外层（标题行本身属于外层容器首段）', () => {
+    const doc = '> [!note] 外\n> > [!tip] 内\n> > inner\n'
+    const hit = resolve(doc, doc.indexOf('外') + 1)!
+    expect(hit.decl.type).toBe('note')
+  })
+
+  it('只有声明无正文：hasBody false（规划器「保空引用行」判定输入）', () => {
+    expect(resolve('> [!note]\n', 5)!.hasBody).toBe(false)
+    // 声明后仅空引用行同样不算正文
+    expect(resolve('> [!note]\n>\n', 5)!.hasBody).toBe(false)
+  })
+
+  it('列表内 callout：经容器下探命中', () => {
+    const doc = '- item\n  > [!todo]\n  > 计划\n'
+    const hit = resolve(doc, doc.indexOf('计划') + 1)!
+    expect(hit.decl.type).toBe('todo')
+    expect(hit.hasBody).toBe(true)
+  })
+
+  it('光标在 callout 容器之后（空行分隔的独立段落）返回 null', () => {
+    // 空行分隔是必须的：紧贴容器的无前缀行是 lazy continuation（T01 对拍
+    // 固定边界），本身属于容器——此时命中是正确语义
+    const doc = '> [!note]\n> b\n\nafter\n'
+    expect(resolve(doc, doc.indexOf('after') + 1)).toBeNull()
+  })
+})

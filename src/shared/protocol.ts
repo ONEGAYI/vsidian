@@ -1187,6 +1187,10 @@ export type HostToWebview =
    *  四态的两轴投影（亮色高对比不为暗）。宿主事件驱动推送（重复值不广播）
    *  + 面板 ready 直发；webview 侧先更新缓存再分发 SDK 订阅 */
   | { kind: 'addonThemeEnvironment.changed'; env: import('./addonThemes').AddonThemeEnvironment }
+  /** #656（T05）Callout 自定义类型输入回执：type 为规范化小写标识；
+   *  取消输入 = null（webview 侧零编辑）。reqId 与
+   *  callout.typeInput.request 配对（webview 侧重验执行上下文后消费） */
+  | { kind: 'callout.typeInput.result'; sessionId: string; reqId: number; type: string | null }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -1358,6 +1362,11 @@ export type WebviewToHost =
     }
   /** 撤销/重做请求：作用于宿主 TextDocument 权威历史（探索笔记 03 §4） */
   | { kind: 'history.request'; op: 'undo' | 'redo' }
+  /** #656（T05）Callout 自定义类型输入请求（宿主 showInputBox 现有输入
+   *  框架的 webview 发起形态）：宿主弹输入框（空白/非单标识符给本地化
+   *  提示，不写半个声明），以 callout.typeInput.result 回执（取消 =
+   *  type:null 零编辑）。current 为当前类型预填值（普通正文缺省空串） */
+  | { kind: 'callout.typeInput.request'; sessionId: string; docUri: string; reqId: number; current: string }
   /** 请求宿主回发全文重同步（外部变更与本地状态无法安全对齐时） */
   | { kind: 'sync.request' }
   /** 冲突/暂停时的本地全文快照上报：宿主保存供用户取回未确认输入 */
@@ -4618,6 +4627,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       )
     case 'history.request':
       return v.op === 'undo' || v.op === 'redo'
+    case 'callout.typeInput.request':
+      // #656（T05）自定义类型输入请求：面板身份 + 预填值（空串=普通正文）
+      return isString(v.sessionId) && isString(v.docUri) && isPositiveInt(v.reqId) && isString(v.current)
     case 'sync.request':
       return true
     case 'conflict.report':
@@ -5663,6 +5675,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'view.locate':
       return isNonNegativeInt(v.offset) && (v.head === undefined || isNonNegativeInt(v.head)) &&
         (v.locateId === undefined || isPositiveInt(v.locateId))
+    case 'callout.typeInput.result':
+      // #656（T05）自定义类型输入回执：reqId 配对 + type 二值（规范化
+      // 小写标识 / null=取消）
+      return isPositiveInt(v.reqId) && isString(v.sessionId) &&
+        (v.type === null || (isString(v.type) && (v.type as string).length > 0))
     case 'reading.perf':
       return isPositiveInt(v.scrollRounds)
     case 'reading.test.image':

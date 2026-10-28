@@ -335,14 +335,19 @@ function handleMenuKeydown(event: KeyboardEvent, menu: HTMLElement, names: MenuD
 /**
  * 子菜单翻转装配期判定：菜单挂载后对每个子菜单量自然宽度（临时显形），
  * 按内核 submenuSide 判定右/左，左翻加 flip 类（CSS right:100% 承载）。
- * 无布局环境（jsdom：尺寸与坐标全 0）安全跳过。
+ * #656（T05）补低高度封顶：子菜单顶对齐父项（top:-5px），其底越出视口
+ * 时按剩余空间设内联 max-height（内容内滚——三级类型列表 15 项在低视口
+ * 的滚动可达面；CSS 侧 max-height: calc(100vh - 16px) 只兜 submenu 位于
+ * 视口顶附近的形态）。无布局环境（jsdom：尺寸与坐标全 0）安全跳过。
  */
 export function applySubmenuFlip(
   menu: HTMLElement,
   viewportWidth: number,
   classNames?: Partial<MenuDomClassNames>,
+  viewportHeight?: number,
 ): void {
   const names: MenuDomClassNames = { ...CONTEXT_MENU_CLASS_NAMES, ...classNames }
+  const heightLimit = viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 0)
   for (const submenu of Array.from(menu.querySelectorAll<HTMLElement>(`.${names.submenu}`))) {
     const host = submenu.parentElement
     if (!host) {
@@ -352,17 +357,29 @@ export function applySubmenuFlip(
     submenu.style.display = 'block'
     submenu.style.visibility = 'hidden'
     const width = submenu.offsetWidth
+    let top = 0
+    let height = 0
+    const hostRect = host.getBoundingClientRect()
+    if (!(hostRect.left === 0 && hostRect.top === 0 && hostRect.width === 0 && hostRect.height === 0)) {
+      const rect = submenu.getBoundingClientRect()
+      top = rect.top
+      height = rect.height
+    }
     submenu.style.display = ''
     submenu.style.visibility = ''
     if (width <= 0) {
       continue
     }
-    const rect = host.getBoundingClientRect()
-    if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
+    if (hostRect.left === 0 && hostRect.top === 0 && hostRect.width === 0 && hostRect.height === 0) {
       continue // 无布局环境（jsdom）——真实翻转由浏览器回归钉住
     }
-    if (submenuSide({ left: rect.left, right: rect.right }, width, viewportWidth) === 'left') {
+    if (submenuSide({ left: hostRect.left, right: hostRect.right }, width, viewportWidth) === 'left') {
       submenu.classList.add(names.submenuFlip)
+    }
+    if (heightLimit > 0 && top + height > heightLimit) {
+      // 顶对齐父项越出视口底：按剩余空间封顶（留 8px 边距，不小于 120px
+      // ——低于该值已无可用面，保底可滚）
+      submenu.style.maxHeight = `${Math.max(120, Math.floor(heightLimit - top - 8))}px`
     }
   }
 }

@@ -66,8 +66,9 @@ describe('manifest NLS：package.json 引用契约', () => {
     //  一命令 + T04/#624 批量导出一命令（批量清单模态）+ T06/#626 合并导出
     //  一命令（合并清单模态——T06 落地时漏同步本计数，110 为既有基线）
     // + #638 跳转到行 + #655 切换当前 callout 折叠（Callout T04）
+    // + #656 Callout 源文操作两命令（插入/转换、修改当前类型——Callout T05）
     //  ——新增/删减命令须同步本断言）
-    expect(commands.length).toBe(112)
+    expect(commands.length).toBe(114)
     const literal = commands.filter((c) => !/^%.+%$/.test(c.title))
     expect(
       literal.map((c) => `${c.command}: ${c.title}`),

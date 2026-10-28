@@ -271,6 +271,18 @@ export const UI_OPERATIONS = [
   // 解析目标，无锚点/无目标静默 no-op）。默认不占键位（箭头是主入口，
   // 键位留给用户按需绑定，评估记录见 docs/specs/keybindings.md）。
   { id: 'calloutToggleFold', command: 'onegayi.vsidian.callout.toggleFold', titleKey: 'command.callout.toggleFold.title', mode: 'both', writes: false, defaults: [] },
+  // #656（Callout T05）「插入／转换 callout」：空行骨架／当前段落转换／
+  // 选区扩展整行包裹（默认 note，完成后选中类型名）；已有 callout 内命中
+  // 最内层时等价改类型 note（幂等零编辑），不再包一层（规格 §6.1）。Live
+  // 写操作（结构敏感区静默沿安全矩阵），默认不占键位——三级菜单是主入口，
+  // 键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
+  { id: 'calloutInsert', command: 'onegayi.vsidian.callout.insert', titleKey: 'command.callout.insert.title', mode: 'live', writes: true, defaults: [] },
+  // #656（Callout T05）「修改当前 callout 类型」：焦点光标最内层 callout
+  // 经宿主输入框（showInputBox 现有输入框架）改写类型标识（保留标题／
+  // 折叠符号／正文与引用层级），空白/非法输入本地化提示不写半个声明，
+  // 取消零编辑；不在 callout 内静默。Live 写操作，默认不占键位（评估记录
+  // 见 docs/specs/keybindings.md）
+  { id: 'calloutChangeType', command: 'onegayi.vsidian.callout.changeType', titleKey: 'command.callout.changeType.title', mode: 'live', writes: true, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

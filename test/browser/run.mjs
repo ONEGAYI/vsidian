@@ -84,6 +84,10 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   // 命令三入口、光标迁移、模式往返共享、阅读重挂、查找双重折叠展开、
   // IME 组合不中断、零写回）。紧随 callout 族。
   'calloutFold',
+  // #656（T05）合入列：calloutPlan（源文转换操作——三级类型菜单真实
+  // 点击/键盘路径、取消零编辑、自定义输入宿主往返、低高度滚动可达、
+  // 嵌套最内层改类型、一步撤销的出站面）。紧随 callout 族。
+  'calloutPlan',
   'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',

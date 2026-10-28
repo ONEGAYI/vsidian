@@ -61,6 +61,10 @@ import {
   toggleCalloutFoldAt,
   unfoldCalloutAround,
 } from './calloutFold'
+import { innermostCalloutAt, type LiveCalloutTarget } from './liveDecorations'
+import { planCalloutRemove, planCalloutRetype, planCalloutWrap } from '../shared/calloutPlan'
+import { isValidCalloutTypeInput } from '../shared/calloutSyntax'
+import type { CalloutMenuHit } from '../shared/contextMenu'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
 import { ToastChannel } from './toast'
@@ -1100,6 +1104,16 @@ export class WebviewSyncController {
       // ——router 已按注册表 mode: both 路由，阅读态同样生效）
       else if (id === 'calloutToggleFold') {
         this.runCalloutToggleCommand()
+      }
+      // #656（T05）Callout 源文操作两项：本地分支直执行（写操作走 CM6
+      // 事务 → edit.request 标准出站链，一步宿主撤销；router 按注册表
+      // mode: live 路由）。插入/转换按焦点光标定目标（callout 内幂等改
+      // note）；改类型经宿主输入框架往返
+      else if (id === 'calloutInsert') {
+        this.runCalloutInsertCommand()
+      }
+      else if (id === 'calloutChangeType') {
+        this.runCalloutChangeTypeCommand()
       }
       // #567（T02）编辑当前 HTML 源码：本地分支直执行（纯选区事务零写
       // 回，不出站宿主往返）；命令面板经 ui.command 回发共用
@@ -3098,6 +3112,13 @@ export class WebviewSyncController {
         this.setViewMode(message.mode)
         this.clearAnchorFlash()
         break
+      case 'callout.typeInput.result':
+        // #656（T05）自定义类型输入回执（宿主 showInputBox）：reqId 配对
+        // + 执行上下文重验（实例在场/文档未换版）后消费；取消零编辑
+        if (message.sessionId === this.sessionId) {
+          this.handleCalloutTypeInputResult(message.reqId, message.type)
+        }
+        break
       case 'view.find.open':
         // 查找会话（#14）：webview 内浮动面板；open/step 为纯只读视图操作。
         // replace 语义（命令面板替换入口，与 Ctrl+H 同命令）在阅读模式
@@ -3237,6 +3258,10 @@ export class WebviewSyncController {
           // 本地分支直达），两入口共用 runCalloutToggleCommand——Live 按光标、
           // 阅读按当前锚点解析最内层目标，无目标静默
           case 'calloutToggleFold': this.runCalloutToggleCommand(); break
+          // #656（T05）Callout 源文操作两项的命令面板入口（快捷键走 router
+          // 本地分支直达），与本地分支共用同一执行体
+          case 'calloutInsert': this.runCalloutInsertCommand(); break
+          case 'calloutChangeType': this.runCalloutChangeTypeCommand(); break
           // #567（T02）编辑当前 HTML 源码：命令面板入口（快捷键走 router
           // 本地分支直达），两入口共用 runHtmlEditSourceCommand——目标按
           // 焦点实例光标解析（焦点在嵌入内部 Live 时落 B 的 html 块），
@@ -7818,6 +7843,9 @@ export class WebviewSyncController {
       ...(zone === 'table' ? { table: this.tableMenuHitAt(view, pos) } : {}),
       ...(zone === 'graphic' ? { graphic: this.graphicMenuHitAt(view, lines, lineIndex) } : {}),
       ...(zone === 'normal' ? { link: menuLinkHitAtPos(view, pos) ?? undefined } : {}),
+      // #656（T05）callout 命中负载：normal 区采集（最内层目标类型 + 标题行
+      // 判定——类型菜单 when/checked 谓词数据面与执行期定位输入）
+      ...(zone === 'normal' ? { callout: this.calloutMenuHitAt(view, pos) } : {}),
     }
   }
 
@@ -7965,7 +7993,8 @@ export class WebviewSyncController {
     )
     menu.style.left = `${Math.max(0, pos.left)}px`
     menu.style.top = `${Math.max(0, pos.top)}px`
-    applySubmenuFlip(menu, window.innerWidth || 1200)
+    // #656：传视口高（子菜单低高度封顶——三级类型列表滚动可达面）
+    applySubmenuFlip(menu, window.innerWidth || 1200, undefined, window.innerHeight || 800)
     // 键盘导航起点：聚焦菜单容器（打开菜单接管方向键；关闭时还焦先前
     // 宿主——见 menuPrevFocus 注释）
     this.captureMenuFocus()
@@ -8102,6 +8131,16 @@ export class WebviewSyncController {
       const graphic = menuSnapshot?.graphic
       if (graphic !== undefined) {
         this.runGraphicOp(command, graphic, view)
+      }
+      return
+    }
+    // #656（T05）Callout 类型叶项（三级菜单与标题右键子菜单同一执行通道）：
+    // 目标 = 菜单打开时捕获的命中位置（右键以命中位置定目标，不先破坏选
+    // 区；普通正文负载同样在场——类型项转包裹路径、"无 Callout"零操作）
+    if (command.startsWith('calloutType:')) {
+      const hit = menuSnapshot?.callout
+      if (hit !== undefined) {
+        this.runCalloutTypeMenuCommand(command.slice('calloutType:'.length), view, embed, hit.pos)
       }
       return
     }
@@ -10382,6 +10421,153 @@ export class WebviewSyncController {
   private unfoldAllAround(view: EditorView, from: number, to?: number): void {
     unfoldAround(view, from, to)
     unfoldCalloutAround(view, from, to)
+  }
+
+  // ---- #656（T05）Callout 源文操作执行族（规格 callout.md §6）----
+  // 三入口共用：三级菜单/标题右键子菜单（runContextMenuCommand 的
+  // calloutType: 前缀分支，目标 = 打开菜单时捕获的命中位置）、键位/命令
+  // 面板（calloutInsert / calloutChangeType，目标 = 焦点实例主光标——
+  // 多选区沿主选区口径）、自定义输入回流（callout.typeInput.result，
+  // 目标 = 请求时保存的上下文重验后消费）。每次操作 = 一笔 CM6 事务 =
+  // 一笔 edit.request = 宿主一步撤销；规划产物 null（同类型幂等/普通
+  // 正文执行无 Callout）零 dispatch 零撤销项。
+
+  /** 命中位置 → CalloutMenuHit（快照采集；树解析失败回退全量解析） */
+  private calloutMenuHitAt(view: EditorView, pos: number): CalloutMenuHit {
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit = innermostCalloutAt(view.state.doc, tree, pos)
+    return {
+      pos,
+      currentType: hit ? hit.decl.type : null,
+      hitTitleLine: hit ? view.state.doc.lineAt(pos).number === hit.titleLineNo : false,
+    }
+  }
+
+  /** 单次转换执行（三入口汇合点）：pos 定目标（最内层 callout 命中 →
+   *  改类型/移除；普通正文 → 包裹，选区取 view 当前主选区——右键保选区
+   *  语义下菜单与键位同数据面）。门控 targetEditable；规划 null 静默。 */
+  private applyCalloutTypeAt(view: EditorView, embed: LiveEditorInstance | null, pos: number, target: 'none' | string): void {
+    if (!this.targetEditable(view, embed)) {
+      return
+    }
+    const clamped = this.clampToDoc(pos)
+    const text = view.state.doc.toString()
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit: LiveCalloutTarget | null = innermostCalloutAt(view.state.doc, tree, clamped)
+    // 包裹范围（普通正文路径）：真选区 → 主选区（右键保选区语义下的用户
+    // 选择）；空选区 → 命中位置本身（规划器按 from===to 展开「命中行所在
+    // 段落／空行骨架」——右键无选区时转换的是命中段落而非光标段落，规格
+    // §6.1 的目标确定方式）
+    const sel = view.state.selection.main
+    const plan = hit
+      ? (target === 'none' ? planCalloutRemove(text, hit) : planCalloutRetype(hit, target))
+      : (target === 'none' ? null : planCalloutWrap(text,
+        sel.empty ? clamped : sel.from, sel.empty ? clamped : sel.to, target))
+    if (!plan) {
+      return // 同类型幂等/普通正文执行无 Callout：零编辑零撤销项
+    }
+    view.dispatch({
+      changes: plan.changes as Array<{ from: number; to: number; insert: string }>,
+      ...(plan.selection ? { selection: plan.selection } : {}),
+    })
+  }
+
+  /** 菜单命令执行体（runContextMenuCommand 分支入口）：目标 = 菜单打开时
+   *  捕获的 CalloutMenuHit.pos（右键以命中位置定目标，不先破坏选区——
+   *  重验后以命中位置与当前主选区执行）；'custom' 发起宿主输入框架 */
+  private runCalloutTypeMenuCommand(target: 'none' | 'custom' | string, view: EditorView, embed: LiveEditorInstance | null, hitPos: number): void {
+    if (target === 'custom') {
+      this.requestCalloutTypeInput(view, embed, hitPos)
+      return
+    }
+    this.applyCalloutTypeAt(view, embed, hitPos, target)
+  }
+
+  /** 键位/命令面板「插入／转换 callout」：目标 = 焦点实例主光标。已有
+   *  callout 内等价改最内层为 note（幂等零编辑），普通正文走包裹（骨架/
+   *  当前段落/主选区扩展整行） */
+  private runCalloutInsertCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const pos = resolved.view.state.selection.main.head
+    this.applyCalloutTypeAt(resolved.view, resolved.embed, pos, 'note')
+  }
+
+  /** 键位/命令面板「修改当前 callout 类型」：焦点光标最内层 callout 经输入
+   *  框改类型；不在 callout 内静默 */
+  private runCalloutChangeTypeCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const view = resolved.view
+    const pos = this.clampToDoc(view.state.selection.main.head)
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit = innermostCalloutAt(view.state.doc, tree, pos)
+    if (!hit) {
+      return
+    }
+    this.requestCalloutTypeInput(view, resolved.embed, pos)
+  }
+
+  /** 自定义类型输入的在途上下文（一次只有一个输入框；会话身份由出站
+   *  消息携带，回流的 reqId 与之配对；重验 = 实例在场 + doc 实例判等——
+   *  contextMenuDoc 锚点过期防御同模式） */
+  private pendingCalloutInput: {
+    reqId: number
+    view: EditorView
+    doc: Text
+    pos: number
+    embed: LiveEditorInstance | null
+  } | null = null
+  private calloutTypeInputSeq = 0
+
+  /** 发起宿主输入框架（现有 showInputBox 通道）：保存执行上下文，回流
+   *  （callout.typeInput.result）后重验执行。取消（type=null）零编辑。 */
+  private requestCalloutTypeInput(view: EditorView, embed: LiveEditorInstance | null, pos: number): void {
+    if (!this.sessionId) {
+      return
+    }
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit = innermostCalloutAt(view.state.doc, tree, this.clampToDoc(pos))
+    this.calloutTypeInputSeq += 1
+    const reqId = this.calloutTypeInputSeq
+    this.pendingCalloutInput = { reqId, view, doc: view.state.doc, pos: this.clampToDoc(pos), embed }
+    this.bridge.postMessage({
+      kind: 'callout.typeInput.request',
+      sessionId: this.sessionId,
+      docUri: this.docUri,
+      reqId,
+      current: hit ? hit.decl.type : '',
+    })
+  }
+
+  /** 输入回流消费（callout.typeInput.result）：reqId 配对 + 上下文重验
+   *  （实例在场 / 文档未换版）后按命中路径执行（callout 内改类型／普通
+   *  正文包裹——预填时无命中的普通正文自定义输入在此转换为骨架/选区
+   *  包裹）；取消或重验失败零编辑。 */
+  private handleCalloutTypeInputResult(reqId: number, type: string | null): void {
+    const pending = this.pendingCalloutInput
+    this.pendingCalloutInput = null
+    if (!pending || pending.reqId !== reqId) {
+      return
+    }
+    if (type === null || !isValidCalloutTypeInput(type)) {
+      return // 取消输入不改文档（宿主已拦非法形态，双保险）
+    }
+    // 重验一：目标实例在场（主正文或嵌入注册表）
+    const view = pending.view
+    const isMain = view === this.view
+    if (!isMain && !(this.embedCards?.liveViewEntry(view))) {
+      return
+    }
+    // 重验二：锚点过期防御（输入框期间文档被外部改写即放弃）
+    if (view.state.doc !== pending.doc) {
+      return
+    }
+    this.applyCalloutTypeAt(view, pending.embed, pending.pos, type.trim().toLowerCase())
   }
 
   /** #567（T02）「编辑当前 HTML 源码」：光标所在 html 块 → 选中完整源码

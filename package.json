@@ -579,6 +579,16 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.callout.insert",
+        "title": "%command.callout.insert.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.callout.changeType",
+        "title": "%command.callout.changeType.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.heading.unfoldAll",
         "title": "%command.heading.unfoldAll.title%",
         "category": "Vsidian"

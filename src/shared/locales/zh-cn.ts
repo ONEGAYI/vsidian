@@ -570,6 +570,11 @@ export const zhCn: Record<MessageKey, string> = {
   'host.gotoLinePlaceholder': '输入源码行号，例如 42',
   'host.gotoLineInvalid': '请输入 1 到 {total} 之间的整数行号。',
   'host.gotoLineNoPanel': '当前活动标签页不是 Vsidian 面板——请先在 Vsidian 中打开目标笔记再跳转到行。',
+  /** #656（T05）Callout 自定义类型输入（宿主 showInputBox 现有输入框架；
+   *  空白/非法输入给本地化提示，不写半个声明） */
+  'host.calloutTypePrompt': 'Callout 类型标识（字母、数字、- 或 _）',
+  'host.calloutTypePlaceholder': '例如 my-note',
+  'host.calloutTypeInvalid': '请输入不含空格的单个标识符（字母、数字、- 或 _）。',
   // ---- #199 更名/移动引用自动更新（宿主通知；批量操作合并提示）----
   // #556 T4：越出所属根改为明确绝对路径改写（不再是跳过原因），跳过仅余
   // 内容变化（edge-stale）一类
@@ -1205,6 +1210,27 @@ export const zhCn: Record<MessageKey, string> = {
   'command.callout.toggleFold.title': '切换当前 Callout 折叠',
   'calloutfold.fold': '收起此提示块',
   'calloutfold.unfold': '展开此提示块',
+  // ---- #656（T05）Callout 源文操作：命令标题与三级类型菜单文案 ----
+  'command.callout.insert.title': '插入／转换 Callout',
+  'command.callout.changeType.title': '修改当前 Callout 类型',
+  'contextMenu.insertCallout': 'Callout',
+  'contextMenu.calloutType': 'Callout 类型',
+  'contextMenu.calloutNone': '无 Callout',
+  'contextMenu.calloutCustom': '自定义…',
+  /** 类型显示名（帮助页口径；规格 §3.2——经字典映射，不在 UI 硬编码） */
+  'callout.type.note': '笔记',
+  'callout.type.abstract': '摘要',
+  'callout.type.info': '信息',
+  'callout.type.todo': '待办',
+  'callout.type.tip': '提示',
+  'callout.type.success': '成功',
+  'callout.type.question': '问题',
+  'callout.type.warning': '警告',
+  'callout.type.failure': '失败',
+  'callout.type.danger': '危险',
+  'callout.type.bug': '缺陷',
+  'callout.type.example': '示例',
+  'callout.type.quote': '引用',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': '分词引擎',
   'setting.wordSegmentEngine.description': 'Ctrl+左/右箭头按词移动时对连续中文段的切分引擎。英文与数字段始终沿用内置分组语义。',

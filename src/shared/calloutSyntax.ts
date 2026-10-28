@@ -62,6 +62,16 @@ export function parseCalloutDecl(line: string): CalloutDecl | null {
 }
 
 /**
+ * 自定义类型标识校验（#656/T05 输入框架的 validateInput 判定）：trim 后
+ * 须为单个标识符（字母/数字/下划线/连字号）且非空——TYPE_RE 同一事实源，
+ * 宿主输入框与 webview 侧共用，不各写宽松规则。
+ */
+export function isValidCalloutTypeInput(value: string): boolean {
+  const trimmed = value.trim()
+  return trimmed !== '' && TYPE_RE.test(trimmed)
+}
+
+/**
  * 默认标题派生（Obsidian 1.14.4 app.js 实测口径，T01 取证
  * obsidian-1144-callout-defaults.json）：type trim → 连字号换空格 →
  * 小写 → 首字母大写。默认标题不写回源文（规格 §3.2）。

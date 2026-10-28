@@ -107,6 +107,8 @@
   "command.heading.toggleFold.title": "折叠/展开切换标题节",
   "command.heading.foldAll.title": "折叠全部标题节",
   "command.callout.toggleFold.title": "切换当前 Callout 折叠",
+  "command.callout.insert.title": "插入／转换 Callout",
+  "command.callout.changeType.title": "修改当前 Callout 类型",
   "command.heading.unfoldAll.title": "展开全部标题节",
   "command.graphic.popup.title": "弹窗预览光标处图形",
   "command.graphic.exportSvg.title": "导出光标处图形为 SVG",

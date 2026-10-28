@@ -123,7 +123,10 @@ describe('webview 构建产物不含字典字节', () => {
     // 拉丁-1 区词条以 \xNN 形态进产物，直接 includes 永不命中）；
     // 主检（键属性形态）键为 ASCII，无须还原
     const source = decodeUnicodeEscapes(readBundle(bundle))
-    const leaked = LONGEST_MARKERS.filter((value) => source.includes(value))
+    // #656：词边界匹配——独立词条才算泄漏（裸 includes 下 'Abstract' 撞
+    // lezer 节点名 AbstractFunctionDeclarator 一类的标识符前缀，误报）
+    const leaked = LONGEST_MARKERS.filter((value) =>
+      new RegExp(`(?<![A-Za-z0-9_-])${escapeRegExp(value)}(?![A-Za-z0-9_-])`).test(source))
     expect(
       leaked,
       `webview 产物泄漏语言包词条：${leaked.join(' | ')}`,

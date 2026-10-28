@@ -406,7 +406,7 @@ const calloutTitleInnerDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.calloutT
 
 /** Blockquote 上的 callout 识别产物（文档坐标；识别单一事实源
  *  shared/calloutSyntax——Live/Reading 不各写规则） */
-interface LiveCalloutInfo {
+export interface LiveCalloutInfo {
   readonly decl: CalloutDecl
   /** 段起点（= 首段首行标记首字符位置） */
   readonly markerFrom: number
@@ -446,6 +446,72 @@ export function calloutOfBlockquote(doc: Text, node: SyntaxNode): LiveCalloutInf
     firstLineNo: doc.lineAt(node.from).number,
     lastLineNo: doc.lineAt(endPos).number,
   }
+}
+
+/** 能包含 Blockquote 的容器块节点名（块级剪枝遍历白名单；#656/T05 起与
+ *  calloutFold.collectCalloutFolds 共用——此前定义在 calloutFold，目标解析
+ *  下沉本模块后单一来源） */
+export const CALLOUT_CONTAINER_NAMES = new Set(['Blockquote', 'BulletList', 'OrderedList', 'ListItem'])
+
+/** 容器内标题行之后是否存在正文行（剥引用前缀非空白——`>` 空行不算正文；
+ *  calloutFold 的「仅标题不产生折叠占位」与规划器「只有声明无正文」共口径） */
+export function calloutHasBody(doc: Text, titleLineNo: number, lastLineNo: number): boolean {
+  for (let n = titleLineNo + 1; n <= lastLineNo; n++) {
+    if (doc.line(n).text.replace(/^(?:\s*>\s?)+/, '').trim() !== '') {
+      return true
+    }
+  }
+  return false
+}
+
+/** innermostCalloutAt 的产物（规划器 CalloutPlanTarget 的 webview 形态） */
+export interface LiveCalloutTarget extends LiveCalloutInfo {
+  /** 标题行之后容器内存在正文行（planCalloutRemove 的分支判定输入） */
+  readonly hasBody: boolean
+}
+
+/**
+ * 包含 pos 的最内层 callout（#656/T05 源文操作目标解析）：块级剪枝遍历
+ * 消费增量树（省略时全量解析），命中区间最小的 callout 即最内层（嵌套时
+ * 内层区间严格更小——applyCalloutToggleAt 同口径）。无命中（普通正文/
+ * 普通引用）返回 null。键位入口以焦点主光标、右键以命中位置调用（规格
+ * §6.1 的两种目标确定方式）。
+ */
+export function innermostCalloutAt(
+  doc: Text,
+  tree: Tree | undefined,
+  pos: number,
+): LiveCalloutTarget | null {
+  const parsed = tree ?? markdownTreeParser.parse(docInput(doc))
+  const hits: LiveCalloutInfo[] = []
+  const descend = (node: SyntaxNode): void => {
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      if (child.name === 'Blockquote') {
+        const info = calloutOfBlockquote(doc, child)
+        if (info) {
+          const from = doc.line(info.titleLineNo).from
+          const to = doc.line(info.lastLineNo).to
+          if (pos >= from && pos <= to) {
+            hits.push(info)
+          }
+        }
+      }
+      if (CALLOUT_CONTAINER_NAMES.has(child.name)) {
+        descend(child)
+      }
+    }
+  }
+  descend(parsed.topNode)
+  let best: LiveCalloutInfo | null = null
+  let bestSpan = Infinity
+  for (const info of hits) {
+    const span = doc.line(info.lastLineNo).to - doc.line(info.titleLineNo).from
+    if (span < bestSpan) {
+      best = info
+      bestSpan = span
+    }
+  }
+  return best ? { ...best, hasBody: calloutHasBody(doc, best.titleLineNo, best.lastLineNo) } : null
 }
 
 // ---- 表格装饰（#12）：单元格边界来自 tableCells 的 GFM 语义拆分 ----

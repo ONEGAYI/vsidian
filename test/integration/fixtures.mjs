@@ -15,6 +15,10 @@ const UNDO4_DOC = '撤销竞态甲行\n撤销竞态乙行\n'
 const ACKORDER_DOC = '顺序观测起始行\n顺序观测第二行\n'
 const RESYNC_DOC = '重同步起始内容\n重同步第二段\n'
 const IME_ESC_DOC = 'A文B\n'
+// #656（T05）Callout 转换：菜单路径的宿主一步撤销/重做（LF）与 CRLF
+// 行尾保持（独立样本——#123 教训：共用样本会被早期用例修改保存）
+const CALLOUT_PLAN_DOC = '转换首段甲\n转换首段乙\n\n结尾段\n'
+const CALLOUT_PLAN_CRLF_DOC = 'CRLF 转换甲行\r\nCRLF 转换乙行\r\n'
 // #123 符号输入辅助：单行正文（IME 钩子的候选写在首行行尾）；行内代码
 // 口径由 unit/browser 两层覆盖，不在集成侧设样本
 const SYMBOL_INPUT_DOC = '符号输入正文段\n'
@@ -1029,6 +1033,9 @@ const HR_DOC = [
  */
 export async function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
   writeFileSync(path.join(wsDir, 'lf.md'), LF_DOC, 'utf8')
+  // #656（T05）Callout 转换样本（独立文件，见常量区注释）
+  writeFileSync(path.join(wsDir, 'callout-plan.md'), CALLOUT_PLAN_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'callout-plan-crlf.md'), CALLOUT_PLAN_CRLF_DOC, 'utf8')
   // #543 T03 附加组件文档导航样例（独立文件——导航零写回但会被打开，
   // 不与既有用例样本共用）：
   // - nav-target.md：标题/块锚点与行号定位的 Markdown 目标（LF）；

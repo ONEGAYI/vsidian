@@ -1984,6 +1984,10 @@ body.vscode-high-contrast #app {
   z-index: 40;
   min-width: 220px;
   max-width: calc(100vw - 8px);
+  /* #656（T05）低高度滚动可达：顶级菜单自身溢出视口时可滚（与子菜单
+     同款视口封顶边距 16px——正常视口菜单不超高，零影响） */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   box-sizing: border-box;
   padding: 4px;
   background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));
@@ -2118,6 +2122,9 @@ body.vscode-high-contrast #app {
 .vsidian-context-menu [data-icon='popupPreview'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-popupPreview.svg'); }
 .vsidian-context-menu [data-icon='exportSvg'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-exportSvg.svg'); }
 .vsidian-context-menu [data-icon='exportPng'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-exportPng.svg'); }
+/* #656（T05）Callout 菜单接线：备用资产转正（此前登记不引用——两表同步
+   约定的显式记账位，本票起菜单引用） */
+.vsidian-context-menu [data-icon='callout'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-callout.svg'); }
 
 body.vscode-dark .vsidian-context-menu [data-icon='link'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-link.svg'); }
@@ -2199,6 +2206,8 @@ body.vscode-dark .vsidian-context-menu [data-icon='exportSvg'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='exportSvg'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-exportSvg.svg'); }
 body.vscode-dark .vsidian-context-menu [data-icon='exportPng'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-exportPng.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='callout'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-callout.svg'); }
 
 /* 文字徽标（H1–H6）：语言无关的字面，弱化一档与文案区分 */
 .vsidian-context-menu .vsidian-context-menu-badge {
@@ -2256,6 +2265,15 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
 .vsidian-context-menu .vsidian-context-menu-submenu.vsidian-menu-flip {
   left: auto;
   right: 100%;
+}
+
+/* #656（T05）三级类型列表（15 项）低高度滚动可达：子菜单沿视口高度封顶
+   并内滚（顶级菜单定位已有底部上翻 clamp；子菜单 top 对齐父项、无法整体
+   上翻，超过视口时必须可滚——键盘焦点跟随由浏览器滚动锚定）。对齐既有
+   定位口径的边距 8px（max-width calc(100vw - 8px) 同族取值，不发明新档） */
+.vsidian-context-menu .vsidian-context-menu-submenu {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
 /* 重命名行内编辑态：条目内容区被 input 替换（原文可含行内标记）。
