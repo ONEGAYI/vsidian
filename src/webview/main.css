@@ -105,6 +105,33 @@ body {
      #7c3aed（深紫，白底可辨）；背景底维持 VSCode 灰调变量（仅竖条换色）。
      视觉验收微调色值后须同步写回规格初值（blockquote-accent-bar.md） */
   --vsidian-quote-bar-color: #a78bfa;
+  /* ---- #653/T02 Callout（note 与未知类型回落）：公开契约类名与变量直接
+     用 Obsidian 原名（.callout 家族 + --callout-* 族即用户片段书写入口，
+     类名即别名——别名桥不适用）。默认值取 Obsidian 1.14.4 默认主题取证
+     （docs/research/data/callout-t01/obsidian-1144-callout-defaults.json）：
+     note 色 亮 #086ddd / 暗 #027aff、radius 4px、边框宽 0、内容底透明。
+     全类型变量表（tip/success…）归 T03 在同结构增量登记 ---- */
+  --callout-radius: 4px;
+  --callout-border-width: 0px;
+  --callout-border-opacity: 0.25;
+  --callout-padding: 12px 12px 12px 24px;
+  --callout-title-color: inherit;
+  --callout-title-weight: 600;
+  --callout-title-size: inherit;
+  --callout-title-padding: 0;
+  --callout-content-padding: 0;
+  --callout-content-background: transparent;
+  --callout-default: #027aff;
+  --callout-color: var(--callout-default);
+}
+
+/* 类型变量表（#653/T02）：:where() 零特异性承载——行元素不得携带内联
+   style 变量（T01 边界 1：内联会压死一切用户片段覆盖）。T02 只登记
+   note；未知类型无规则即回落 --callout-default（note 外观回落、原标识
+   仍暴露在 data-callout 上供自定义 CSS 命中）。注意选择器刻意不写
+   #app 前缀（保持零特异性），作用域由使用处限定 */
+:where([data-callout='note']) {
+  --callout-color: var(--callout-default);
 }
 
 /* #105 浅色主题高亮覆盖：白底上提高浓度与饱和度保证目视可辨 */
@@ -112,6 +139,8 @@ body {
 body.vscode-light #app {
   --vsidian-highlight-background: var(--text-highlight-bg, #ffe066);
   --vsidian-quote-bar-color: #7c3aed;
+  /* #653/T02 Callout 亮色档：note 色取取证亮值 */
+  --callout-default: #086ddd;
 }
 
 #app .cm-editor {
@@ -2250,6 +2279,53 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
 }
 
+/* ---- #653/T02 Callout 行级形态（T01 路线 A）：容器视觉逐行同规则绘制。
+   quiet 类由最内层引用层判定挂（嵌套普通引用行不挂——紫条照画，自身
+   样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃 RGB 三元组片段、
+   渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效透明、渐变绘制）。
+   左距为 --callout-padding 左分量（24px）的行级近似——上下分量不落行
+   （行级类不改行高的既有纪律），阅读侧整容器按变量原样消费 ---- */
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout.vsidian-callout-quiet {
+  box-shadow: none;
+  padding-left: 24px;
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* 首末行圆角（分角写：单行容器两类同挂自然合成全圆角） */
+#app .cm-editor .cm-scroller .vsidian-quote-line.vsidian-callout-first {
+  border-top-left-radius: var(--callout-radius);
+  border-top-right-radius: var(--callout-radius);
+}
+
+#app .cm-editor .cm-scroller .vsidian-quote-line.vsidian-callout-last {
+  border-bottom-left-radius: var(--callout-radius);
+  border-bottom-right-radius: var(--callout-radius);
+}
+
+/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引） */
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout-title {
+  color: var(--callout-title-color);
+  font-size: var(--callout-title-size);
+  font-weight: var(--callout-title-weight);
+}
+
+/* 图标：Obsidian 默认铅笔形内联 SVG mask（T02 note 默认图标；--callout-icon
+   变量与 Lucide/SVG 定制接线归 T06），颜色随类型色（mask 只取 alpha） */
+#app .callout-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 6px;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+  background-color: var(--callout-color);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
 #app .cm-editor .cm-scroller .vsidian-list-line {
   --_vsidian-list-indent: 0px;
   padding-left: var(--_vsidian-list-indent);
@@ -3778,6 +3854,40 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   border-left: 3px solid var(--vsidian-quote-bar-color);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
   color: var(--vscode-textBlockQuote-foreground, inherit);
+}
+
+/* ---- #653/T02 Callout 阅读侧真实容器（token 变换发射 div.callout 家族；
+   严格父子容器选择器在此侧承诺——.callout > .callout-title 等天然可达）。
+   容器变量按 Obsidian 原名消费；底色与 live 行级同款双通道（T01 §6.2）；
+   blockquote 标签已改 div，引用紫条规则天然不再命中（callout 替代该层
+   紫条；容器内普通引用仍是 blockquote 照常呈现） ---- */
+#app .vsidian-view-reading .vsidian-reading-block div.callout {
+  margin: 0.4em 0;
+  padding: var(--callout-padding);
+  border-radius: var(--callout-radius);
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--callout-title-padding);
+  color: var(--callout-title-color);
+  font-size: var(--callout-title-size);
+  font-weight: var(--callout-title-weight);
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-content {
+  padding: var(--callout-content-padding);
+  background: var(--callout-content-background);
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-content > :first-child {
+  margin-top: 0;
 }
 
 #app .vsidian-view-reading .vsidian-reading-block blockquote p,

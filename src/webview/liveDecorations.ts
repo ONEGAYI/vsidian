@@ -77,6 +77,11 @@ import {
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
 import { buildFrontmatterCardPlan, fmDegradedHintRangeAt, fmFoldField } from './frontmatterDecorations'
 import {
+  calloutDefaultTitle,
+  parseCalloutDecl,
+  type CalloutDecl,
+} from '../shared/calloutSyntax'
+import {
   barePipeAt,
   blankContainerPrefix,
   containerPrefixLen,
@@ -116,6 +121,27 @@ export const LIVE_CLASS_NAMES = {
   htmlComment: 'vsidian-html-comment',
   /** 引用行（`.HyperMD-quote` / `.cm-quote`） */
   quoteLine: 'vsidian-quote-line',
+  /** ---- callout（#653/T02，T01 路线 A）：公开契约主类名直接用 Obsidian
+   *  原名（.callout 家族即用户片段书写入口——主名即别名，别名桥不适用，
+   *  条目见 styleContract callout）---- */
+  /** callout 容器行（嵌套时内外层容器行同挂；Live 为行级形态，跨行严格
+   *  父子容器选择器仅在阅读侧承诺——既知边界，见 T01 §6.1 矩阵） */
+  calloutLine: 'callout',
+  /** 标题行（容器声明行） */
+  calloutTitle: 'callout-title',
+  /** 正文行（容器内非标题行） */
+  calloutContent: 'callout-content',
+  /** 标题文字 span / 默认标题 widget 元素（真实文本在场，IME/选区原生） */
+  calloutTitleInner: 'callout-title-inner',
+  /** 标题标记 widget 呈现的图标元素（.callout-icon） */
+  calloutIcon: 'callout-icon',
+  /** 首末行圆角（内部类：行级形态的容器视觉收边；非公开契约） */
+  calloutFirst: 'vsidian-callout-first',
+  calloutLast: 'vsidian-callout-last',
+  /** 该行最内层引用层为 callout（内部类）：静默该层引用紫条与引用底
+   *  （T01 边界 3——callout 替代该层紫条；内部普通引用行不挂，仍显示
+   *  自身引用样式） */
+  calloutQuiet: 'vsidian-callout-quiet',
   /** 围栏/缩进代码行（`.HyperMD-codeblock`） */
   codeLine: 'vsidian-code-line',
   /** 列表项行（`.HyperMD-list-line`，本项目自有组合形态） */
@@ -305,6 +331,118 @@ class HorizontalRuleWidget extends WidgetType {
   }
 }
 const hrRuleDeco = Decoration.replace({ widget: new HorizontalRuleWidget() })
+
+// ---- callout 装饰（#653/T02，T01 路线 A）----
+
+/**
+ * Callout 标记 widget（#653/T02）：标题行声明 `[!类型]`（含其后折叠符号
+ * 与吞并的空格，markerEnd 语义）未触及时被隐藏，本 widget 呈现
+ * `.callout-icon`（图标绘制在 CSS mask）。控制域是标题行：光标/选区
+ * **端点**触及该行即不发射，源码显形可编辑——与生产 QuoteMark 同款
+ * 端点语义（#296 三轮；选区跨越不显形）。无交互事件；折叠箭头归 T04。
+ */
+export class CalloutMarkerWidget extends WidgetType {
+  constructor(readonly type: string) {
+    super()
+  }
+  eq(other: CalloutMarkerWidget): boolean {
+    return other.type === this.type
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement('span')
+    el.className = LIVE_CLASS_NAMES.calloutIcon
+    return el
+  }
+}
+
+/**
+ * Callout 默认标题 widget（#653/T02）：无显式标题时以**零宽** widget 呈现
+ * 源文派生的默认标题（calloutDefaultTitle，Obsidian 口径——不写回源文，
+ * 零源文对应故零宽）。与标记 widget 同一控制域：标题行端点触及时不发射
+ * （显形源码 `[!note]` 时不重复呈现派生标题）。
+ */
+export class CalloutDefaultTitleWidget extends WidgetType {
+  constructor(readonly text: string) {
+    super()
+  }
+  eq(other: CalloutDefaultTitleWidget): boolean {
+    return other.text === this.text
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement('span')
+    el.className = LIVE_CLASS_NAMES.calloutTitleInner
+    el.textContent = this.text
+    return el
+  }
+}
+
+/** 标记隐藏 widget / 默认标题 widget 实例缓存（type/text 有限组合） */
+const calloutMarkerDecos = new Map<string, ReturnType<typeof Decoration.replace>>()
+function calloutMarkerDeco(type: string): ReturnType<typeof Decoration.replace> {
+  let deco = calloutMarkerDecos.get(type)
+  if (!deco) {
+    deco = Decoration.replace({ widget: new CalloutMarkerWidget(type) })
+    calloutMarkerDecos.set(type, deco)
+  }
+  return deco
+}
+
+const calloutDefaultTitleDecos = new Map<string, ReturnType<typeof Decoration.widget>>()
+function calloutDefaultTitleDeco(text: string): ReturnType<typeof Decoration.widget> {
+  let deco = calloutDefaultTitleDecos.get(text)
+  if (!deco) {
+    deco = Decoration.widget({ widget: new CalloutDefaultTitleWidget(text), side: -1 })
+    calloutDefaultTitleDecos.set(text, deco)
+  }
+  return deco
+}
+
+/** 标题文字 mark（.callout-title-inner：真实文本在场，IME/选区原生） */
+const calloutTitleInnerDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.calloutTitleInner })
+
+/** Blockquote 上的 callout 识别产物（文档坐标；识别单一事实源
+ *  shared/calloutSyntax——Live/Reading 不各写规则） */
+interface LiveCalloutInfo {
+  readonly decl: CalloutDecl
+  /** 段起点（= 首段首行标记首字符位置） */
+  readonly markerFrom: number
+  /** 标题行（= 首段首行）行号 */
+  readonly titleLineNo: number
+  readonly firstLineNo: number
+  readonly lastLineNo: number
+}
+
+/**
+ * Blockquote 直属首段首行上的 callout 声明（null = 普通引用）：跳过前导
+ * QuoteMark 取首个直属子节点，须为 Paragraph；识别输入取「段起点→行尾」
+ * 子串（T01 两端对拍口径——列表/引用前缀均已由解析器剥掉）。只读首行
+ * 子串，成本与首行长度同阶（增量窗口内逐容器识别，不扫全文）。
+ */
+export function calloutOfBlockquote(doc: Text, node: SyntaxNode): LiveCalloutInfo | null {
+  let first = node.firstChild
+  while (first && first.name === 'QuoteMark') {
+    first = first.nextSibling
+  }
+  if (!first || first.name !== 'Paragraph') {
+    return null
+  }
+  const line = doc.lineAt(first.from)
+  const decl = parseCalloutDecl(doc.sliceString(first.from, line.to))
+  if (!decl) {
+    return null
+  }
+  let endPos = Math.min(node.to, doc.length)
+  if (endPos > node.from && doc.sliceString(endPos - 1, endPos) === '\n') {
+    endPos -= 1
+  }
+  return {
+    decl,
+    markerFrom: first.from,
+    titleLineNo: line.number,
+    firstLineNo: doc.lineAt(node.from).number,
+    lastLineNo: doc.lineAt(endPos).number,
+  }
+}
 
 // ---- 表格装饰（#12）：单元格边界来自 tableCells 的 GFM 语义拆分 ----
 // （lezer 的 TableCell 节点不识别 \| 与行内代码内管道，不作定位依据）
@@ -608,6 +746,15 @@ const gridLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
  *  逐键缓存量与「编辑过的表格形态数」同阶——清空仅丢失实例复用（eq 暂时
  *  失配触发一次重绘），不影响正确性；旧文档态不再被引用后条目即死数据 */
 const GRID_LINE_DECO_CACHE_LIMIT = 512
+/** 行级网格属性（tableGridLineDeco 与 callout 行装饰共用：网格行身份 +
+ *  列宽计划内联变量；#142 口径，消费见 main.css 网格行规则） */
+function gridLineAttributes(kind: GridRowKind, plan: TableGridPlan): Record<string, string> {
+  return {
+    'data-vsidian-table-row': kind,
+    style: `--vsidian-table-columns: ${plan.columns}; --vsidian-table-col-widths: ${plan.template}`,
+  }
+}
+
 function tableGridLineDeco(cls: string, kind: GridRowKind, plan: TableGridPlan): ReturnType<typeof Decoration.line> {
   // 网格行同样过别名桥（#296）：引用/列表内表格行保留 .HyperMD-quote 等
   // 兼容别名——样式契约承诺的选择器不得因网格行类丢失命中
@@ -618,16 +765,36 @@ function tableGridLineDeco(cls: string, kind: GridRowKind, plan: TableGridPlan):
     if (gridLineDecos.size >= GRID_LINE_DECO_CACHE_LIMIT) {
       gridLineDecos.clear()
     }
+    deco = Decoration.line({ class: aliased, attributes: gridLineAttributes(kind, plan) })
+    gridLineDecos.set(key, deco)
+  }
+  return deco
+}
+
+/** callout 行装饰缓存（#653/T02）：data-callout 属性由最内层 callout 容器
+ *  胜出（发射前逐行归一，不依赖 CM6 多装饰属性合并序）；网格行组合时
+ *  并入网格属性（callout 内表格行）。缓存键含全属性源，容量同网格行缓存 */
+const calloutLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
+function calloutLineDeco(
+  cls: string,
+  type: string,
+  grid?: { kind: GridRowKind; plan: TableGridPlan },
+): ReturnType<typeof Decoration.line> {
+  const aliased = applyObsidianDomAlias(cls)
+  const key = `${aliased}\u0000${type}\u0000${grid ? `${grid.kind}\u0000${grid.plan.columns}\u0000${grid.plan.template}` : ''}`
+  let deco = calloutLineDecos.get(key)
+  if (!deco) {
+    if (calloutLineDecos.size >= GRID_LINE_DECO_CACHE_LIMIT) {
+      calloutLineDecos.clear()
+    }
     deco = Decoration.line({
       class: aliased,
       attributes: {
-        'data-vsidian-table-row': kind,
-        // #142：列数（旧入口保留）+ 列宽计划（minmax 保底 + fr 占比）；
-        // 消费见 main.css 网格行规则（缺省回退等分）
-        style: `--vsidian-table-columns: ${plan.columns}; --vsidian-table-col-widths: ${plan.template}`,
+        'data-callout': type,
+        ...(grid ? gridLineAttributes(grid.kind, grid.plan) : {}),
       },
     })
-    gridLineDecos.set(key, deco)
+    calloutLineDecos.set(key, deco)
   }
   return deco
 }
@@ -878,6 +1045,11 @@ function emitForRange(
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
   const gridLines = new Map<number, { kind: GridRowKind; plan: TableGridPlan }>()
+  // callout 行身份（#653/T02）：visitRange 先序访问（外层 Blockquote 先于
+  // 内层），按访问序后写胜出——data-callout 取最内层 callout 容器、quiet
+  // 取最内层引用层是否 callout（普通引用层撤销外层静默，T01 边界 3）
+  const calloutTypeByLine = new Map<number, string>()
+  const quietLines = new Set<number>()
   const addLineCls = (lineNo: number, cls: string): void => {
     const idx = lineNo - fromLine
     let set = lineCls[idx]
@@ -966,9 +1138,61 @@ function emitForRange(
       case 'CodeBlock':
         eachNodeLine(doc, node, fromLine, toLine, (n) => addLineCls(n, LIVE_CLASS_NAMES.codeLine))
         return
-      case 'Blockquote':
+      case 'Blockquote': {
         eachNodeLine(doc, node, fromLine, toLine, (n) => addLineCls(n, LIVE_CLASS_NAMES.quoteLine))
+        // #653/T02：直属首段首行命中声明 → 容器行级类 + data-callout +
+        // 标题行标记 widget/标题 mark（识别骑增量树、发射骑本增量窗口——
+        // T01 性能红线：不做独立视口插件从 topNode 下降重扫）
+        const info = calloutOfBlockquote(doc, node)
+        if (info) {
+          eachNodeLine(doc, node, fromLine, toLine, (n) => {
+            addLineCls(n, LIVE_CLASS_NAMES.calloutLine)
+            addLineCls(n, n === info.titleLineNo
+              ? LIVE_CLASS_NAMES.calloutTitle
+              : LIVE_CLASS_NAMES.calloutContent)
+            if (n === info.firstLineNo) {
+              addLineCls(n, LIVE_CLASS_NAMES.calloutFirst)
+            }
+            if (n === info.lastLineNo) {
+              addLineCls(n, LIVE_CLASS_NAMES.calloutLast)
+            }
+            quietLines.add(n)
+            calloutTypeByLine.set(n, info.decl.type)
+          })
+          // 标记与标题装饰仅在标题行落入重建窗口时发射（窗口外行保留
+          // 旧装饰，增量路径不自愈区不做无谓重建）
+          if (info.titleLineNo >= fromLine && info.titleLineNo <= toLine) {
+            const line = doc.line(info.titleLineNo)
+            const declEnd = info.markerFrom + info.decl.markerTo
+            // markerEnd 语义：吞并标记后一个空格（与 QuoteMark/ListMark
+            // 同款，widget 与正文的间距由 CSS margin 表达）
+            const markerEnd = declEnd < line.to && doc.sliceString(declEnd, declEnd + 1) === ' '
+              ? declEnd + 1
+              : declEnd
+            if (!endpointTouches(line.from, line.to)) {
+              out.push(calloutMarkerDeco(info.decl.type).range(info.markerFrom, markerEnd))
+              if (info.decl.title === undefined) {
+                // 无显式标题：零宽默认标题 widget（源文派生，不写回源文）
+                out.push(calloutDefaultTitleDeco(calloutDefaultTitle(info.decl.type)).range(markerEnd))
+              }
+            }
+            if (info.decl.title !== undefined) {
+              // 显式标题区间：标记后跳过前导空白到行尾（尾空白不进标题）
+              const after = doc.sliceString(markerEnd, line.to)
+              const titleFrom = markerEnd + (after.length - after.trimStart().length)
+              const titleTo = titleFrom + info.decl.title.length
+              if (titleTo > titleFrom) {
+                out.push(calloutTitleInnerDeco.range(titleFrom, titleTo))
+              }
+            }
+          }
+        } else {
+          // 该层是普通引用：撤销外层（若有）在覆盖行上的静默——最内层
+          // 引用为普通引用的行仍显示自身引用样式（T01 边界 3）
+          eachNodeLine(doc, node, fromLine, toLine, (n) => quietLines.delete(n))
+        }
         return
+      }
       case 'HorizontalRule': {
         eachNodeLine(doc, node, fromLine, toLine, (n) => addLineCls(n, LIVE_CLASS_NAMES.hrLine))
         // #106 渲染态：控制域是该行区间（含两端边界），未触及时隐藏源文、
@@ -1236,9 +1460,16 @@ function emitForRange(
     const set = lineCls[i]
     if (set && set.size > 0) {
       const line = doc.line(fromLine + i)
-      const cls = [...set].sort().join(' ')
+      // #653/T02：静默类按最内层引用层判定后并入（访问序后写胜出已在
+      // quietLines 归一）；callout 行带 data-callout 属性（网格行组合并网
+      // 格属性），其余行走既有装饰工厂
+      const quiet = quietLines.has(line.number)
+      const cls = [...set].sort().join(' ') + (quiet ? ` ${LIVE_CLASS_NAMES.calloutQuiet}` : '')
       const grid = gridLines.get(line.number)
-      out.push((grid ? tableGridLineDeco(cls, grid.kind, grid.plan) : lineDeco(cls)).range(line.from))
+      const calloutType = calloutTypeByLine.get(line.number)
+      out.push((calloutType !== undefined
+        ? calloutLineDeco(cls, calloutType, grid)
+        : grid ? tableGridLineDeco(cls, grid.kind, grid.plan) : lineDeco(cls)).range(line.from))
     }
   }
   return out
@@ -1666,6 +1897,57 @@ function planRebuildSpans(
     spans.push(...selectionSpans(tr))
   }
 
+  // callout 身份翻转扩展（#653/T02）：首行声明区间的编辑可翻转容器的
+  // callout 身份，容器**全部行**的行类与 data-callout 随之变化——变更
+  // 种子只覆盖声明行时其余行会残留旧类。比较受变更影响的 Blockquote 在
+  // 新旧树的 callout 身份签名（仅「是否 callout + 类型」——fold/标题变化
+  // 只影响声明行自身装饰，该行已在种子内），翻转时扩展重建区间到容器
+  // 边界（新旧两侧都进 span）。容器吸收/消失由容器分类差异探测承接，
+  // 此处只管「同为 Blockquote 但身份翻转」的窄场景。
+  const inverted = tr.changes.invertedDesc
+  const identityOf = (treeDoc: Text, node: SyntaxNode | null): string => {
+    if (!node || node.name !== 'Blockquote') {
+      return 'none'
+    }
+    const info = calloutOfBlockquote(treeDoc, node)
+    return info ? `callout:${info.decl.type}` : 'quote'
+  }
+  const blockquoteAt = (tree: Tree, pos: number): SyntaxNode | null => {
+    for (const node of chainAt(tree, pos)) {
+      if (node.name === 'Blockquote') {
+        return node
+      }
+    }
+    return null
+  }
+  for (const c of changed) {
+    const nodes: Array<[SyntaxNode, Text]> = [
+      ...collectNamedInRange(newTree, c.fromB, c.toB, doc, 'Blockquote'),
+      ...collectNamedInRange(oldTree, Math.min(c.fromA, oldDoc.length),
+        Math.min(Math.max(c.toA, c.fromA), oldDoc.length), oldDoc, 'Blockquote'),
+    ]
+    for (const [node, nodeDoc] of nodes) {
+      const isNew = nodeDoc === doc
+      const identity = identityOf(nodeDoc, node)
+      // 对侧树的同位容器（本侧容器首经变更映射到对侧坐标系）
+      const otherPos = isNew
+        ? Math.min(inverted.mapPos(node.from, -1), oldDoc.length)
+        : Math.min(tr.changes.mapPos(node.from, -1), doc.length)
+      const otherNode = blockquoteAt(isNew ? oldTree : newTree, otherPos)
+      const otherIdentity = identityOf(isNew ? oldDoc : doc, otherNode)
+      if (identity === otherIdentity) {
+        continue
+      }
+      pushSpan(node.from, node.to)
+      if (otherNode) {
+        pushSpan(
+          isNew ? tr.changes.mapPos(otherNode.from, -1) : inverted.mapPos(otherNode.from, -1),
+          isNew ? tr.changes.mapPos(otherNode.to, 1) : inverted.mapPos(otherNode.to, 1),
+        )
+      }
+    }
+  }
+
   if ((fmDirty && (newFm !== null || oldFm !== null)) || !sameRange(newFm, oldFm)) {
     // 旧 fm 端点映射到新坐标再取行号——fm 前方插入/删除行时旧行号已偏移
     // （#140 外部在头区前插行的场景实测暴露：未映射时清理范围不足，
@@ -1683,6 +1965,25 @@ function planRebuildSpans(
   mergeSpans(spans, doc.lines)
   expandSpansByContainerDiff(spans, tr, oldTree, newTree, changed)
   return spans
+}
+
+/** 区间内名为 name 的节点（连同所属文档引用返回——新旧树各自坐标系，
+ *  #653/T02 callout 身份翻转探测用；不下降进命中节点的子树嵌套同名容器
+ *  ——visitRange 会递归，此处按「相交即收」取全部层级的 Blockquote） */
+function collectNamedInRange(
+  tree: Tree,
+  from: number,
+  to: number,
+  doc: Text,
+  name: string,
+): Array<[SyntaxNode, Text]> {
+  const nodes: Array<[SyntaxNode, Text]> = []
+  visitRange(tree, from, to, (node) => {
+    if (node.name === name) {
+      nodes.push([node, doc])
+    }
+  })
+  return nodes
 }
 
 function sameRange(a: SourceRange | null, b: SourceRange | null): boolean {
