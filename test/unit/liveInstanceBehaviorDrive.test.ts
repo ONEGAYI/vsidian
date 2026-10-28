@@ -332,6 +332,39 @@ describe('T07 liveInstance 行为链驱动检测', () => {
     expect(drives).toEqual([])
   })
 
+  it('#649 行内代码内键入驱动：`·|` 键入 ·——行为链代码上下文不含行内代码', async () => {
+    const { instance, drives } = setup('`·`\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 2 } })
+    view.dispatch({ changes: { from: 2, insert: '·' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    // easy-typing builtin-conv-codeblock（`·` 升级代码块）的唯一触发形态
+    // 是光标在行内代码内——行为链须放行该输入（上游 tryProcessInput 无
+    // 行内代码排除；符号补全面仍排除，见 inCodeContext 本体）
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type', inputText: '·', replaced: null }])
+  })
+
+  it('#649 行内代码内 IME 定稿驱动：`·|` 组合定稿 ·——compose 路径同放行', async () => {
+    const { instance, drives } = setup('`·`\n')
+    const view = instance.getView()!
+    const content = view.contentDOM
+    view.dispatch({ selection: { anchor: 2 } })
+    content.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+    view.dispatch({ changes: { from: 2, insert: '·' }, userEvent: 'input.type.compose' })
+    content.dispatchEvent(new CompositionEvent('compositionend', { data: '·' }))
+    await flushMicrotasks()
+    expect(drives).toEqual([{ instanceId: 'main', userEvent: 'input.type.compose', inputText: '·', replaced: null }])
+  })
+
+  it('#649 对照：块级 HTML 内键入仍不驱动（块级排除面不变）', async () => {
+    const { instance, drives } = setup('<div>\nhello\n</div>\n')
+    const view = instance.getView()!
+    view.dispatch({ selection: { anchor: 11 } })
+    view.dispatch({ changes: { from: 11, insert: '^' }, userEvent: 'input.type' })
+    await flushMicrotasks()
+    expect(drives).toEqual([])
+  })
+
   it('外部同步与 SDK 修饰事务不驱动（防第二写入口/递归）', async () => {
     const { instance, drives } = setup('word\n')
     const view = instance.getView()!
