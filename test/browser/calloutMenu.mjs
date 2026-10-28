@@ -272,6 +272,24 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(60)
   assert.ok(!(await page.evaluate(() => !!document.querySelector('.vsidian-context-menu'))), 'Esc 应关闭菜单')
+  // Tab 键击：焦点移动绝不停在分隔线 div（票面明列 Tab；此前仅结构保证，补真实键击验证）
+  await openTypeMenu(page, afterEnter.text.indexOf('开头段落正文'))
+  await page.keyboard.press('ArrowRight') // 进二级
+  await page.keyboard.press('ArrowRight') // 进三级类型面
+  await page.waitForTimeout(60)
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(60)
+  const afterTab = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName ?? '',
+    cls: String(document.activeElement?.className ?? ''),
+  }))
+  assert.ok(
+    !afterTab.cls.includes('vsidian-context-menu-separator'),
+    `Tab 后焦点不得落在分隔线（实际 ${afterTab.tag}.${afterTab.cls.slice(0, 60)}）`,
+  )
+  passed++
+  console.log('[Callout 菜单预览][PASS] Tab 键击后焦点不停留在分隔线')
+  await page.keyboard.press('Escape')
   passed++
   console.log('[Callout 菜单预览][PASS] 键盘导航：分隔线不进焦点序列 + Enter 执行 + Esc 关闭')
 
