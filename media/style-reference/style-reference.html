@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（96 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（98 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -358,7 +358,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「稳定样式契约」（#9）：.vsidian-task-checkbox 命中 rgb(19, 20, 21)；cssProbe.liveTaskCheckboxDecorationColor</p>
       <p class="life">引入：#8（2026-09-24）；#9（2026-09-24）起可交互</p>
     </article>
-    <h2>正文域 · 行级语法（5）</h2>
+    <h2>正文域 · 行级语法（6）</h2>
     <article class="entry" id="live-code-line">
       <h3><code>.vsidian-code-line</code><span class="eid">live-code-line</span></h3>
       <p class="purpose">live 围栏/缩进代码**行**（含围栏标记行）；卡片开启时的行级类另见 chrome 域 live-code-card-line。</p>
@@ -387,6 +387,21 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：集成「Obsidian 原名别名桥」：.HyperMD-quote 命中；cssProbe.obsidianAliases[&quot;live-quote-line&quot;]</p>
       <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="callout">
+      <h3><code>.callout / .callout-title / .callout-icon / .callout-title-inner / .callout-content / [data-callout]</code><span class="eid">callout</span></h3>
+      <p class="purpose">Callout 容器家族（#653/T02：note 与未知类型回落，全类型归 T03）：Obsidian 原名即公开主类名（发射侧直接挂 .callout 家族——主名即别名，无 vsidian 前缀名，别名桥不适用）。识别在引用容器直属首段首行（`&gt; [!类型] 标题`，识别器两端共用）；callout 行替代该层引用紫条与引用底，内部普通引用保留自身样式。Live 为行级形态：容器每行挂 .callout（标题行加 .callout-title、正文行加 .callout-content），data-callout 由最内层 callout 容器胜出（嵌套原标识保留）；**跨行严格父子容器选择器（.callout &gt; .callout-content 等）仅在阅读侧承诺**——Live 行级形态的既知边界（T01 §6.1 矩阵）。阅读为真实容器：div.callout[data-callout] &gt; div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：Live 标题行在光标/选区端点触及前隐藏 `[!类型]` 声明并以 .callout-icon 呈现（触及显形源码，与 QuoteMark 同款端点语义）；无显式标题时呈现源文派生默认标题（不写回源文）。折叠符号本票仅解析，箭头与状态类归 T04。</p>
+      <p class="obsidian">Obsidian 对应：.callout 家族（Obsidian 阅读侧同名结构；Obsidian Live 为整块 widget——本项目行级形态是自有边界，编辑正文保留外框）</p>
+
+      <p class="dom">DOM 关系：Live：.cm-line 行元素携带行级类 + data-callout 属性；标记为行内 replace widget。阅读：div.callout 严格容器家族。</p>
+      <pre><code>.callout[data-callout=&quot;note&quot;] {
+  /* 类名即 Obsidian 原名，两模式直接命中 */
+  --callout-color: #d40;
+}</code></pre>
+      <p class="verify">验证：单元 calloutSyntax：识别矩阵与 T01 对拍夹具同例（35 夹具零分歧）；单元 liveCallout / readingCallout：双模式结构、源锚点与增量对拍契约；单元 calloutCssContract：变量族 / :where 类型表 / 双通道底色 / 紫条替代；浏览器 calloutPaint：明暗主题绘制层证据（computed 底色 / 标题 / 图标）</p>
+      <p class="life">引入：#653（2026-10-28）</p>
     </article>
     <article class="entry" id="live-hr-line">
       <h3><code>.vsidian-hr-line</code><span class="eid">live-hr-line</span></h3>
@@ -1115,7 +1130,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 embedSlots（#246）：占位 html 形态（span + data-inner + 显示文本）、代码字面量/残缺形态不产占位与未闭合注释边角；单元 embedSlots：占位查询与配对（data-vsidian-embed-inner 为挂载配对单一来源）；单元 readingMarkdown（#248）：格内 \| 形态经解码重解析产占位（data-inner 解码语义）、跨格伪形态与 code span 字面量不产占位；浏览器 mixedEmbed（#246）：占位降级形态（链接域内）文字可见</p>
       <p class="life">引入：#246（2026-10-01）</p>
     </article>
-    <h2>正文域 · 公开 CSS 变量（12）</h2>
+    <h2>正文域 · 公开 CSS 变量（13）</h2>
     <article class="entry" id="var-anchor-flash-background">
       <h3><code>--vsidian-anchor-flash-background</code><span class="eid">var-anchor-flash-background</span></h3>
       <p class="purpose">跳转目标高亮的半透黄背景色（#163 验收反馈）：用户可覆盖的 CSS 接口，live 行级与 reading 块级两条规则同引（一处定义两视图生效）。默认 rgba(255, 213, 79, 0.25)。</p>
@@ -1229,6 +1244,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：quoteBarCssContract：#app 定义 + 亮色覆盖 + 两侧同引（背景底不换色）；浏览器 quoteBarPaint：明暗主题 × 双视图 computed 竖条颜色一致且为紫</p>
       <p class="life">引入：#143（2026-09-27）</p>
     </article>
+    <article class="entry" id="var-callout-color">
+      <h3><code>--callout-color / --callout-default / --callout-radius / --callout-padding / --callout-title-color / --callout-title-weight / --callout-title-size / --callout-title-padding / --callout-content-padding / --callout-content-background / --callout-border-width / --callout-border-opacity</code><span class="eid">var-callout-color</span></h3>
+      <p class="purpose">Callout 公开变量族（#653/T02，Obsidian 原名即公开入口——无 vsidian 前缀名与别名桥）：类型色 --callout-color 同时接受标准 CSS 颜色与既有片段常见的 RGB 三元组（拆属性双通道：内置标准色经背景渐变绘制、三元组经 background-color 绘制，互斥生效——两形态无法在同一声明兼容是 CSS 实测边界，T01 §6.2；非背景通道仅标准色）。类型变量表以 :where([data-callout=…]) 零特异性承载（本票登记 note，未知类型无规则即回落 --callout-default 的 note 外观）；默认值取 Obsidian 1.14.4 默认主题取证（note 色 亮 #086ddd / 暗 #027aff、radius 4px、边框宽 0）。--callout-icon 与 --callout-blend-mode 归 T06。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--callout-color 等官方 Callout 变量清单（同名直接生效）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（亮色分支覆盖 --callout-default）；类型变量经 :where 规则按 data-callout 属性命中（行元素无内联变量）。</p>
+      <pre><code>.callout[data-callout=&quot;note&quot;] {
+  --callout-color: 212, 64, 0; /* RGB 三元组形态同样生效 */
+}</code></pre>
+      <p class="verify">验证：calloutCssContract：变量族定义 / 亮色覆盖 / :where 类型表 / 双通道底色；浏览器 calloutPaint：明暗主题两通道 computed 底色证据</p>
+      <p class="life">引入：#653（2026-10-28）</p>
+    </article>
     <article class="entry" id="var-table-background">
       <h3><code>--vsidian-table-background</code><span class="eid">var-table-background</span></h3>
       <p class="purpose">live 表头格 / 阅读表头（th）/ fm 标题栏底色（#213 起数据行透明，行背景改走 --vsidian-table-row-background）；默认 rgba(128, 128, 128, 0.05)。</p>
@@ -1296,14 +1325,14 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="limit-callout">
       <h3><code>.callout 及其 data 属性</code><span class="eid">limit-callout</span></h3>
-      <p class="purpose">Callout 语法未实现，后续版本提供。</p>
-      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+      <p class="purpose">历史限制（#653/T02 起部分解除）：note 与未知类型（回落 note 外观、原标识进 data-callout）的双模式呈现已支持，见 callout / var-callout-color 条目。剩余边界如实可查：全类型与别名注册表、折叠状态机与箭头（.callout-fold / is-collapsible / is-collapsed）、富标题、嵌套视觉精修与 CSS 自定义图标（--callout-icon）归后续票（T03–T06）增量交付。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
 
-      <p class="obsidian">Obsidian 对应：.callout</p>
+      <p class="obsidian">Obsidian 对应：.callout（部分支持）</p>
 
-      <p class="dom">DOM 关系：无 callout 结构。</p>
-      <p class="verify">验证：清单即边界</p>
-      <p class="life">引入：#6（2026-09-23）</p>
+      <p class="dom">DOM 关系：已支持部分的真实 DOM 见 callout 条目；未交付部分无对应节点（折叠箭头不发射）。</p>
+      <p class="verify">验证：单元 calloutSyntax / liveCallout / readingCallout / calloutCssContract（#653）；浏览器 calloutPaint（#653）</p>
+      <p class="life">引入：#6（2026-09-23，如实记录不支持）；#653（2026-10-28）转为本片能力说明</p>
     </article>
     <article class="entry" id="limit-task-extended-states">
       <h3><code>.task-list-item[data-task=&quot;x&quot;] 等</code><span class="eid">limit-task-extended-states</span></h3>

@@ -127,6 +127,7 @@ vsidian/
     │   ├── addonUi.ts                 # 附加组件界面贡献共享形状与校验
     │   ├── behaviorFilterQuery.ts     # 行为筛选查询与分页纯函数
     │   ├── blockId.ts                 # 块 id 与块边界单一事实源
+    │   ├── calloutSyntax.ts           # Callout 识别单一事实源
     │   ├── changeMapping.ts           # 变更重定位纯函数
     │   ├── chromeContract.ts          # 界面域样式契约探针表
     │   ├── codeLangs.ts               # 代码块语言注册表与别名路由

@@ -155,6 +155,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'A .cm-line line element inside the live container.',
     obsidian: { counterpart: '.HyperMD-quote (the Obsidian quote line class)' },
   },
+  callout: {
+    purpose:
+      'The callout container family (#653/T02: note plus unknown types falling back to the note look; all built-in types arrive in T03): the Obsidian names are the public primary class names (emitted directly as-is, no vsidian prefix and no alias bridge). Recognition happens on the first line of the quote container\'s first paragraph (`> [!type] title`, one shared recognizer for both views); a callout replaces that quote layer\'s accent bar and background while inner plain quotes keep their own look. Live is a line-level shape: every container line carries .callout (title line adds .callout-title, body lines add .callout-content), and data-callout is decided by the innermost callout. **Strict parent-child container selectors (.callout > .callout-content) are promised on the reading side only** — a documented boundary of the live line shape (T01 §6.1 matrix). Reading emits a real container: div.callout[data-callout] > div.callout-title(.callout-icon + .callout-title-inner) + div.callout-content.',
+    states:
+      'In live, the `[!type]` declaration on the title line stays hidden (replaced by a .callout-icon widget) until a cursor or selection endpoint touches the title line (same endpoint semantics as QuoteMark); without an explicit title a derived default title is shown (never written back to the source). Fold signs are parsed in this slice; the arrow and state classes arrive in T04.',
+    dom: 'Live: .cm-line line elements carry the line classes plus the data-callout attribute; the declaration is an inline replace widget. Reading: a strict div.callout container family.',
+    obsidian: { counterpart: 'The .callout family (same names as Obsidian reading; Obsidian live uses a block widget — the line shape here is a vsidian-specific boundary that keeps the frame while editing)' },
+  },
   'live-hr-line': {
     purpose:
       'Line-level class for live horizontal rules; since #106 the rendered state took over, and this class remains for coloring the raw-source state.',
@@ -506,6 +514,12 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'Defined on #app (centrally defined since #132; consumer sites previously carried inline fallbacks); Obsidian alias --table-background.',
     obsidian: { counterpart: '--table-background' },
   },
+  'var-callout-color': {
+    purpose:
+      'The public callout variable family (#653/T02, Obsidian names as the public entry — no vsidian prefix, no alias bridge): --callout-color accepts both standard CSS colors and the RGB triplets common in existing snippets (a split-property dual channel: the built-in standard color paints via the background gradient, the triplet via background-color — mutually exclusive, since no single declaration can accept both shapes; T01 §6.2). Channels other than backgrounds accept standard colors only. The type table rides zero-specificity :where([data-callout=…]) rules (note is registered in this slice; unknown types fall back to the note look of --callout-default); defaults come from the Obsidian 1.14.4 stock theme (note color light #086ddd / dark #027aff, radius 4px, border width 0). --callout-icon and --callout-blend-mode arrive in T06.',
+    dom: 'Defined on #app (light branch overrides --callout-default); type variables match via :where rules on the data-callout attribute (no inline variables on line elements).',
+    obsidian: { counterpart: '--callout-color and the official Callout variable list (same names take effect directly)' },
+  },
   'var-table-row-background': {
     purpose:
       'Background of live table data rows and delimiter rows; defaults to transparent (blending into the editor background, aligned with the reading-side td). Header cell backgrounds are unaffected by this variable (they still use --vsidian-table-background).',
@@ -532,9 +546,10 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     obsidian: { counterpart: '.cm-hashtag (live) / .tag (reading)' },
   },
   'limit-callout': {
-    purpose: 'Callout syntax is not implemented; a later version will provide it.',
-    dom: 'No callout structure exists.',
-    obsidian: { counterpart: '.callout' },
+    purpose:
+      'Historical limitation (partially lifted as of #653/T02): the dual-mode presentation of note and unknown types (falling back to the note look, original id kept in data-callout) is supported — see the callout / var-callout-color entries. Remaining boundaries, kept honest: the full type/alias registry, the fold state machine and arrow (.callout-fold / is-collapsible / is-collapsed), rich titles, nested visual refinement and CSS icon customization (--callout-icon) arrive in later slices (T03–T06).',
+    dom: 'The real DOM of the supported part is described in the callout entry; undelivered parts have no matching nodes (no fold arrow is emitted).',
+    obsidian: { counterpart: '.callout (partial support)' },
   },
   'limit-task-extended-states': {
     purpose: 'Extended task check states are not supported: only space / x / X.',
