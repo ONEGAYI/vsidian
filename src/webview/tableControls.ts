@@ -7,7 +7,7 @@ import { liveDecorationsField } from './liveDecorations'
 import { splitTableRowCells } from '../shared/tableCells'
 import type { TableRowInfo } from './tableStructure'
 import { prefixLenOf } from './tableStructure'
-import { selectTableRegion, setTableRegion, tableRegionField } from './tableRegionSelection'
+import { selectTableRegion } from './tableRegionSelection'
 import { t } from '../shared/i18n'
 
 interface TableControlActions {
@@ -81,8 +81,6 @@ class TableControlsView {
       update.state.field(liveDecorationsField, false)?.decos
     if (update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged || decorationsChanged) {
       this.scheduleRender()
-    } else if (update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setTableRegion)))) {
-      this.applySelection()
     }
   }
 
@@ -185,11 +183,8 @@ class TableControlsView {
     // 语言切换后控件按钮随本渲染自然取新词；层可访问名称常驻，就地重刷
     this.layer.setAttribute('aria-label', t('table.controls'))
     for (const item of this.visible) {
-      item.element.classList.remove('vsidian-table-row-selected', 'vsidian-table-dragging',
+      item.element.classList.remove('vsidian-table-dragging',
         'vsidian-table-drop-before', 'vsidian-table-drop-after')
-      item.element.querySelectorAll('.vsidian-table-column-selected').forEach((cell) =>
-        cell.classList.remove('vsidian-table-column-selected', 'vsidian-table-column-first',
-          'vsidian-table-column-last'))
     }
     this.visible = []
     this.layer.replaceChildren()
@@ -235,7 +230,6 @@ class TableControlsView {
           this.view.focus()
           selectTableRegion(this.view, { tableFrom: rows[0]!.lineFrom, rowFrom: index,
             rowTo: index, columnFrom: 0, columnTo: columns - 1 })
-          this.applySelection()
         })
       handle.textContent = '⠿'
       handle.dataset['tableFrom'] = String(rows[0]!.lineFrom)
@@ -269,7 +263,6 @@ class TableControlsView {
               this.view.focus()
               selectTableRegion(this.view, { tableFrom: anchor.tableFrom, rowFrom: 0,
                 rowTo: anchor.rows.length - 2, columnFrom: column, columnTo: column })
-              this.applySelection()
             })
           button.textContent = '⠿'
           button.dataset['tableFrom'] = String(anchor.tableFrom)
@@ -307,28 +300,8 @@ class TableControlsView {
         addRow.style.width = `${rect.width}px`
       }
     }
-    this.applySelection()
     if (this.dragging?.moved) this.paintDrag(this.dragging.lastX, this.dragging.lastY)
     else if (!this.dragging && this.insertHover) this.paintInsertHover(this.insertHover.x, this.insertHover.y)
-  }
-
-  private applySelection(): void {
-    const selected = this.view.state.field(tableRegionField, false)
-    for (const item of this.visible) {
-      const columns = item.element.querySelectorAll(':scope > .vsidian-table-grid-cell').length
-      const rowSelected = selected?.tableFrom === item.tableFrom && selected.rowFrom === item.index &&
-        selected.rowTo === item.index && selected.columnFrom === 0 && selected.columnTo === columns - 1
-      item.element.classList.toggle('vsidian-table-row-selected', rowSelected)
-      const column = selected?.tableFrom === item.tableFrom && selected.rowFrom === 0 &&
-        selected.rowTo === item.rows.length - 2 && selected.columnFrom === selected.columnTo
-        ? selected.columnFrom : undefined
-      item.element.querySelectorAll<HTMLElement>(':scope > .vsidian-table-grid-cell').forEach((cell, index) => {
-        const active = column === index
-        cell.classList.toggle('vsidian-table-column-selected', active)
-        cell.classList.toggle('vsidian-table-column-first', active && item.index === 0)
-        cell.classList.toggle('vsidian-table-column-last', active && item.index === item.rows.length - 2)
-      })
-    }
   }
 
   private startDrag(axis: 'row' | 'column', tableFrom: number, source: number,
