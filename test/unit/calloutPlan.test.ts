@@ -253,3 +253,39 @@ describe('docLinesOf：行边界辅助（wrap 行收集口径）', () => {
     expect(docLinesOf('ab\ncd\nef\n', 9, true)).toBe(3) // to=文档长（末 \n 后）：恰在末空行行首，归前一行
   })
 })
+
+describe('#662 R1-002 无 Callout 移除保留外层容器前缀', () => {
+  /** 混合容器前缀场景的手工目标（targetOf 夹具的纯引用前缀正则不覆盖）：
+   *  markerFrom 按声明 `[` 的行内位置手算，decl 走识别单一事实源 */
+  function targetAt(markerFrom: number, titleLineNo: number, lastLineNo: number, declText: string): CalloutPlanTarget {
+    const decl = parseCalloutDecl(declText)
+    if (!decl) {
+      throw new Error(`夹具声明不成型：${declText}`)
+    }
+    return { markerFrom, titleLineNo, lastLineNo, hasBody: true, decl }
+  }
+
+  it('列表首行声明（- > [!note]）移除：保留列表标记与换行，仅删最内层引用标记+声明', () => {
+    const text = '- > [!note]\n  > body'
+    const plan = planCalloutRemove(text, targetAt(4, 1, 2, '[!note]'))
+    expect(applyPlan(text, plan.changes)).toBe('-\n  > body')
+  })
+
+  it('有序列表（1. > [!tip]+）同样保留序号前缀', () => {
+    const text = '1. > [!tip]+\n   > body'
+    const plan = planCalloutRemove(text, targetAt(5, 1, 2, '[!tip]+'))
+    expect(applyPlan(text, plan.changes)).toBe('1.\n   > body')
+  })
+
+  it('嵌套外层声明同行（> [!note] > [!tip]）：移除内层保留外层声明，正文归外层', () => {
+    const text = '> [!note] > [!tip]\n> body'
+    const plan = planCalloutRemove(text, targetAt(12, 1, 2, '[!tip]'))
+    expect(applyPlan(text, plan.changes)).toBe('> [!note]\n> body')
+  })
+
+  it('纯引用前缀（回归）：无标题有正文仍整行删除', () => {
+    const text = '> [!note]\n> body'
+    const plan = planCalloutRemove(text, targetAt(2, 1, 2, '[!note]'))
+    expect(applyPlan(text, plan.changes)).toBe('> body')
+  })
+})

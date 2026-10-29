@@ -96,10 +96,19 @@ export function planCalloutRemove(text: string, target: CalloutPlanTarget): Call
     // 只有声明：保留空引用行（前缀 `> ` 原样，声明段剥除）
     return { changes: [{ from: target.markerFrom, to: lineEnd, insert: '' }] }
   }
-  // 无标题空行整行删除（带走其后换行；末行无换行时删到行尾）
+  // 无标题空行删除：纯引用前缀整行删（带走其后换行；末行无换行时删到
+  // 行尾）；混合容器前缀（列表标记／外层声明等父层结构，#662 R1-002）
+  // 保留外层——仅删「最内层引用标记之后到行尾」（保留换行与后续正文行，
+  // 整行删会连带删掉 `- ` 列表标记等父层结构）
+  const prefix = line.slice(0, target.markerFrom - lineStart)
   const nextLineStart = lineEnd + 1
-  const to = nextLineStart <= text.length ? nextLineStart : lineEnd
-  return { changes: [{ from: lineStart, to, insert: '' }] }
+  if (/^(?:\s*>\s?)*$/.test(prefix)) {
+    const to = nextLineStart <= text.length ? nextLineStart : lineEnd
+    return { changes: [{ from: lineStart, to, insert: '' }] }
+  }
+  const lastGt = prefix.lastIndexOf('>')
+  const outer = (lastGt < 0 ? prefix : prefix.slice(0, lastGt)).replace(/\s+$/, '')
+  return { changes: [{ from: lineStart + outer.length, to: lineEnd, insert: '' }] }
 }
 
 /** 行号（1-based）→ 文档偏移（行首） */
