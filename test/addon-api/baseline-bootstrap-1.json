@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "cc4dbcfdf70365626ac6752ac17d8ad4c665f4dd",
-      "ref": "HEAD",
+      "sha": "2c5d47639c7d90717124bdd89e5c0b353d899ef3",
+      "ref": "2c5d4763",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -1288,7 +1288,7 @@
       "ADDON_IDENTITY_MANIFEST_VERSION": "/** 身份声明格式版本（与公开 API 版本分开） */\nexport const ADDON_IDENTITY_MANIFEST_VERSION = 1",
       "AddonIdentityDeclaration": "/** 合法身份声明形状 */\nexport interface AddonIdentityDeclaration {\n  /** 声明格式版本（当前仅支持 1） */\n  manifestVersion: number\n  /** 支持的稳定 API 范围（semver range 子集，如 '^1.0.0'） */\n  api: string\n  /** 确有使用时才声明的实验入口兼容范围（入口名 → 版本范围） */\n  experimental?: Readonly<Record<string, string>>\n}",
       "AddonDeclarationParseResult": "/** 声明解析结果：none = 普通扩展（无声明，不入组件列表） */\nexport type AddonDeclarationParseResult =\n  | { kind: 'none' }\n  | {\n      kind: 'invalid'\n      /** 拒绝原因（呈现层组句用） */\n      reason: 'field-not-object' | 'manifest-version-unsupported' | 'api-invalid' | 'experimental-invalid'\n    }\n  | { kind: 'ok'; declaration: AddonIdentityDeclaration }",
-      "ADDON_API_VERSION": "/**\n * 宿主当前稳定 API 版本（`^1.0.0` 语义的基准）。当前 1.3.0；自 1.1.0\n * （2026-10-16）起随 Vsidian 本体发行并产生兼容承诺——附加组件声明的\n * api 范围须包含该版本才判兼容；API 版本独立于 Vsidian 本体版本号，随\n * 携带 API 变更的本体发布同笔升版。\n */\nexport const ADDON_API_VERSION = '1.3.0'",
+      "ADDON_API_VERSION": "/**\n * 宿主当前稳定 API 版本（`^1.0.0` 语义的基准）。当前 1.4.0；自 1.1.0\n * （2026-10-16）起随 Vsidian 本体发行并产生兼容承诺——附加组件声明的\n * api 范围须包含该版本才判兼容；API 版本独立于 Vsidian 本体版本号， 随\n * 携带 API 变更的本体发布同笔升版。\n */\nexport const ADDON_API_VERSION = '1.4.0'",
       "AddonCompatibilityHost": "/** 兼容判定的宿主侧输入 */\nexport interface AddonCompatibilityHost {\n  /** 宿主当前提供的稳定 API 版本 */\n  apiVersion: string\n  /** 宿主当前支持的实验入口表（入口名 → 宿主侧版本范围；未发布的入口不在表内） */\n  experimental: Readonly<Record<string, string>>\n}",
       "AddonCompatibility": "export type AddonCompatibility =\n  | { compatible: true }\n  | {\n      compatible: false\n      reason: 'api-range' | 'experimental-unsupported' | 'experimental-incompatible'\n      /** experimental 拒绝时点名入口名 */\n      entry?: string\n    }",
       "checkAddonCompatibility": "/** 兼容判定：声明范围须包含宿主稳定 API 版本；声明的实验入口须宿主已提供\n *  且版本匹配。当前宿主实验入口表为空——任何 experimental 声明都会被判\n *  experimental-unsupported（如实反映「实验入口未发布」）。 */\nexport function checkAddonCompatibility(\n  declaration: AddonIdentityDeclaration,\n  host: AddonCompatibilityHost,\n): AddonCompatibility {\n  if (!satisfiesSemverRange(declaration.api, host.apiVersion)) {\n    return { compatible: false, reason: 'api-range' }\n  }\n  for (const [entry, range] of Object.entries(declaration.experimental ?? {})) {\n    const hosted = host.experimental[entry]\n    if (hosted === undefined) {\n      return { compatible: false, reason: 'experimental-unsupported', entry }\n    }\n    if (!satisfiesSemverRange(range, hosted)) {\n      return { compatible: false, reason: 'experimental-incompatible', entry }\n    }\n  }\n  return { compatible: true }\n}",
@@ -1576,6 +1576,12 @@
       "version": "1.3.0",
       "status": "released",
       "releasedAt": "2026-10-20",
+      "experimental": []
+    },
+    {
+      "version": "1.4.0",
+      "status": "released",
+      "releasedAt": "2026-10-29",
       "experimental": []
     }
   ],
