@@ -177,7 +177,7 @@ import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
-import { liveDocStyle, liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
+import { liveDocStyle, liveHtmlDocScope, liveHtmlDocScopeOf, revealHtmlSourceAtCursor } from './liveHtml'
 import {
   hubResourcePort,
   invalidateAllHtmlResources,
@@ -8015,9 +8015,15 @@ export class WebviewSyncController {
     document.body.appendChild(menu)
     // #658（T07）Callout 类型页取色预览：菜单含类型页时挂隐藏探针绘制
     // 预览（在 applySubmenuFlip 量宽**之前**——预览槽加宽三级面，翻转与
-    // 低高度封顶按含预览的实际宽度判定）；不含类型页返回 null 零影响
+    // 低高度封顶按含预览的实际宽度判定）；不含类型页返回 null 零影响。
+    // #659（T08）文档样式身份随菜单目标：嵌入内部 Live 打开时探针取目标
+    // 文档的 docScope（liveHtmlDocScopeOf facet——B 的文档样式产物进
+    // 预览），主文打开缺省根文档 'doc'（预览选项缺省同值）
     this.calloutMenuPreview?.dispose()
-    this.calloutMenuPreview = mountCalloutMenuPreview(menu, { scopeRoot: this.rootEl ?? document.body }) ?? undefined
+    this.calloutMenuPreview = mountCalloutMenuPreview(menu, {
+      scopeRoot: this.rootEl ?? document.body,
+      docScope: liveHtmlDocScopeOf(view.state) ?? 'doc',
+    }) ?? undefined
     const size = { w: menu.offsetWidth || 220, h: menu.offsetHeight || 260 }
     const pos = menuViewportPosition(
       { x: clientX, y: clientY },

@@ -5,6 +5,7 @@
 // 聚焦 webview 行为与绘制层断言。
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { WebviewToHost } from '../../src/shared/protocol'
+import { docScopeKeyOf } from '../../src/shared/docStyle'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { EditorView } from '@codemirror/view'
 import { keymap } from '@codemirror/view'
@@ -174,5 +175,33 @@ Object.assign(window, {
   /** 已出站消息快照（零写回断言的计数基线） */
   refSent(): WebviewToHost[] {
     return [...sent]
+  },
+  /** B 目标的文档样式身份键（docScopeKeyOf 派生——预览探针断言的期望值） */
+  refBDocScope(): string {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return docScopeKeyOf(B_FS)
+  },
+  /** 卡内指定 callout 标题行位置派发 contextmenu（真实监听链路——嵌入
+   *  contentDOM 转发 → onEmbedLiveContextMenu → openContextMenu）。
+   *  行元素限定在 live 容器内查（卡根下隐藏的 Reading 容器 DOM 同在，
+   *  其 div.callout 非 .cm-line 会误命中） */
+  refContextMenuAtCallout(cardIndex: number, type: string): boolean {
+    const card = cardAt(cardIndex)
+    const live = card?.querySelector<HTMLElement>('.vsidian-embed-card-live') ?? null
+    const line = live?.querySelector<HTMLElement>(`[data-callout="${type}"]`)?.closest('.cm-line') ?? null
+    if (!live || !line || !line.closest('.cm-content')) {
+      return false
+    }
+    const rect = line.getBoundingClientRect()
+    line.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true,
+      clientX: rect.x + Math.min(rect.width / 2, 120), clientY: rect.y + rect.height / 2,
+    }))
+    return true
+  },
+  /** 菜单预览探针的文档样式身份（无探针返回 null） */
+  refMenuProbeDocScope(): string | null {
+    const probe = document.querySelector<HTMLElement>('.vsidian-callout-menu-probe')
+    return probe?.getAttribute('data-vsidian-doc-scope') ?? null
   },
 })

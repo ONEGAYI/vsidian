@@ -124,6 +124,31 @@ try {
   assert.ok(plain.iconInjected && plain.iconPainted, '全部类型均消费同一注入面')
 
   assert.ok(errors.length === 0, `页面无错误：${errors.join(' | ')}`)
+
+  // ---- 六、嵌入内类型菜单预览身份：探针 docScope 取目标文档（T07 评审移交 T08） ----
+  await page.evaluate(({ m, b }) => window.initCalloutRefEmbed(m, b), { m: MAIN_DOC, b: B_DOC })
+  await drain(page)
+  await settle(page)
+  assert.ok(await page.evaluate(() => window.refToggleCardMode(0)), '切 Live（菜单预览身份用例前置）')
+  await drain(page)
+  await settle(page)
+  assert.ok(await page.evaluate(() => window.refContextMenuAtCallout(0, 'note')),
+    '嵌入内 callout 标题行右键应可达（contentDOM 转发链路在场）')
+  await settle(page)
+  // 右键命中 callout 标题行：菜单直接携带「修改类型」与类型页（calloutType:*）
+  const menuState = await page.evaluate(() => ({
+    open: !!document.querySelector('.vsidian-context-menu'),
+    typeRows: document.querySelectorAll('.vsidian-context-menu button[data-vsidian-command^="calloutType:"]').length,
+  }))
+  assert.ok(menuState.open, '右键后统一菜单应打开（嵌入转发链路）')
+  assert.ok(menuState.typeRows >= 14, `类型页应在场（实际 ${menuState.typeRows} 行）`)
+  const bScope = await page.evaluate(() => window.refBDocScope())
+  const probeScope = await page.evaluate(() => window.refMenuProbeDocScope())
+  assert.ok(probeScope !== null, '类型页在场时预览探针应挂载')
+  assert.equal(probeScope, bScope, `探针文档样式身份应取嵌入目标 B（期望 ${bScope}，实际 ${probeScope}）`)
+  assert.notEqual(probeScope, 'doc', '不得回落根文档身份（T07 评审发现的缺口）')
+  assert.ok(errors.length === 0, `页面无错误：${errors.join(' | ')}`)
+
   console.log('calloutRefEmbed: 全部断言通过')
 } finally {
   await browser.close()
