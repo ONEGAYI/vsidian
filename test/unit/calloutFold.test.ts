@@ -484,3 +484,36 @@ describe('外部同步光标钳制', () => {
     }
   })
 })
+
+describe('#662 R1-004 列表首行声明的 override 失效清理', () => {
+  it('列表首行声明（- > [!note]-）的手动展开在正文编辑后保留', () => {
+    const doc = '- > [!note]- 标题\n  > 正文\n尾部\n'
+    let state = foldState(doc)
+    const spans = collectCalloutFolds(state.doc)
+    expect(spans).toHaveLength(1) // 识别基线：解析器认识列表内 callout
+    state = state.update({
+      effects: calloutFoldSet.of(new Map([[spans[0]!.key, { folded: false, declFold: '-' }]])),
+    }).state
+    // 正文编辑（无关声明行）：docChanged 的行级失效清理不得误删列表声明的 override
+    const bodyPos = state.doc.toString().indexOf('正文')
+    state = state.update({ changes: { from: bodyPos, to: bodyPos + 2, insert: '内容' } }).state
+    const after = collectCalloutFolds(state.doc)
+    expect(after).toHaveLength(1)
+    expect(calloutFoldView(state.field(calloutFoldField), after)[0]!.folded).toBe(false)
+  })
+
+  it('有序列表（1. > [!tip]+）的手动收起在编辑后同样保留', () => {
+    const doc = '1. > [!tip]+ 标题\n   > 正文\n尾部\n'
+    let state = foldState(doc)
+    const spans = collectCalloutFolds(state.doc)
+    expect(spans).toHaveLength(1)
+    state = state.update({
+      effects: calloutFoldSet.of(new Map([[spans[0]!.key, { folded: true, declFold: '+' }]])),
+    }).state
+    const tailPos = state.doc.toString().indexOf('尾部')
+    state = state.update({ changes: { from: tailPos, insert: '已改' } }).state
+    const after = collectCalloutFolds(state.doc)
+    expect(after).toHaveLength(1)
+    expect(calloutFoldView(state.field(calloutFoldField), after)[0]!.folded).toBe(true)
+  })
+})

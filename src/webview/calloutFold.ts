@@ -70,7 +70,8 @@ export interface CalloutFoldOverride {
 /** 行级字符串校验：key 所在行是否仍是携带折叠符号的 callout 标题行，
  *  返回当前声明符号（用于失配检测）；否则 null。update 的轻量失效通道
  *  ——只对 override 键逐行检查（数量 ≤ 收起数），不做全文档扫描；识别
- *  单一事实源 parseCalloutDecl 的行级形态（剥引用前缀后的段起点近似）。 */
+ *  单一事实源 parseCalloutDecl 的行级投影（容器前缀 = 引用/列表标记
+ *  组合，含列表首行声明形态）。 */
 function foldDeclOfLine(doc: Text, key: number): '+' | '-' | null {
   if (key < 0 || key > doc.length) {
     return null
@@ -79,8 +80,13 @@ function foldDeclOfLine(doc: Text, key: number): '+' | '-' | null {
   if (line.from !== key) {
     return null
   }
-  const m = /^(?:\s*>\s?)+/.exec(line.text)
-  if (!m) {
+  // 容器前缀：引用/列表标记（`>`、`-`、`*`、`+`、有序序号）与空白的任意
+  // 组合，且至少含一个 `>`（callout 必在引用内——纯列表行不是声明）。
+  // 列表首行声明 `- > [!note]-` / `1. > [!tip]+` 的行级投影（#662 R1-004：
+  // 纯引用正则会拒绝列表前缀，编辑后误清 override）；声明判定交
+  // parseCalloutDecl（识别单一事实源）。
+  const m = /^(?:[\s>*+-]|\d+[.)])+/.exec(line.text)
+  if (!m || !m[0].includes('>')) {
     return null
   }
   const decl = parseCalloutDecl(line.text.slice(m[0].length))
