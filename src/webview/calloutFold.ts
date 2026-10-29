@@ -688,7 +688,9 @@ export function decorateCalloutFoldControlsIn(
  * spans（键在场且声明符号未变）的记录——Reading 侧没有 Live StateField
  * 的 ChangeSet 映射链，重载（目标外部修改广播）按新文本重派生时，旧
  * 坐标键自然脱靶丢弃（「标记删除/全文重新初始化丢弃失效状态」的 Reading
- * 侧等价语义；纯函数与 calloutFoldView 同源判定）。
+ * 侧保守近似——Live 侧另有 mapPos 坐标迁移，本面无 ChangeSet 映射链，
+ * 目标前部删行时旧键可能错配到同符号 callout（低概率、纯视图态）；
+ * 纯函数与 calloutFoldView 同源判定）。
  */
 export function pruneCalloutOverrides(
   overrides: ReadonlyMap<number, CalloutFoldOverride>,

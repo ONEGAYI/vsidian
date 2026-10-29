@@ -89,8 +89,6 @@ describe('T08 引用实例 Callout 呈现（Reading 形态消费同一管线）'
 
   it('箭头点击翻转（视图态）：收起 → 展开，实例 overrides 记录，零源文出站', () => {
     const { mount, contentEl, instance } = fixture('first')
-    const sent: WebviewToHost[] = []
-    void sent
     mount.render(loaded)
     const note = contentEl.querySelector<HTMLElement>('div.callout[data-callout="note"]')!
     ;(note.querySelector('.callout-fold') as HTMLElement).click()

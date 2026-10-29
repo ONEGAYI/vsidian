@@ -27,6 +27,7 @@
 import { CALLOUT_TYPES } from '../shared/calloutSyntax'
 import { OBSIDIAN_DOM_ALIASES } from '../shared/obsidianAlias'
 import { decideCalloutIcon } from './calloutIconMount'
+import { ROOT_DOC_SCOPE } from './liveHtml'
 
 /** 探针根类（内部样式锚：隐藏定位零占位；非公开契约） */
 export const CALLOUT_MENU_PROBE_CLASS = 'vsidian-callout-menu-probe'
@@ -209,7 +210,7 @@ export function mountCalloutMenuPreview(
   if (rows.size === 0) {
     return null
   }
-  const probe = buildProbe(options.docScope ?? 'doc')
+  const probe = buildProbe(options.docScope ?? ROOT_DOC_SCOPE)
   options.scopeRoot.appendChild(probe)
 
   let disposed = false

@@ -633,6 +633,8 @@ export class RefContentMount {
 
   /** 当前装载文本的可折叠 spans（calloutFold 纯函数族全量派生 + 共享缓存） */
   private calloutFoldSpansOf(): ReturnType<typeof calloutFoldSpansCached> {
+    // target 判别＝Markdown 文本目标（无 kind 字段）；与 loaded 侧守卫
+    // isRefLoadedMarkdown（判 RefLoadedContent）不是同一对象，不共用。
     const mdTarget = this.target !== null && !('kind' in this.target) ? this.target : null
     return mdTarget === null
       ? []

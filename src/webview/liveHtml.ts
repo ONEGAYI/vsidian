@@ -251,6 +251,9 @@ const liveHtmlDocScopeFacet = Facet.define<string | null, string | null>({
   combine: (values) => values[values.length - 1] ?? null,
 })
 
+/** 根文档 docScope 身份（主正文装配与各缺省面共用，防字面量双写漂移） */
+export const ROOT_DOC_SCOPE = 'doc'
+
 /** docScope 装配扩展（syncController 经 extraExtensions 注入根正文） */
 export function liveHtmlDocScope(scope: string): Extension {
   return liveHtmlDocScopeFacet.of(scope)

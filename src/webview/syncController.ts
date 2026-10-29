@@ -177,7 +177,7 @@ import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
-import { liveDocStyle, liveHtmlDocScope, liveHtmlDocScopeOf, revealHtmlSourceAtCursor } from './liveHtml'
+import { liveDocStyle, liveHtmlDocScope, liveHtmlDocScopeOf, revealHtmlSourceAtCursor, ROOT_DOC_SCOPE } from './liveHtml'
 import {
   hubResourcePort,
   invalidateAllHtmlResources,
@@ -1345,7 +1345,7 @@ export class WebviewSyncController {
       // #567（T02）主文档身份标记（T01 探针 b2 隔离基座）：html 块渲染根
       // 挂 data-vsidian-doc-scope="doc"（嵌入实例的目标身份键随 T04 装载
       // 器接线）
-      docScope: 'doc',
+      docScope: ROOT_DOC_SCOPE,
       // #419 阅读态折叠交互：翻转主文 Live 的折叠 StateField（单一事实源
       // ——阅读与 Live 共享同一折叠状态集）；阅读呈现刷新经下方折叠侦测
       // updateListener 闭环（dispatch → 折叠集变化 → syncReadingFolds）
@@ -1927,8 +1927,8 @@ export class WebviewSyncController {
       // 起同键装载全文 <style> 产物（Reading 共享同一 CM6 doc——双模式
       // 单一装载链；dispose 随视图销毁释放）；#570（T05）产物 url()/字体
       // 经 hub 端口按 A 身份解析（sourceDocUri 缺省 = 面板文档）
-      liveHtmlDocScope('doc'),
-      liveDocStyle('doc', hubResourcePort()),
+      liveHtmlDocScope(ROOT_DOC_SCOPE),
+      liveDocStyle(ROOT_DOC_SCOPE, hubResourcePort()),
       // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
       // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
       ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
