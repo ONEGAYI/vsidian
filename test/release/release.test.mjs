@@ -39,6 +39,8 @@ const QUICK_ICON_KEYS = [
   'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
   'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
   'popupPreview', 'exportSvg', 'exportPng',
+  // Callout 批次（#656/T05）：插入 Callout 菜单图标（与 release.mjs 清单同步）
+  'callout',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({
