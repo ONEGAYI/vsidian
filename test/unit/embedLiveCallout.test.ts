@@ -153,3 +153,27 @@ describe('T08 引用实例 callout 折叠的模式往返', () => {
     expect(noteAfter.classList.contains('is-collapsed')).toBe(true)
   })
 })
+
+describe('#662 R1-003 模式往返不丢开合状态（teardown 同 Map 导出）', () => {
+  it('Live 展开态（偏离 `-` 默认收起）→ 切回 Reading 保持展开', () => {
+    const h = harness()
+    const el = mountEmbedBlock(h.manager, '![[目标笔记]]\n')
+    h.manager.notifyResult(resultOk(hoverRequestOf(h.sent)))
+    const readingNote = cardOf(el).querySelector<HTMLElement>('div.callout[data-callout="note"]')!
+    ;(readingNote.querySelector('.callout-fold') as HTMLElement).click() // Reading 手动展开
+    clickModeButton(el) // → Live（bind 灌入同一 overrides）
+    bindPort(h)
+    const live = h.manager['active'].values().next().value!.entry.live!
+    const view = live.instance!.getView()!
+    const key = Number(readingNote.getAttribute('data-vsidian-src-start'))
+    const before = view.state.field(calloutFoldField, false)!
+    const next = new Map(before)
+    next.set(key, { folded: false, declFold: '-' }) // Live 重申展开（偏离源码默认）
+    view.dispatch({ effects: calloutFoldSet.of(next) })
+    // 切回 Reading：teardown 导出的就是实例自己的 Map——先 clear 后迭代
+    // 的同对象传递会丢全部条目、落回源码默认收起
+    clickModeButton(el)
+    const noteAfter = cardOf(el).querySelector<HTMLElement>('div.callout[data-callout="note"]')!
+    expect(noteAfter.classList.contains('is-collapsed')).toBe(false)
+  })
+})

@@ -702,8 +702,11 @@ export class RefContentMount {
     if (this.released) {
       return
     }
+    // #662 R1-003：teardownLive 导出回放传入的就是实例自己的 Map——先
+    // 复制再清空（clear 后迭代同一对象是零循环，开合状态会全部丢失）
+    const entries = [...next]
     this.instance.calloutFoldOverrides.clear()
-    for (const [key, override] of next) {
+    for (const [key, override] of entries) {
       this.instance.calloutFoldOverrides.set(key, override)
     }
     this.syncCalloutFolds()
