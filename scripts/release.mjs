@@ -162,6 +162,8 @@ const QUICK_ACTION_ICON_KEYS = [
   'insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight',
   'deleteRow', 'deleteColumn', 'deleteTable', 'selectRow', 'selectColumn', 'removeQuote',
   'popupPreview', 'exportSvg', 'exportPng',
+  // Callout 批次（#656/T05）：插入 Callout 菜单图标
+  'callout',
 ]
 const REQUIRED_QUICK_ACTION_SVGS = ['light', 'dark'].flatMap((theme) =>
   QUICK_ACTION_ICON_KEYS.map((key) => `out/webview/assets/${theme}-${key}.svg`),
