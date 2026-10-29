@@ -14,6 +14,7 @@
 | 1.1.0 | 已发布 | 2026-10-16 | 首个随本体发行的稳定 API（随 Vsidian 1.1.0 发布）：1.0.0 候选面与候选期增补（粘贴转换组、2026-10 扩展批次）并入本版本；自本发行日起产生兼容承诺，弃用与移除受双移除门槛约束（两个后续 API 次版本且满 30 天）。此前各本体版本携带的候选面不追溯兼容承诺；experimental 实验入口维持候选口径（兼容清单整本台账唯一锚定，见 1.0.0 记录），不随稳定 API 弃用期限承诺。 |
 | 1.2.0 | 已发布 | 2026-10-18 | 兼容性修订（随 Vsidian 1.2.0 发布）：无新增能力面与实验入口。内核 Codex 主题退役（#535/T08）——旧键 appearance.mermaidTheme 不再参与主题首选解析，首选值域收窄为 default \| <addonId>/<themeId>，存量 codex 按未知首选回落 default 显示且首选保留；resolveActiveTheme 对退役 codex 值按目录不命中处理（available=false、effective=default、preferred 保留）；preferredAvailable 收窄为仅 default 恒 true；v1.1.0 公开符号 resolveThemePreferred 双参与 CODEX_THEME_ID 保持编译期兼容并标 @deprecated（弃用与移除受双门槛约束）。 |
 | 1.3.0 | 已发布 | 2026-10-20 | 新增能力与语义澄清（随 Vsidian 1.3.0 发布）：页面 SDK 新增可选只读 locale 面（编辑器页与设置页，#582）；settings.get() 快照新增可选成员 userValues 与 workspaceValues（各作用域层显式保存值，#590）；行为链 IME 组合定稿补驱动上下文 replaced 携带组合覆盖文本（取值范围放宽，类型形状不变，#593）。输入行为驱动语义归一——键入路径与表格空白行首笔规范化的 inputText 一律为原始键入字符（#597、#600），IME 定稿路径内置补全/包裹重建事务退出行为链驱动面（#595）；归一属兼容性修订而非破坏性变更（涉及形态从未载入已发行契约文档）。无新增实验入口。 |
+| 1.4.0 | 已发布 | 2026-10-29 | 语义澄清（随 Vsidian 1.6.0 发布）：行为链驱动的代码上下文排除面收窄为块级（#649）——驱动门控与符号补全的代码上下文口径拆分，排除面为 frontmatter、围栏/缩进代码块与块级 HTML，行内代码内的键入（input.type）与 IME 定稿（input.type.compose）照常驱动恰一次、载荷形态与其他正文键入同构；删除白名单事件（delete.*）同样在行内代码内照常驱动。属兼容性修订而非破坏性变更（「代码上下文不驱动」从未在契约中承诺行内代码不驱动）。无新增能力面与实验入口。 |
 
 **实验入口兼容清单**（使用须在清单 `experimental` 声明对应入口与兼容范围；实验入口可能随版本调整，不随稳定 API 弃用期限承诺）：
 
@@ -141,12 +142,12 @@ export type AddonDeclarationParseResult =
 
 ```ts
 /**
- * 宿主当前稳定 API 版本（`^1.0.0` 语义的基准）。当前 1.3.0；自 1.1.0
+ * 宿主当前稳定 API 版本（`^1.0.0` 语义的基准）。当前 1.4.0；自 1.1.0
  * （2026-10-16）起随 Vsidian 本体发行并产生兼容承诺——附加组件声明的
- * api 范围须包含该版本才判兼容；API 版本独立于 Vsidian 本体版本号，随
+ * api 范围须包含该版本才判兼容；API 版本独立于 Vsidian 本体版本号， 随
  * 携带 API 变更的本体发布同笔升版。
  */
-export const ADDON_API_VERSION = '1.3.0'
+export const ADDON_API_VERSION = '1.4.0'
 
 /** 兼容判定的宿主侧输入 */
 export interface AddonCompatibilityHost {

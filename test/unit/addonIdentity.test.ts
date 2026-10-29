@@ -70,8 +70,8 @@ describe('附加组件身份声明解析', () => {
     expect(ADDON_MANIFEST_FIELD).toBe('vsidianAddon')
     expect(ADDON_IDENTITY_MANIFEST_VERSION).toBe(1)
     // 1.1.0（2026-10-16）随本体发行，首个产生兼容承诺的稳定 API 版本；
-    // 当前 1.3.0（2026-10-20）随本体发行
-    expect(ADDON_API_VERSION).toBe('1.3.0')
+    // 当前 1.4.0（2026-10-29）随本体发行
+    expect(ADDON_API_VERSION).toBe('1.4.0')
     // 官方组件清单：主仓库维护的明确扩展 ID 清单（#463 已登记首个官方组件）
     expect(OFFICIAL_ADDON_EXTENSION_IDS).toEqual(['ONEGAYI.vsidian-easy-typing'])
     expect(isOfficialAddon('anything.else')).toBe(false)

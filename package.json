@@ -3,7 +3,7 @@
   "displayName": "%manifest.displayName%",
   "icon": "media/vsidian-icon-256.png",
   "description": "%manifest.description%",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "publisher": "onegayi",
   "license": "MIT",
   "keywords": [

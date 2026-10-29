@@ -1299,4 +1299,14 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
     // 参考文档按全台账合并呈现。
     experimental: [],
   },
+  {
+    version: '1.4.0',
+    status: 'released',
+    releasedAt: '2026-10-29',
+    summary:
+      '语义澄清（随 Vsidian 1.6.0 发布）：行为链驱动的代码上下文排除面收窄为块级（#649）——驱动门控与符号补全的代码上下文口径拆分，排除面为 frontmatter、围栏/缩进代码块与块级 HTML，行内代码内的键入（input.type）与 IME 定稿（input.type.compose）照常驱动恰一次、载荷形态与其他正文键入同构；删除白名单事件（delete.*）同样在行内代码内照常驱动。属兼容性修订而非破坏性变更（「代码上下文不驱动」从未在契约中承诺行内代码不驱动）。无新增能力面与实验入口。',
+    // 本版本不新增实验入口，既有五个入口的兼容清单保留在 1.0.0 记录，
+    // 参考文档按全台账合并呈现。
+    experimental: [],
+  },
 ]
