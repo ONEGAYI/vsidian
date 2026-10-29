@@ -2234,7 +2234,7 @@
       "category": "content-limits",
       "kind": "limitation",
       "target": ".callout 及其 data 属性",
-      "purpose": "历史限制（#653/T02 起部分解除，#654/T03、#655/T04、#657/T06 逐票收口）：note 与未知类型回落之上，全类型与别名（13 规范类型 + 14 别名 + important 独立变量）、富标题（既有行内格式/链接复用解析与净化）、多层嵌套与列表/引用容器组合的双模式呈现（#653/#654）、折叠状态机与箭头（#655）、CSS 原名变量全量登记（含 --callout-icon 公开自定义：锁版 Lucide ID + 净化 SVG、--callout-blend-mode、border 三件套消费——#657）均已支持，见 callout / var-callout-color 条目。剩余边界如实可查：源文转换与类型菜单（T05）、类型菜单实际配色预览（T07）、悬停/嵌入/PDF 场景的 --callout-icon 注入与收口（T08——当前图标注入覆盖主正文双模式，默认 mask 通道随 CSS 全场景生效）增量交付。",
+      "purpose": "历史限制（#653/T02 起部分解除，#654/T03、#655/T04、#657/T06 逐票收口）：note 与未知类型回落之上，全类型与别名（13 规范类型 + 14 别名 + important 独立变量）、富标题（既有行内格式/链接复用解析与净化）、多层嵌套与列表/引用容器组合的双模式呈现（#653/#654）、折叠状态机与箭头（#655）、CSS 原名变量全量登记（含 --callout-icon 公开自定义：锁版 Lucide ID + 净化 SVG、--callout-blend-mode、border 三件套消费——#657）均已支持，见 callout / var-callout-color 条目。源文转换与三级类型菜单（#656/T05）、类型菜单实际配色预览与逐项分隔（#658/T07）、悬停/嵌入/PDF 场景的 --callout-icon 注入与收口（#659/T08）已随批次交付。",
       "views": [
         "live",
         "reading"
