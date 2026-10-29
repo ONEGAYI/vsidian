@@ -39,6 +39,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | --- | --- |
 | Table editing | Well-formed tables render as an editable grid: in-cell editing, rectangular selection and copy, row/column add, delete and reorder, content-proportional column widths with a font-aware readability floor for short columns, and whole-table height optimization once the caret leaves; arrow keys can stop at either table edge to insert or remove adjacent blank lines; tables inside quotes and lists are supported too |
 | Lists & quotes | Enter continues structure, Backspace peels it off in layers, Tab indents whole lines; nested lists and quotes fully supported |
+| Callouts | Obsidian-style callouts (`> [!note] Title`): 13 built-in types and their aliases render with their own background, icon, and title in live preview and reading view, with rich titles and multi-level nesting; `+` / `-` markers fold per instance, auto-expanding when search, links, or the outline jump into a folded callout; right-click to create, convert, or retype, with a type menu showing live color previews; Obsidian CSS variables (`--callout-color`, etc.) and `--callout-icon` custom icons restyle the look; hover previews, embeds, and PDF export render callouts too |
 | Frontmatter properties | The YAML head renders as a read-only table card; a popover adds, edits, and removes properties, one undo per action |
 
 ### Links & images
