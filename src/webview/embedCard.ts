@@ -45,6 +45,14 @@ import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import { LiveEditorInstance, externalSync } from './liveInstance'
 import { liveEmbedChildCards } from './liveEmbed'
+import { liveDecorationsField } from './liveDecorations'
+import {
+  calloutFoldField,
+  calloutFoldSpansCached,
+  pruneCalloutOverrides,
+  setCalloutFolds,
+  type CalloutFoldOverride,
+} from './calloutFold'
 import { liveDocStyle, liveHtmlDocScope, liveHtmlResourceSource } from './liveHtml'
 import { hubResourcePort } from './htmlResourceHub'
 import { docScopeKeyOf } from '../shared/docStyle'
@@ -898,6 +906,9 @@ export class EmbedCardManager {
         codeHighlight: () => this.context.codeHighlight?.() ?? true,
         onEmbedBlockMounted: (block, target) => this.mountChildBlock(entry!, block, target),
         onEmbedBlockUnmounted: (block) => this.unmountBlock(block),
+        // #659（T08）Reading 侧 callout 折叠翻转 → 内部 Live 在场时同步其
+        // StateField（同实例 Live/阅读共享状态；effect 直驱零写回）
+        onCalloutFoldChanged: (next) => this.pushCalloutFoldsToLive(entry!, next),
       }),
       display: 'loading',
       note: '',
@@ -1088,7 +1099,11 @@ export class EmbedCardManager {
       ...(args.onExplicitCloseCanceled ? { onExplicitCloseCanceled: args.onExplicitCloseCanceled } : {}),
       ...(args.onLiveStateChanged ? { onLiveStateChanged: args.onLiveStateChanged } : {}),
     }
-    const content = entry.content.mount(args.contentMount)
+    const content = entry.content.mount({
+      ...args.contentMount,
+      // #659（T08）浮层根同款注入：Reading 侧折叠翻转同步内部 Live StateField
+      onCalloutFoldChanged: (next) => this.pushCalloutFoldsToLive(entry, next),
+    })
     const handle: EmbedCardHandle = {
       entry,
       instanceId: `hover-root-${++this.seq}`,
@@ -2244,6 +2259,10 @@ export class EmbedCardManager {
             restoreAnchor: true,
           })
           this.locateLiveInstance(entry)
+          // #659（T08）实例会话内的 callout 折叠灌入内部 Live（init 全文
+          // 就绪后——calloutFoldField 对全文替换显式清空，灌入必须在
+          // handleFullSync 之后；同实例 Live/阅读共享状态）
+          this.pushCalloutFoldsToLive(entry, entry.content.calloutFoldOverrides)
           break
         case 'edit.ack':
           if (message.message.ok) {
@@ -2413,6 +2432,25 @@ export class EmbedCardManager {
     }
   }
 
+  /**
+   * #659（T08）callout 折叠状态推送进内部 Live（Reading 翻转与 init 灌入
+   * 共用）：Live 在场时它承载同实例的折叠 StateField——effect 直驱覆盖
+   * 整集（setCalloutFolds，零写回零撤销项）；灌入前按 Live 当前 doc 做
+   * prune（键脱靶/声明改写的记录不带入新文本）。Live 不在场（纯 Reading
+   * 容器或绑定前）静默 no-op——实例 overrides 已是状态源。
+   */
+  private pushCalloutFoldsToLive(entry: EmbedEntry, next: ReadonlyMap<number, CalloutFoldOverride>): void {
+    const view = entry.live?.instance?.getView()
+    if (!view) {
+      return
+    }
+    const spans = calloutFoldSpansCached(
+      view.state.doc,
+      view.state.field(liveDecorationsField, false)?.tree,
+    )
+    setCalloutFolds(view, pruneCalloutOverrides(next, spans))
+  }
+
   /** 销毁目标编辑端口：保存选区（occurrence 会话记忆）→ 销毁实例与图片
    *  管理器 → 出站 unbind → 清内容预算（Reading 重渲染时重新计费）。
    *  P2-10：属该实例的 frontmatter Popover 随实例关闭（浮层单例持有
@@ -2443,6 +2481,16 @@ export class EmbedCardManager {
       const sel = view.state.selection.main
       entry.liveSelection = { anchor: sel.anchor, head: sel.head }
       closeFmPopoverForView(view)
+      // #659（T08）callout 折叠导出回实例（Live 在场期间 field 是状态承载
+      // ——含 Reading 期间经 onCalloutFoldChanged 推入的翻转与 Live 内的
+      // 行级失效清理；切回 Reading 后实例 overrides 是唯一状态源）
+      const folds = view.state.field(calloutFoldField, false)
+      entry.content.calloutFoldOverrides.clear()
+      if (folds) {
+        for (const [key, override] of folds) {
+          entry.content.calloutFoldOverrides.set(key, override)
+        }
+      }
     }
     live.instance?.destroy()
     live.images?.dispose()
@@ -2463,6 +2511,8 @@ export class EmbedCardManager {
         continue
       }
       handle.liveEl.textContent = ''
+      // #659（T08）Reading 侧重装饰消费导出结果（模式往返的开合保持）
+      handle.content.applyCalloutFoldOverrides(entry.content.calloutFoldOverrides)
       this.applyInternalDom(handle)
       this.refreshModeChrome(handle)
     }

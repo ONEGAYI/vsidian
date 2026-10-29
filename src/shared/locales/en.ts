@@ -596,6 +596,12 @@ export const en = {
   'host.gotoLinePlaceholder': 'Enter a source line number, e.g. 42',
   'host.gotoLineInvalid': 'Enter a whole line number between 1 and {total}.',
   'host.gotoLineNoPanel': 'No active Vsidian panel — open the note in Vsidian before jumping to a line.',
+  /** #656 (T05) callout custom type input (host showInputBox — the existing
+   *  input framework; blank/invalid input gets a localized message and never
+   *  writes a half declaration) */
+  'host.calloutTypePrompt': 'Callout type identifier (letters, digits, - or _)',
+  'host.calloutTypePlaceholder': 'e.g. my-note',
+  'host.calloutTypeInvalid': 'Enter a single identifier (letters, digits, - or _) with no spaces.',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
   // #556 T4: targets outside the source root are now rewritten to explicit
   // absolute paths (no longer a skip reason); the only skip reason left is
@@ -1258,6 +1264,31 @@ export const en = {
   // ---- #414（#409 T03）折叠 UI 悬停词（箭头/省略号可访问形态） ----
   'headingfold.fold': 'Fold this section',
   'headingfold.unfold': 'Unfold this section',
+  // ---- #655（T04）Callout 折叠操作与箭头悬停词 ----
+  'command.callout.toggleFold.title': 'Toggle Fold of Current Callout',
+  'calloutfold.fold': 'Collapse this callout',
+  'calloutfold.unfold': 'Expand this callout',
+  // ---- #656（T05）Callout 源文操作：命令标题与三级类型菜单文案 ----
+  'command.callout.insert.title': 'Insert/Convert Callout',
+  'command.callout.changeType.title': 'Change Current Callout Type',
+  'contextMenu.insertCallout': 'Callout',
+  'contextMenu.calloutType': 'Callout Type',
+  'contextMenu.calloutNone': 'No Callout',
+  'contextMenu.calloutCustom': 'Custom…',
+  /** 类型显示名（帮助页口径；规格 §3.2——经字典映射，不在 UI 硬编码） */
+  'callout.type.note': 'Note',
+  'callout.type.abstract': 'Abstract',
+  'callout.type.info': 'Info',
+  'callout.type.todo': 'To Do',
+  'callout.type.tip': 'Tip',
+  'callout.type.success': 'Success',
+  'callout.type.question': 'Question',
+  'callout.type.warning': 'Warning',
+  'callout.type.failure': 'Failure',
+  'callout.type.danger': 'Danger',
+  'callout.type.bug': 'Bug',
+  'callout.type.example': 'Example',
+  'callout.type.quote': 'Quote',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': 'Word segmentation engine',
   'setting.wordSegmentEngine.description': 'Engine used to split continuous CJK text for word-wise Ctrl+Left/Right motion. Latin and digit runs always keep the built-in group semantics.',

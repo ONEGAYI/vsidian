@@ -39,6 +39,7 @@ import { prepareHtmlResources, NESTED_DOC_ROOT_ATTR, type HtmlResourceBinding } 
 import { DocumentStyleBinding } from './docStyleLoader'
 import { docScopeKeyOf } from '../shared/docStyle'
 import { promoteEmbedSlotsInBlock } from './embedSlots'
+import { mountCalloutIcons } from './calloutIconMount'
 import { renderGraphicBlockInto } from './graphicRenderers'
 import { renderMermaidIn } from './mermaidRender'
 import { GRAPHIC_LANG_ATTR, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
@@ -566,7 +567,13 @@ export function mountExportDocument(
     docStyleBindings.push(binding)
   }
 
+  // #659（T08）callout 图标注入：--callout-icon 被片段/文档样式设置时按
+  // T06 同一决策面注入 SVG（默认类型表走 CSS mask 通道不需 JS——PDF 页
+  // 样式快照携带同样的类型表变量，两通道与阅读同源；样式快照在 head，
+  // 计算值读取时序天然就绪）。装配是一次性同步全量，此处一次扫描即可；
+  // 须在容器进 DOM 后（computed 值读取要求元素在文档树内级联可达）。
   appRoot.appendChild(reading)
+  mountCalloutIcons(reading)
 
   const allImageSlots = (): HTMLImageElement[] =>
     Array.from(reading.querySelectorAll<HTMLImageElement>(`img[${IMG_STATE_ATTR}]`))

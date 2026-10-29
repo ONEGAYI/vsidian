@@ -100,6 +100,9 @@
 | 分隔线 | `horizontalRule` | `horizontalRule` |
 | 代码块 | `codeBlock` | `codeBlock` |
 | 数学块 | `blockMath` | `blockMath` |
+| **Callout ▸**（#656/T05，三级） | `calloutInsert`（父项；叶项 `calloutType:<id>`） | `callout` |
+
+**Callout 三级子菜单（#656/T05 落档）**：「插入 → Callout → 类型」是内置菜单「最深两级」边界的**唯一扩容**（规格 [callout.md](callout.md) §7 授权，仅本类型路径）。第三级按「无 Callout｜13 规范类型（注册表序，别名不重复排列）｜自定义…」三组组织（组边界线沿既有机制自然形成）；类型项 `checked` 按语法归类点亮（别名归目标类型——`cite` 点亮 quote；未知自定义类型回落条目 `knownType=false` 不点亮任何内置项，经「自定义…」修改），「无 Callout」在普通正文为勾选当前态且执行零操作（不置灰——规格 §6.2「选择此项不修改文件」）；叶项不设 enable（结构敏感区由插入父项的 `enabledOutsideStructure` 传播整簇置灰，安全矩阵不破例）。**Live 标题右键**的「Callout 类型 ▸」子菜单（`calloutOps` 组，预登记于链接簇之前——右键命中的上下文动作排首）与插入路径**共享同一类型列表描述符对象**（同 id 同对象，覆写层语义一致生效）与同一执行通道（`runCalloutTypeMenuCommand` → `applyCalloutTypeAt`，命中位置定目标不破坏选区）；`when` = 命中 callout 标题行（快照 `CalloutMenuHit.hitTitleLine`）。执行语义、自定义输入与键位入口见规格 [callout.md](callout.md) §6。**#658（T07）起类型页逐项分隔与取色预览落地**：两个父描述符携带 `itemSeparators: true`（DOM 装配在该子菜单内以相邻可见项各一条分隔线**替代**组边界线——三组组织的组线由逐项线覆盖，首尾无孤线、隐藏/置灰不产生重复线，分隔线 role=presentation 不进键盘焦点序列；仅该两处子菜单启用，其他子菜单仍按组边界）；每行预览槽（`-swatch` 族，公开契约 context-menu 条目）经隐藏探针读当前文档/主题/片段下的有效色内联注入（取色方法与边界见规格 §7 与 `src/webview/calloutMenuPreview.ts` 头注——菜单 DOM 零 `.callout` 类名，不冒充正文上下文），叶项仍无 `iconKey` 图标位。
 
 **媒体 ▸ 不出现**（嵌入类未定档；图标 `media` 备用生成）。
 
@@ -193,7 +196,7 @@ T10 落地形态：附加组件经页面 SDK `menus.registerItem`（仅编辑器
 
 生成流程按项目技能 `ai-icon-sheet-to-svg`（Codex 专属，ZCode 侧只产出本清单；key 接入 `scripts/quick-action-icons.py` 的 `KEYS`，风格对齐现有 17 枚快速操作图标：单色极简线稿、明暗两套主题色、18px 可读）。
 
-**复用现有资产（16 枚，零新增）**：`link`、`bold`、`italic`、`strikethrough`、`highlight`、`inlineCode`、`inlineMath`、`clearInline`、`bulletList`、`orderedList`、`taskList`、`quote`、`table`、`horizontalRule`、`codeBlock`、`blockMath`（其中 `link` 同时服务簇 1 三处）。
+**复用现有资产（16 枚，零新增）**：`link`、`bold`、`italic`、`strikethrough`、`highlight`、`inlineCode`、`inlineMath`、`clearInline`、`bulletList`、`orderedList`、`taskList`、`quote`、`table`、`horizontalRule`、`codeBlock`、`blockMath`（其中 `link` 同时服务簇 1 三处）。备用 key `callout` 已于 #656/T05 随三级菜单转正接线（两表同步 41 枚）。
 
 **需 AI 新生成（14 枚）**：
 
@@ -212,7 +215,7 @@ T10 落地形态：附加组件经页面 SDK `menus.registerItem`（仅编辑器
 | `pastePlain` | 剪贴板带字母 T | #305 接线：粘贴纯文本 |
 | `media` | 胶片 | 备用（嵌入类未定档） |
 | `footnote` | 页面带笔 | 备用（脚注未定档） |
-| `callout` | 引号块 | 备用（callout 属二期清单） |
+| `callout` | 引号块 | #656/T05 已接线（三级类型菜单与标题右键子菜单） |
 
 不生成：`database`（Obsidian Bases，明确用不上）。H1–H6 用文字徽标，不经生图。
 
@@ -237,5 +240,6 @@ T10 落地形态：附加组件经页面 SDK `menus.registerItem`（仅编辑器
 
 1. **两表同步**：菜单项注册表新增带图标位的条目时，图标 key 必须已在图标 key 表（`quick-action-icons.py` `KEYS`）登记——接线项不得引用未生成 key；备用图标（`media` / `footnote` / `callout`）在表中登记但菜单不引用，属显式记账。#305 已将既有 `pastePlain` 资产接入纯文本粘贴项。#437 起场景簇按 S6 决策允许「两表同步登记即合规」，资产可后补（渲染层无规则时留空降级）。#441 已收口表格簇 10 枚与图形簇 3 枚的临时缺口：40 个描述符引用 key 全部有明暗两套 SVG 与 CSS 规则，`contextMenu.test.ts` 不再跳过任何已引用 key；生成、语义与裁切记录见 [菜单场景资产记录](../../media/quick-actions/menu-scenes-ai-prompt.md)。
 2. **三步接入清单**：①描述符登记（含 `when` / `enable` 显式声明，安全降级矩阵不得因新项破例）→ ②图标 key 接入 → ③语言包双写 + 契约测试钉住。三步缺一不可合入。
-3. **既有边界不得顺手放宽**：阅读模式不接管、frontmatter 头区不接管、内置项不可删只可隐藏、菜单提示列数据只派生自键位注册表（剪切/复制/全选固定提示除外；#305 粘贴两项已纳入注册表）、内置菜单最深两级。
+3. **既有边界不得顺手放宽**：阅读模式不接管、frontmatter 头区不接管、内置项不可删只可隐藏、菜单提示列数据只派生自键位注册表（剪切/复制/全选固定提示除外；#305 粘贴两项已纳入注册表）、内置菜单最深两级——**唯一例外是 Callout 类型路径的三级**（#656/T05 按规格 callout.md §7 授权扩容，内核 children 结构与 DOM/键盘装配本就递归支持任意深度；新增第三级须规格层先授权登记，不得循例）。
 4. **覆写层兼容承诺**：覆写语义（后注册胜、隐藏不删、来源记录）是对「插件叠插件」的第一个稳定面，破坏性变更需先出弃用声明。
+5. **子菜单分隔线两模式（#658/T07 落档）**：子菜单分隔线默认按**组边界**产出（`sortMenuDefsByGroup` 聚组 + DOM 组界线）；父描述符 `itemSeparators: true` 切换为**相邻可见项各一条**（Callout 类型页唯一消费方——同色类型也要有清晰边界）。新增逐项分隔的子菜单须规格层授权并在本档登记，不得循例铺开到其他菜单。

@@ -32,6 +32,7 @@ import { tableCellBreakLength } from '../shared/tableCells'
 import { decodeCellView } from '../shared/tableCellEmbed'
 import { matchInlineHtmlFragmentAt } from '../shared/htmlInline'
 import { htmlInlineRenderHtml, IFRAME_APPROVED_ATTR } from './htmlSanitize'
+import { calloutDefaultTitle, parseCalloutDecl } from '../shared/calloutSyntax'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
 export interface ReadingRenderEnv {
@@ -408,6 +409,117 @@ function embedSlotHtml(inner: string): string {
 }
 
 /**
+ * Callout token 变换（#653/T02）：core 'inline' 阶段后扫描 token 流，把
+ * 「直属首段首行命中声明」的 blockquote 变换为 Obsidian 阅读侧 DOM 结构
+ * （div.callout[data-callout] > div.callout-title(.callout-icon +
+ * .callout-title-inner) + div.callout-content——严格父子容器选择器仅在
+ * 阅读侧承诺，T01 §6.1 矩阵）。识别输入 = 首段 inline content 的首行
+ * （markdown-it 已剥引用前缀，与 Live 侧「段起点→行尾」子串同源——识别
+ * 器共用 shared/calloutSyntax，两端不各写规则）；嵌套逐层独立判定（内层
+ * blockquote_open 在流中同样被扫描）。tag 由 blockquote 改 div：阅读引用
+ * 紫条规则选择 blockquote 标签，改形后天然不再命中（callout 替代该层
+ * 紫条，T01 边界 3）；内部普通引用保持 blockquote 标签照常呈现。
+ * 折叠箭头（.callout-fold）与 is-collapsible/is-collapsed 归 T04。
+ */
+function installCalloutTransform(md: InstanceType<typeof MarkdownIt>): void {
+  md.core.ruler.after('inline', 'vsidian_callout', (state) => {
+    const tokens = state.tokens
+    for (let i = 0; i < tokens.length; i++) {
+      const open = tokens[i]!
+      if (open.type !== 'blockquote_open' || open.hidden) {
+        continue
+      }
+      // 直属首段：blockquote_open 紧随的首个子块须为段落（嵌套引用的
+      // blockquote_open 紧跟时非直属首段——其首段归属内层判定）
+      if (tokens[i + 1]?.type !== 'paragraph_open') {
+        continue
+      }
+      const inlineTok = tokens[i + 2]
+      if (!inlineTok || inlineTok.type !== 'inline') {
+        continue
+      }
+      const content = inlineTok.content
+      const nl = content.indexOf('\n')
+      const decl = parseCalloutDecl(nl < 0 ? content : content.slice(0, nl))
+      if (!decl) {
+        continue
+      }
+      // 配对 close（nesting 归零处）
+      let depth = 0
+      let closeIdx = i
+      for (; closeIdx < tokens.length; closeIdx++) {
+        depth += tokens[closeIdx]!.nesting
+        if (depth === 0) {
+          break
+        }
+      }
+      if (closeIdx >= tokens.length) {
+        continue
+      }
+      // 容器改形：blockquote → div.callout（attrs 经默认 renderToken 输出）
+      open.tag = 'div'
+      open.attrs = [['class', 'callout'], ['data-callout', decl.type]]
+      // 源锚点（#655/T04 评审修复 P2，li 的 data-vsidian-src-start 同款
+      // 机制）：值 = 标题行行首偏移（全文 doc 坐标）= 折叠键 span.key——
+      // 阅读装饰期按键位精确匹配容器，废除按序 zip（不可折叠 callout 无
+      // 折叠记录但同样渲染容器，按序配对会错挂箭头与状态类）。行界表或
+      // map 缺失（防御）不挂属性，装饰期不匹配即零装饰不崩溃。
+      const bounds = state.env as unknown as ReadingRenderEnv | undefined
+      if (bounds && Array.isArray(bounds.lineStarts) && open.map) {
+        const base = typeof bounds.baseLine === 'number' ? bounds.baseLine : 0
+        const key = bounds.lineStarts[open.map[0]! + base]
+        if (typeof key === 'number') {
+          open.attrs.push(['data-vsidian-src-start', String(key)])
+        }
+      }
+      tokens[closeIdx]!.tag = 'div'
+      // 标题 token（content = 显式标题的行内源文；空 = 渲染期派生默认标题）
+      const title = new state.Token('vsidian_callout_title', '', 0)
+      title.content = decl.title ?? ''
+      title.meta = { calloutType: decl.type }
+      // 正文包裹 token（默认 renderToken 按 tag/attrs 渲染 div.callout-content）
+      const contentOpen = new state.Token('vsidian_callout_content_open', 'div', 1)
+      contentOpen.attrs = [['class', 'callout-content']]
+      const contentClose = new state.Token('vsidian_callout_content_close', 'div', -1)
+      // 首段剩余（lazy 续行，标记后各行的同段内容）保留为正文段；无剩余
+      // 则整段移除（标题独占首行，content 内不残留空段落）
+      const rest = nl < 0 ? '' : content.slice(nl + 1)
+      if (rest.trim() === '') {
+        tokens.splice(i + 1, 3, title, contentOpen)
+        closeIdx -= 1 // +2 插入 -3 删除
+      } else {
+        inlineTok.content = rest
+        inlineTok.children = []
+        md.inline.parse(rest, md, state.env, inlineTok.children)
+        tokens.splice(i + 1, 0, title, contentOpen)
+        closeIdx += 2
+      }
+      tokens.splice(closeIdx, 0, contentClose)
+      i = i + 2 // 跳过已插入的 title/contentOpen（内层容器随后照常扫描）
+    }
+  })
+  // 标题渲染：真实 .callout-title 子树（icon + inner）；显式标题经行内
+  // 渲染（复用既有规则与净化链——文本 token 自动转义），无显式标题按
+  // 源文派生默认标题（Obsidian 口径，不写回源文）
+  md.renderer.rules['vsidian_callout_title'] = (tokens, idx, options, env, self) => {
+    const token = tokens[idx]!
+    const calloutType = (token.meta?.calloutType as string | undefined) ?? ''
+    let inner: string
+    if (token.content === '') {
+      inner = escapeHtml(calloutDefaultTitle(calloutType))
+    } else {
+      const children: Token[] = []
+      md.inline.parse(token.content, md, env as unknown as Env, children)
+      inner = self.renderInline(children, options, env)
+    }
+    return (
+      `<div class="callout-title"><div class="callout-icon"></div>` +
+      `<div class="callout-title-inner">${inner}</div></div>\n`
+    )
+  }
+}
+
+/**
  * 创建阅读渲染器（安全配置锁定；渲染规则一次性装配，实例应复用）。
  * 安全锁定的边界（#423 重协商；#567/T02 块级、#568/T03 行内接入改版）：
  * - **html:true（#567）**：markdown-it 在 html:false 下完全不产 html_block
@@ -502,6 +614,8 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
   }
   // #60 Mermaid：fence 规则覆盖为容器输出（挂载后经 DOM API 渲染 SVG）
   installMermaidFenceRenderer(md)
+  // #653/T02 Callout：blockquote 直属首段命中声明 → .callout 容器家族
+  installCalloutTransform(md)
   // 编辑态把格内回车存成 br。阅读态只在表格 inline token 里重新解析
   // 无属性 br；#567 起 html:true 下其余 HTML 经 html_inline 渲染覆盖转义
   // （含格内重解析产物——全局字面，代码片段由解析器保留字面值）。

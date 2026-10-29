@@ -71,7 +71,37 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 三期 #343 合入列：webPageView（外链原网页形态——受控可嵌入站点真实
 // iframe 内容可见与滚轮滚动、退回矩阵、恶意子页消息注入丢弃、设置联动
 // 销毁）紧随 webLinkCard（同外链悬停族）。
-const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
+const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 'quoteBarPaint',
+  // #653 合入列：calloutPaint（note/未知类型双模式绘制层——标记显隐、
+  // 输入外框保留、拖选、明暗双通道底色、普通引用不回归）紧随 quoteBarPaint
+  // （同引用族渲染与样式侧套件）。
+  'calloutPaint',
+  // #654（T03）合入列：calloutTypes（全类型/别名明暗绘制与图标 mask、
+  // 三层嵌套与列表容器组合、列表内 callout 真实输入/拖选——T01 报告 §10
+  // 声明的编辑态缺口）紧随 calloutPaint（同 callout 族）。
+  'calloutTypes',
+  // #655（T04）合入列：calloutFold（按实例折叠状态机——真实点击/键位/
+  // 命令三入口、光标迁移、模式往返共享、阅读重挂、查找双重折叠展开、
+  // IME 组合不中断、零写回）。紧随 callout 族。
+  'calloutFold',
+  // #656（T05）合入列：calloutPlan（源文转换操作——三级类型菜单真实
+  // 点击/键盘路径、取消零编辑、自定义输入宿主往返、低高度滚动可达、
+  // 嵌套最内层改类型、一步撤销的出站面）。紧随 callout 族。
+  'calloutPlan',
+  // #657（T06）合入列：calloutIcon（--callout-icon 公开自定义——锁版
+  // Lucide ID/净化 SVG 注入、非法值诊断、真实片段通道热更新、明暗主题、
+  // 容器变量 border/blend、模式往返与视口重挂）。紧随 callout 族。
+  'calloutIcon',
+  // #658（T07）合入列：calloutMenu（类型菜单取色预览——隐藏探针与正文
+  // 呈现对拍、同色相邻类型逐项分隔线、片段热更新/主题翻转即时刷新、
+  // 键盘导航分隔线不入焦点序列、低高度滚动、探针零泄漏）。紧随 callout 族。
+  'calloutMenu',
+  // #659（T08）合入列：calloutRefEmbed（引用实例侧——Reading 嵌入卡
+  // callout 呈现/默认收起绘制、真实点击展开、相邻同文件实例独立、
+  // Live↔Reading 折叠往返共享、编辑器资源回基线、片段 --callout-icon
+  // 注入真实绘制）。紧随 callout 族。
+  'calloutRefEmbed',
+  'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 

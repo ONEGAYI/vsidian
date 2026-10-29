@@ -18,6 +18,7 @@ import {
 import { prepareHtmlResources, type HtmlResourceBinding, type HtmlResourceSubscribe } from './htmlResourceMount'
 import { READING_CLASS_NAMES } from './readingView'
 import { renderGraphicBlockInto } from './graphicRenderers'
+import { scheduleCalloutIconResolve } from './calloutIconMount'
 import { decorateReadingCodeCard, isReadingCodeBlock } from './readingCodeCard'
 import { buildFrontmatterHeaderHtml, escapeHtml } from '../shared/frontmatterTable'
 import { t } from '../shared/i18n'
@@ -127,6 +128,15 @@ export function mountRefContentBlock(
     ...(opts.docScope !== undefined ? { docScope: opts.docScope } : {}),
   })
   opts.onDispose?.(() => binding.dispose())
+  // #659（T08）callout 图标解析（T06 触发面在引用块挂载的接线）：挂载
+  // 时机经 rAF 解析 computed --callout-icon 并按决策注入/复位——虚拟化
+  // 的 mountBlock 建块时是游离节点（onBlockMounted 先于 reorderChildren
+  // 入位，同步读 computed 拿不到片段/类型表值），Live widget 的
+  // scheduleCalloutIconResolve 同款「插入完成后下一帧」时机；回收重挂
+  // 天然重解析，注入的 SVG 随块 DOM 卸载自然释放（无监听器/观察器资源）
+  for (const icon of el.querySelectorAll('.callout-icon')) {
+    scheduleCalloutIconResolve(icon)
+  }
   renderGraphicBlockInto(el)
   // #220 代码高亮：朴素形态（card=false——无头部/行号/按钮；token span
   // 直接注入 code）。卡片工具条不进引用内容：复制按钮的会话语义

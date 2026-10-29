@@ -1,0 +1,63 @@
+{
+ "purpose": "Obsidian 默认主题 callout 事实表（T01 取证）。来源：本机 Obsidian 1.14.4 安装（D:/APP/_ForWork/Obsidian/resources/obsidian.asar 内 app.css，668223 字节，提取件留存 .scratch/callout/obsidian-1.14.4-app.css 不入库）；帮助页与开发者文档另见报告引用。",
+ "source": {
+  "product": "Obsidian desktop 1.14.4",
+  "extractedFrom": "obsidian.asar!app.css",
+  "extractedAt": "2026-10-28"
+ },
+ "baseVariables": {
+  "--callout-border-width": "0px",
+  "--callout-border-opacity": "0.25",
+  "--callout-padding": "var(--size-4-3) var(--size-4-3) var(--size-4-3) var(--size-4-6) = 12px 12px 12px 24px",
+  "--callout-radius": "var(--radius-s) = 4px",
+  "--callout-blend-mode": "var(--highlight-mix-blend-mode)（亮 darken / 暗 lighten）",
+  "--callout-title-color": "inherit",
+  "--callout-title-padding": "0",
+  "--callout-title-size": "inherit",
+  "--callout-title-weight": "calc(var(--font-weight) + var(--bold-modifier)) = 基础字重+200",
+  "--callout-content-padding": "0",
+  "--callout-content-background": "transparent"
+ },
+ "typeVariables": {
+  "--callout-default": "note → --color-blue（亮 #086ddd / 暗 #027aff）",
+  "--callout-summary": "abstract|summary|tldr → --color-cyan（亮 #00bfbc / 暗 #53dfdd）",
+  "--callout-info": "info → --color-blue",
+  "--callout-todo": "todo → --color-blue",
+  "--callout-tip": "tip|hint → --color-cyan",
+  "--callout-important": "important（独立变量，图标 lucide-flame 与 tip 同）→ --color-cyan",
+  "--callout-success": "success|check|done → --color-green（亮 #08b94e / 暗 #44cf6e）",
+  "--callout-question": "question|help|faq → --color-orange（亮 #ec7500 / 暗 #e9973f）",
+  "--callout-warning": "warning|caution|attention → --color-orange",
+  "--callout-fail": "failure|fail|missing → --color-red（亮 #e93147 / 暗 #fb464c）",
+  "--callout-error": "danger|error → --color-red",
+  "--callout-bug": "bug → --color-red",
+  "--callout-example": "example → --color-purple（亮 #7852ee / 暗 #a882ff）",
+  "--callout-quote": "quote|cite → 固定 #9e9e9e（非调色板引用）"
+ },
+ "icons": {
+  "note": "lucide-pencil",
+  "abstract": "lucide-clipboard-list",
+  "info": "lucide-info",
+  "todo": "lucide-check-circle-2",
+  "important": "lucide-flame",
+  "tip": "lucide-flame",
+  "success": "lucide-check",
+  "question": "help-circle（原文无 lucide- 前缀，app.css 照录）",
+  "warning": "lucide-alert-triangle",
+  "failure": "lucide-x",
+  "danger": "lucide-zap",
+  "bug": "lucide-bug",
+  "example": "lucide-list",
+  "quote": "quote-glyph（内部图标名，非 lucide）"
+ },
+ "aliasDiscrepancy": {
+  "helpPage": "important 列为 tip 的别名（obsidian-help master，2026-10-28 读取）",
+  "cssDoc": "app.css 给 important 独立变量 --callout-important（值=cyan，与 tip 相同）；开发者文档 CSS 变量页同样列 --callout-important",
+  "conclusion": "语法别名归属 tip（帮助页口径），CSS 变量面独立——两者并存不矛盾；vsidian 需按“识别归类 tip 别名 + 变量独立 --callout-important”分别登记"
+ },
+ "domStructure": {
+  "reading": "AST 变换器产 div.callout > div.callout-title(div.callout-icon + div.callout-title-inner) + div.callout-content；data-callout-fold=+/- 时挂 is-collapsible，收起双挂 is-collapsed（callout 根与 fold 元素）；标题默认派生 = type.trim().replace(/-/g,\" \").toLowerCase() 首字母大写",
+  "live": "整块 block replace widget（类名 cm-callout，widget 持源文 text，estimatedHeight=行数×默认行高）；光标/选区触及区间 [G,K] 时 widget 不发射 → 整块回源为 HyperMD-quote 行（app.css 无 .HyperMD-callout 行级类；.cm-callout 仅 widget 类）。即 Obsidian 自己也不满足“编辑正文保留外框”——其编辑态只有引用行样式",
+  "blockDecorationRule": "widget 经 Decoration.replace({widget, side:1, block:true}) 挂出；实例跨构建复用（setPos 更新区间）"
+ }
+}

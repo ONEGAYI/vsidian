@@ -140,10 +140,15 @@ vsidian/
 │   │   ├── 597-plan3-probe.md                     # #597 键入路径形态归一验证报告
 │   │   ├── addon-csp-dynamic-eval-probe.md        # 动态代码 CSP 探针报告
 │   │   ├── addon-fold-capability-probe.md         # 折叠能力载体盘点探针
+│   │   ├── callout-t01-live-container-probe.md    # T01 Callout 容器探针报告
 │   │   ├── data/                                  # 探针证据数据目录
 │   │   │   ├── addon-v02-probe-results.json                  # V02 探针证据数据
 │   │   │   ├── appearance-probe-dark-custom.json             # 外观探针暗色轮证据
 │   │   │   ├── appearance-probe-light-default.json           # 外观探针亮色轮证据
+│   │   │   ├── callout-t01/                                  # T01 探针证据数据
+│   │   │   │   ├── obsidian-1144-callout-defaults.json # Obsidian 1.14.4 事实表
+│   │   │   │   ├── probe-evidence.json                 # T01 浏览器探针结果数据
+│   │   │   │   └── syntax-parity.json                  # T01 两端语法对拍夹具与结果
 │   │   │   ├── html-css-scope-probe-b2-evidence.png          # 探针b2获选路线视觉取证截图
 │   │   │   ├── html-css-scope-probe-browser-chromium151.json # 探针浏览器Chromium151证据数据
 │   │   │   ├── html-css-scope-probe-host-1.82.3.json         # 探针宿主1.82.3证据数据

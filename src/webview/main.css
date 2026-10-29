@@ -105,6 +105,107 @@ body {
      #7c3aed（深紫，白底可辨）；背景底维持 VSCode 灰调变量（仅竖条换色）。
      视觉验收微调色值后须同步写回规格初值（blockquote-accent-bar.md） */
   --vsidian-quote-bar-color: #a78bfa;
+  /* ---- #653/T02 Callout（#654/T03 全类型）：公开契约类名与变量直接
+     用 Obsidian 原名（.callout 家族 + --callout-* 族即用户片段书写入口，
+     类名即别名——别名桥不适用）。默认值取 Obsidian 1.14.4 默认主题取证
+     （docs/research/data/callout-t01/obsidian-1144-callout-defaults.json）：
+     每类型变量引调色板（暗色轮 blue #027aff / cyan #53dfdd / green
+     #44cf6e / orange #e9973f / red #fb464c / purple #a882ff）、radius 4px、
+     边框宽 0、内容底透明；--callout-quote 固定 #9e9e9e 不走调色板；
+     important 独立变量（值同 cyan，取证 aliasDiscrepancy）。变量名按
+     app.css 形态：abstract→summary / failure→fail / danger→error。
+     类型清单与 src/shared/calloutSyntax.ts CALLOUT_TYPES 同步（契约测试
+     calloutCssContract 钉住）---- */
+  --callout-radius: 4px;
+  --callout-border-width: 0px;
+  --callout-border-opacity: 0.25;
+  --callout-padding: 12px 12px 12px 24px;
+  --callout-blend-mode: lighten;
+  --callout-title-color: inherit;
+  --callout-title-weight: 600;
+  --callout-title-size: inherit;
+  --callout-title-padding: 0;
+  --callout-content-padding: 0;
+  --callout-content-background: transparent;
+  --callout-default: #027aff;
+  --callout-color: var(--callout-default);
+  --callout-summary: #53dfdd;
+  --callout-info: #027aff;
+  --callout-todo: #027aff;
+  --callout-tip: #53dfdd;
+  --callout-important: #53dfdd;
+  --callout-success: #44cf6e;
+  --callout-question: #e9973f;
+  --callout-warning: #e9973f;
+  --callout-fail: #fb464c;
+  --callout-error: #fb464c;
+  --callout-bug: #fb464c;
+  --callout-example: #a882ff;
+  --callout-quote: #9e9e9e;
+}
+
+/* 类型变量表（#653/T02 建，#654/T03 全类型）：:where() 零特异性承载——
+   行元素不得携带内联 style 变量（T01 边界 1：内联会压死一切用户片段
+   覆盖）。颜色变量按 app.css 取证分组（别名共用所属规范类型的变量），
+   important 变量独立成规则（值同 cyan——取证 aliasDiscrepancy：帮助页归
+   tip 别名、CSS 变量面独立，两者并存）。未知类型无规则即回落
+   --callout-default（note 外观回落、原标识仍暴露在 data-callout 上供
+   自定义 CSS 命中）。注意选择器刻意不写 #app 前缀（保持零特异性），
+   作用域由使用处限定。清单与 CALLOUT_TYPES 同步（契约测试钉住） */
+:where([data-callout='note']) {
+  --callout-color: var(--callout-default);
+}
+
+:where([data-callout='abstract'], [data-callout='summary'], [data-callout='tldr']) {
+  --callout-color: var(--callout-summary);
+}
+
+:where([data-callout='info']) {
+  --callout-color: var(--callout-info);
+}
+
+:where([data-callout='todo']) {
+  --callout-color: var(--callout-todo);
+}
+
+:where([data-callout='tip'], [data-callout='hint']) {
+  --callout-color: var(--callout-tip);
+}
+
+:where([data-callout='important']) {
+  --callout-color: var(--callout-important);
+}
+
+:where([data-callout='success'], [data-callout='check'], [data-callout='done']) {
+  --callout-color: var(--callout-success);
+}
+
+:where([data-callout='question'], [data-callout='help'], [data-callout='faq']) {
+  --callout-color: var(--callout-question);
+}
+
+:where([data-callout='warning'], [data-callout='caution'], [data-callout='attention']) {
+  --callout-color: var(--callout-warning);
+}
+
+:where([data-callout='failure'], [data-callout='fail'], [data-callout='missing']) {
+  --callout-color: var(--callout-fail);
+}
+
+:where([data-callout='danger'], [data-callout='error']) {
+  --callout-color: var(--callout-error);
+}
+
+:where([data-callout='bug']) {
+  --callout-color: var(--callout-bug);
+}
+
+:where([data-callout='example']) {
+  --callout-color: var(--callout-example);
+}
+
+:where([data-callout='quote'], [data-callout='cite']) {
+  --callout-color: var(--callout-quote);
 }
 
 /* #105 浅色主题高亮覆盖：白底上提高浓度与饱和度保证目视可辨 */
@@ -112,6 +213,25 @@ body {
 body.vscode-light #app {
   --vsidian-highlight-background: var(--text-highlight-bg, #ffe066);
   --vsidian-quote-bar-color: #7c3aed;
+  /* #653/T02 Callout 亮色档（#654/T03 全类型）：取证亮值 blue #086ddd /
+     cyan #00bfbc / green #08b94e / orange #ec7500 / red #e93147 /
+     purple #7852ee；quote 固定 #9e9e9e 不做亮色覆盖。
+     #657/T06 blend 亮色档：取证 --callout-blend-mode 引
+     --highlight-mix-blend-mode（亮 darken / 暗 lighten） */
+  --callout-blend-mode: darken;
+  --callout-default: #086ddd;
+  --callout-summary: #00bfbc;
+  --callout-info: #086ddd;
+  --callout-todo: #086ddd;
+  --callout-tip: #00bfbc;
+  --callout-important: #00bfbc;
+  --callout-success: #08b94e;
+  --callout-question: #ec7500;
+  --callout-warning: #ec7500;
+  --callout-fail: #e93147;
+  --callout-error: #e93147;
+  --callout-bug: #e93147;
+  --callout-example: #7852ee;
 }
 
 #app .cm-editor {
@@ -1868,6 +1988,10 @@ body.vscode-high-contrast #app {
   z-index: 40;
   min-width: 220px;
   max-width: calc(100vw - 8px);
+  /* #656（T05）低高度滚动可达：顶级菜单自身溢出视口时可滚（与子菜单
+     同款视口封顶边距 16px——正常视口菜单不超高，零影响） */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   box-sizing: border-box;
   padding: 4px;
   background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));
@@ -1956,6 +2080,73 @@ body.vscode-high-contrast #app {
   mask-size: contain;
 }
 
+/* ---- #658（T07）Callout 类型页取色预览槽：隐藏探针（#app 内、双正文
+   作用域祖先 + 文档样式身份）读计算值，经内联变量注入菜单行——菜单挂
+   body（不在 #app 内）不继承 --callout-*，这里内联的是「当前文档/主题/
+   片段下的有效值」，色底表达式与正文行级/阅读容器同款复制（标准色走
+   渐变、RGB 三元组走 background-color，互斥语义与正文一致）；圆角默认
+   取菜单条目档位 4px，尊重探针透传的 --callout-radius 定制 ---- */
+.vsidian-context-menu .vsidian-context-menu-swatch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 16px;
+  border-radius: var(--vsidian-callout-menu-radius, 4px);
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* 无 Callout 行：普通引用呈现（引用底色变量族 + 紫条 inset——与正文
+   引用行同款消费；竖条色经探针内联透传，菜单在 #app 外不继承该变量） */
+.vsidian-context-menu .vsidian-context-menu-swatch-quote {
+  background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
+  background-image: none;
+  box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color, #a78bfa);
+}
+
+/* 自定义输入行：透明占位（保列对齐，不伪装固定类型——菜单语义） */
+.vsidian-context-menu .vsidian-context-menu-swatch-placeholder {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+/* 预览槽图标位：mask 通道（形状/颜色均为正文图标计算值的内联复制） */
+.vsidian-context-menu .vsidian-context-menu-swatch-icon {
+  width: 12px;
+  height: 12px;
+  background-color: var(--vsidian-callout-menu-icon-color, transparent);
+  -webkit-mask-image: var(--vsidian-callout-menu-icon-mask);
+  mask-image: var(--vsidian-callout-menu-icon-mask);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* 自定义图标注入态（calloutIconMount 同款语义）：关 mask/底色，
+   currentColor 随类型色（--callout-color 内联在槽上；三元组形态按 unset
+   降级继承——与正文非背景通道的实测边界一致） */
+.vsidian-context-menu .vsidian-context-menu-swatch-icon.vsidian-context-menu-swatch-icon-custom {
+  -webkit-mask-image: none;
+  mask-image: none;
+  background-color: transparent;
+  color: var(--callout-color);
+}
+
+.vsidian-context-menu .vsidian-context-menu-swatch-icon.vsidian-context-menu-swatch-icon-custom svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* #441 图标接线（40 枚，含表格 10 枚与图形块 3 枚）：菜单挂 body
    （不在 #app 内），规则不带 #app 前缀；两套资源与快速操作条同一 18px
    画布资产族，mask 跟随前景色。备用 3 key（media/footnote/callout）
@@ -2002,6 +2193,9 @@ body.vscode-high-contrast #app {
 .vsidian-context-menu [data-icon='popupPreview'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-popupPreview.svg'); }
 .vsidian-context-menu [data-icon='exportSvg'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-exportSvg.svg'); }
 .vsidian-context-menu [data-icon='exportPng'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-exportPng.svg'); }
+/* #656（T05）Callout 菜单接线：备用资产转正（此前登记不引用——两表同步
+   约定的显式记账位，本票起菜单引用） */
+.vsidian-context-menu [data-icon='callout'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-callout.svg'); }
 
 body.vscode-dark .vsidian-context-menu [data-icon='link'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-link.svg'); }
@@ -2083,6 +2277,8 @@ body.vscode-dark .vsidian-context-menu [data-icon='exportSvg'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='exportSvg'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-exportSvg.svg'); }
 body.vscode-dark .vsidian-context-menu [data-icon='exportPng'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-exportPng.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='callout'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-callout.svg'); }
 
 /* 文字徽标（H1–H6）：语言无关的字面，弱化一档与文案区分 */
 .vsidian-context-menu .vsidian-context-menu-badge {
@@ -2140,6 +2336,15 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
 .vsidian-context-menu .vsidian-context-menu-submenu.vsidian-menu-flip {
   left: auto;
   right: 100%;
+}
+
+/* #656（T05）三级类型列表（15 项）低高度滚动可达：子菜单沿视口高度封顶
+   并内滚（顶级菜单定位已有底部上翻 clamp；子菜单 top 对齐父项、无法整体
+   上翻，超过视口时必须可滚——键盘焦点跟随由浏览器滚动锚定）。对齐既有
+   定位口径的边距 8px（max-width calc(100vw - 8px) 同族取值，不发明新档） */
+.vsidian-context-menu .vsidian-context-menu-submenu {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
 /* 重命名行内编辑态：条目内容区被 input 替换（原文可含行内标记）。
@@ -2248,6 +2453,189 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='exportPng'] { --vsid
      同款取舍） */
   padding-left: calc(0.9em + 3px);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
+}
+
+/* ---- #653/T02 Callout 行级形态（T01 路线 A）：容器视觉逐行同规则绘制。
+   quiet 类由最内层引用层判定挂（嵌套普通引用行不挂——紫条照画，自身
+   样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃 RGB 三元组片段、
+   渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效透明、渐变绘制）。
+   左距为 --callout-padding 左分量（24px）的行级近似——上下分量不落行
+   （行级类不改行高的既有纪律），阅读侧整容器按变量原样消费。
+   #657/T06：box-shadow 通道承载 --callout-border-width 左缘近似（同引用
+   紫条机制：inset 阴影零布局位移；默认 0 宽零绘制——语义仍是该层紫条被
+   callout 替代；四边完整边框仅阅读侧承诺，行级形态边界见样式参考） ---- */
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout.vsidian-callout-quiet {
+  box-shadow: inset var(--callout-border-width) 0 0
+    color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
+  padding-left: 24px;
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* 首末行圆角（分角写：单行容器两类同挂自然合成全圆角） */
+#app .cm-editor .cm-scroller .vsidian-quote-line.vsidian-callout-first {
+  border-top-left-radius: var(--callout-radius);
+  border-top-right-radius: var(--callout-radius);
+}
+
+#app .cm-editor .cm-scroller .vsidian-quote-line.vsidian-callout-last {
+  border-bottom-left-radius: var(--callout-radius);
+  border-bottom-right-radius: var(--callout-radius);
+}
+
+/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引） */
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout-title {
+  color: var(--callout-title-color);
+  font-size: var(--callout-title-size);
+  font-weight: var(--callout-title-weight);
+}
+
+/* ---- #655（T04）折叠箭头 .callout-fold（T01 固定口径；Live 标题行行尾
+   widget 与阅读 .callout-title 尾部注入共用基座）与 is-collapsed 状态 ---- */
+#app .callout-fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  padding: 0;
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  color: var(--callout-color);
+  cursor: pointer;
+  vertical-align: -0.2em;
+  flex-shrink: 0;
+}
+
+#app .callout-fold svg {
+  transition: transform 0.12s ease;
+}
+
+/* 收起态：箭头右向（旋转 -90deg）+ is-collapsed 双挂口径的 fold 元素侧 */
+#app .callout-fold.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+#app .callout-fold:hover {
+  color: var(--vscode-foreground, inherit);
+}
+
+/* Live 行级形态：收起后容器末行已被隐藏——标题行补下圆角维持外框
+   收口（is-collapsed 行类由 calloutFold 装饰发射；is-collapsible 行类由
+   liveDecorations 源文派生发射） */
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout-title.is-collapsed {
+  border-bottom-left-radius: var(--callout-radius);
+  border-bottom-right-radius: var(--callout-radius);
+}
+
+/* 图标表（#654/T03 建，#657/T06 补公开名）：按类型组分派 Lucide 内联 SVG
+   mask（私有变量 --_vsidian-callout-icon 承载默认通道，:where() 零特异性
+   ——用户片段任意规则即可覆盖）。SVG 取 lucide-static 0.462.0（版本锚定；
+   取证 JSON 记 Obsidian 图标 id——question 的 help-circle 无 lucide- 前缀、
+   quote 为内部名 quote-glyph，造型分别以 lucide circle-help / quote 对应
+   绘制）。图标按「同图标分组」而不是颜色变量分组：tip/hint/important 共用
+   lucide-flame（important 颜色独立、图标同源，取证 aliasDiscrepancy）。
+   #657/T06：--callout-icon 公开名与 mask 同组登记（注册表 CALLOUT_TYPES
+   驱动，契约测试钉住同步）——calloutIconMount 读计算值解析（锁版 ID 或
+   净化 SVG）后注入并关闭 mask，见下方注入态规则 */
+:where([data-callout='note']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z' /%3E %3Cpath d='m15 5 4 4' /%3E%3C/svg%3E");
+  --callout-icon: lucide-pencil;
+}
+
+:where([data-callout='abstract'], [data-callout='summary'], [data-callout='tldr']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='8' height='4' x='8' y='2' rx='1' ry='1' /%3E %3Cpath d='M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2' /%3E %3Cpath d='M12 11h4' /%3E %3Cpath d='M12 16h4' /%3E %3Cpath d='M8 11h.01' /%3E %3Cpath d='M8 16h.01' /%3E%3C/svg%3E");
+  --callout-icon: lucide-clipboard-list;
+}
+
+:where([data-callout='info']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10' /%3E %3Cpath d='M12 16v-4' /%3E %3Cpath d='M12 8h.01' /%3E%3C/svg%3E");
+  --callout-icon: lucide-info;
+}
+
+:where([data-callout='todo']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.801 10A10 10 0 1 1 17 3.335' /%3E %3Cpath d='m9 11 3 3L22 4' /%3E%3C/svg%3E");
+  --callout-icon: lucide-check-circle-2;
+}
+
+:where([data-callout='tip'], [data-callout='hint'], [data-callout='important']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z' /%3E%3C/svg%3E");
+  --callout-icon: lucide-flame;
+}
+
+:where([data-callout='success'], [data-callout='check'], [data-callout='done']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5' /%3E%3C/svg%3E");
+  --callout-icon: lucide-check;
+}
+
+:where([data-callout='question'], [data-callout='help'], [data-callout='faq']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10' /%3E %3Cpath d='M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3' /%3E %3Cpath d='M12 17h.01' /%3E%3C/svg%3E");
+  --callout-icon: help-circle;
+}
+
+:where([data-callout='warning'], [data-callout='caution'], [data-callout='attention']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3' /%3E %3Cpath d='M12 9v4' /%3E %3Cpath d='M12 17h.01' /%3E%3C/svg%3E");
+  --callout-icon: lucide-alert-triangle;
+}
+
+:where([data-callout='failure'], [data-callout='fail'], [data-callout='missing']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6 6 18' /%3E %3Cpath d='m6 6 12 12' /%3E%3C/svg%3E");
+  --callout-icon: lucide-x;
+}
+
+:where([data-callout='danger'], [data-callout='error']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z' /%3E%3C/svg%3E");
+  --callout-icon: lucide-zap;
+}
+
+:where([data-callout='bug']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m8 2 1.88 1.88' /%3E %3Cpath d='M14.12 3.88 16 2' /%3E %3Cpath d='M9 7.13v-1a3.003 3.003 0 1 1 6 0v1' /%3E %3Cpath d='M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6' /%3E %3Cpath d='M12 20v-9' /%3E %3Cpath d='M6.53 9C4.6 8.8 3 7.1 3 5' /%3E %3Cpath d='M6 13H2' /%3E %3Cpath d='M3 21c0-2.1 1.7-3.9 3.8-4' /%3E %3Cpath d='M20.97 5c0 2.1-1.6 3.8-3.5 4' /%3E %3Cpath d='M22 13h-4' /%3E %3Cpath d='M17.2 17c2.1.1 3.8 1.9 3.8 4' /%3E%3C/svg%3E");
+  --callout-icon: lucide-bug;
+}
+
+:where([data-callout='example']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h.01' /%3E %3Cpath d='M3 18h.01' /%3E %3Cpath d='M3 6h.01' /%3E %3Cpath d='M8 12h13' /%3E %3Cpath d='M8 18h13' /%3E %3Cpath d='M8 6h13' /%3E%3C/svg%3E");
+  --callout-icon: lucide-list;
+}
+
+:where([data-callout='quote'], [data-callout='cite']) {
+  --_vsidian-callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z' /%3E %3Cpath d='M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z' /%3E%3C/svg%3E");
+  --callout-icon: quote-glyph;
+}
+
+/* 图标基座（#653/T02 建）：尺寸/对齐/颜色随类型色（mask 只取 alpha）；
+   mask 经私有变量分派（#654/T03 类型表），未知类型无规则命中时回落
+   默认铅笔形（note 图标同款 0.462.0 path） */
+#app .callout-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 6px;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+  background-color: var(--callout-color);
+  -webkit-mask: var(--_vsidian-callout-icon, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z' /%3E %3Cpath d='m15 5 4 4' /%3E%3C/svg%3E")) center / contain no-repeat;
+  mask: var(--_vsidian-callout-icon, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z' /%3E %3Cpath d='m15 5 4 4' /%3E%3C/svg%3E")) center / contain no-repeat;
+}
+
+/* #657/T06 自定义图标注入态（内部状态类，非公开契约——公开入口是
+   --callout-icon 变量）：calloutIconMount 在解析成功时注入净化 SVG 并挂
+   本类——关闭 mask/底色通道，颜色改经 currentColor 随类型色（Obsidian
+   `.callout-icon .svg-icon` 同款）。非法值不挂类不注入，默认 mask 保留 */
+#app .callout-icon.vsidian-callout-icon-custom {
+  -webkit-mask: none;
+  mask: none;
+  background: none;
+  color: var(--callout-color);
+}
+
+#app .callout-icon.vsidian-callout-icon-custom svg {
+  display: block;
+  width: 1em;
+  height: 1em;
 }
 
 #app .cm-editor .cm-scroller .vsidian-list-line {
@@ -3778,6 +4166,53 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   border-left: 3px solid var(--vsidian-quote-bar-color);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
   color: var(--vscode-textBlockQuote-foreground, inherit);
+}
+
+/* ---- #653/T02 Callout 阅读侧真实容器（token 变换发射 div.callout 家族；
+   严格父子容器选择器在此侧承诺——.callout > .callout-title 等天然可达）。
+   容器变量按 Obsidian 原名消费；底色与 live 行级同款双通道（T01 §6.2）；
+   blockquote 标签已改 div，引用紫条规则天然不再命中（callout 替代该层
+   紫条；容器内普通引用仍是 blockquote 照常呈现） ---- */
+#app .vsidian-view-reading .vsidian-reading-block div.callout {
+  margin: 0.4em 0;
+  padding: var(--callout-padding);
+  /* #657/T06：官方容器变量补全消费（Obsidian 1.14.4 app.css 同款形态）——
+     border 三件套（默认宽 0 不显形）与 mix-blend-mode（取证：亮 darken /
+     暗 lighten；行级 Live 形态不承诺 blend，边界见样式参考） */
+  border-style: solid;
+  border-color: color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
+  border-width: var(--callout-border-width);
+  border-radius: var(--callout-radius);
+  mix-blend-mode: var(--callout-blend-mode);
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--callout-title-padding);
+  color: var(--callout-title-color);
+  font-size: var(--callout-title-size);
+  font-weight: var(--callout-title-weight);
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-content {
+  padding: var(--callout-content-padding);
+  background: var(--callout-content-background);
+}
+
+/* #655（T04）阅读态收起：正文不绘制（状态类是 calloutFold 状态源的呈现
+   消费面——不是状态源；恢复经箭头/键位翻转同一 effect 链路） */
+#app .vsidian-view-reading .vsidian-reading-block div.callout.is-collapsed > .callout-content {
+  display: none;
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-content > :first-child {
+  margin-top: 0;
 }
 
 #app .vsidian-view-reading .vsidian-reading-block blockquote p,

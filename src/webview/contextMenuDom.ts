@@ -11,7 +11,9 @@
 //    （其余 menuitem）；置灰用原生 disabled（键盘跳过、点击无回调）。
 //
 // 2. 分组线只在组间产出（首组之前无）；组内可见项为零时模型层已整组收起，
-//    DOM 不出现孤立分隔线。
+//    DOM 不出现孤立分隔线。#658（T07）例外：itemSeparators 子菜单（Callout
+//    类型页）改为相邻可见项之间各一条（同色类型也有清晰边界），首尾无孤线，
+//    分隔线 role=presentation 不进键盘焦点序列（导航只取 button）。
 //
 // 3. 子菜单显隐唯一开关是 CSS :hover/:focus-within（无 JS 展开状态机）；
 //    父项点击展开是兜底通道（宿主挂 open 类 + aria-expanded 派生）；父项
@@ -186,14 +188,24 @@ export function buildMenuDom(
       submenu.setAttribute('role', 'menu')
       // 子菜单分组（#183 验收反馈）：组边界落分隔线——复用顶级 separator
       // 类与 presentation 角色，观感与顶级三簇一致；模型层 children 已按
-      // 组聚排（sortMenuDefsByGroup），隐藏组不产出、相邻交界自然单线
+      // 组聚排（sortMenuDefsByGroup），隐藏组不产出、相邻交界自然单线。
+      // #658（T07）itemSeparators 子菜单（Callout 类型页）：改为相邻可见项
+      // 之间各一条（同色类型也有清晰边界），替代组边界线——跨组交界不叠加
+      // 双线；children 是模型层过滤后的可见序列，隐藏/置灰不产生重复线
+      const appendSeparator = (): void => {
+        const separator = document.createElement('div')
+        separator.className = names.separator
+        separator.setAttribute('role', 'presentation')
+        submenu.appendChild(separator)
+      }
       let prevGroup: string | undefined
       for (const child of def.children) {
-        if (prevGroup !== undefined && child.group !== prevGroup) {
-          const separator = document.createElement('div')
-          separator.className = names.separator
-          separator.setAttribute('role', 'presentation')
-          submenu.appendChild(separator)
+        if (def.itemSeparators === true) {
+          if (submenu.children.length > 0) {
+            appendSeparator()
+          }
+        } else if (prevGroup !== undefined && child.group !== prevGroup) {
+          appendSeparator()
         }
         prevGroup = child.group
         appendItem(submenu, child)
@@ -335,34 +347,69 @@ function handleMenuKeydown(event: KeyboardEvent, menu: HTMLElement, names: MenuD
 /**
  * 子菜单翻转装配期判定：菜单挂载后对每个子菜单量自然宽度（临时显形），
  * 按内核 submenuSide 判定右/左，左翻加 flip 类（CSS right:100% 承载）。
- * 无布局环境（jsdom：尺寸与坐标全 0）安全跳过。
+ * #656（T05）补低高度封顶：子菜单顶对齐父项（top:-5px），其底越出视口
+ * 时按剩余空间设内联 max-height（内容内滚——三级类型列表 15 项在低视口
+ * 的滚动可达面；CSS 侧 max-height: calc(100vh - 16px) 只兜 submenu 位于
+ * 视口顶附近的形态）。无布局环境（jsdom：尺寸与坐标全 0）安全跳过。
  */
 export function applySubmenuFlip(
   menu: HTMLElement,
   viewportWidth: number,
   classNames?: Partial<MenuDomClassNames>,
+  viewportHeight?: number,
 ): void {
   const names: MenuDomClassNames = { ...CONTEXT_MENU_CLASS_NAMES, ...classNames }
+  const heightLimit = viewportHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 0)
   for (const submenu of Array.from(menu.querySelectorAll<HTMLElement>(`.${names.submenu}`))) {
     const host = submenu.parentElement
     if (!host) {
       continue
     }
-    // 子菜单默认 display:none（CSS :hover 显隐）——临时显形量宽后恢复
+    // 子菜单默认 display:none（CSS :hover 显隐）——临时显形量宽后恢复。
+    // #656（T05）三级路径修复：孙级 submenu 的祖先 submenu 同样默认
+    // display:none，祖先隐藏下 offsetWidth 恒 0（量宽无效、翻转与低高度
+    // 封顶都不判定——三级菜单在视口右缘会溢出屏幕）。量宽前显形整条
+    // submenu 祖先链，量毕恢复
+    const hiddenAncestors: HTMLElement[] = []
+    let walk: HTMLElement | null = submenu.parentElement
+    while (walk && walk !== menu) {
+      if (walk.classList.contains(names.submenu) && getComputedStyle(walk).display === 'none') {
+        walk.style.display = 'block'
+        walk.style.visibility = 'hidden'
+        hiddenAncestors.push(walk)
+      }
+      walk = walk.parentElement
+    }
     submenu.style.display = 'block'
     submenu.style.visibility = 'hidden'
     const width = submenu.offsetWidth
+    let top = 0
+    let height = 0
+    const hostRect = host.getBoundingClientRect()
+    if (!(hostRect.left === 0 && hostRect.top === 0 && hostRect.width === 0 && hostRect.height === 0)) {
+      const rect = submenu.getBoundingClientRect()
+      top = rect.top
+      height = rect.height
+    }
     submenu.style.display = ''
     submenu.style.visibility = ''
+    for (const ancestor of hiddenAncestors) {
+      ancestor.style.display = ''
+      ancestor.style.visibility = ''
+    }
     if (width <= 0) {
       continue
     }
-    const rect = host.getBoundingClientRect()
-    if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
+    if (hostRect.left === 0 && hostRect.top === 0 && hostRect.width === 0 && hostRect.height === 0) {
       continue // 无布局环境（jsdom）——真实翻转由浏览器回归钉住
     }
-    if (submenuSide({ left: rect.left, right: rect.right }, width, viewportWidth) === 'left') {
+    if (submenuSide({ left: hostRect.left, right: hostRect.right }, width, viewportWidth) === 'left') {
       submenu.classList.add(names.submenuFlip)
+    }
+    if (heightLimit > 0 && top + height > heightLimit) {
+      // 顶对齐父项越出视口底：按剩余空间封顶（留 8px 边距，不小于 120px
+      // ——低于该值已无可用面，保底可滚）
+      submenu.style.maxHeight = `${Math.max(120, Math.floor(heightLimit - top - 8))}px`
     }
   }
 }

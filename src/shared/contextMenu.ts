@@ -13,13 +13,15 @@
 //
 // 既有边界（不得顺手放宽）：阅读模式与 frontmatter 头区不接管（zone 判定
 // 返回 null）；内置项不可删只可隐藏；提示列数据只派生自键位注册表（剪贴板
-// 四项固定提示除外）；内置菜单最深两级（children 数据结构支持任意嵌套，
-// 运行期注册不受限）。
+// 四项固定提示除外）；内置菜单最深两级——**唯一例外是 Callout 类型路径**
+// （#656/T05：「插入 → Callout → 类型」三级，规格 callout.md §7 修订），
+// 内核 children 数据结构与运行期注册仍支持任意嵌套。
 import type { MessageKey } from './locales/en'
 import { atxHeadingOf, blockRangeOfLine, scanFenceBlocks } from './blockId'
 import { parseLinePrefix } from './listPrefix'
 import { isRenderedFenceInfo } from './mermaid'
 import { formatBindingLabel, getEffectiveBindings, type KeybindingOverrides } from './keybindings'
+import { CALLOUT_TYPES, calloutTypeOf } from './calloutSyntax'
 
 /** 右键命中区域（安全降级矩阵的行维度；null = 不接管） */
 export type ContextMenuZone = 'normal' | 'table' | 'fence' | 'graphic'
@@ -141,6 +143,21 @@ export interface GraphicMenuHit {
   rendered?: boolean
 }
 
+/** 命中 callout 的结构化负载（#656/T05：类型菜单 when/checked/enable 的
+ *  谓词数据面与执行期定位输入——TableMenuHit 先例）。仅 zone='normal'
+ *  采集（结构敏感区沿安全矩阵不开放）；执行侧经 pos 重新解析最内层目标
+ *  （文档版本判等后 innermostCalloutAt——锚点过期重验沿既有模式） */
+export interface CalloutMenuHit {
+  /** 命中处文档偏移（执行期结构定位入口输入） */
+  pos: number
+  /** 命中位置所属最内层 callout 的当前类型（规范化小写原样标识——别名
+   *  不归并，勾选判定由谓词按语法归类消费）；普通正文命中 = null */
+  currentType: string | null
+  /** 命中行是否 callout 标题行（Live 标题右键「Callout 类型」子菜单的
+   *  when 输入） */
+  hitTitleLine: boolean
+}
+
 /** 打开菜单时采集的判定输入快照（when/enable/checked 谓词的唯一数据面）。
  *  三类场景命中负载均为可选字段：只在对应 zone 采集（table 仅 zone='table'、
  *  graphic 仅 zone='graphic'、link 仅 zone='normal'——结构敏感区不采集，
@@ -164,6 +181,8 @@ export interface MenuContextSnapshot {
   link?: LinkMenuHit
   /** 图形块命中负载（#436；仅 zone='graphic'） */
   graphic?: GraphicMenuHit
+  /** callout 命中负载（#656/T05；仅 zone='normal'） */
+  callout?: CalloutMenuHit
 }
 
 /** 上下文谓词（纯函数；输入只认 MenuContextSnapshot） */
@@ -229,6 +248,11 @@ export interface MenuItemDescriptor {
   /** 勾选态谓词（段落设置为首个消费者；文本格式类不接） */
   checked?: MenuPredicate
   children?: readonly MenuItemDescriptor[]
+  /** #658（T07）子菜单逐项分隔线：true 时该子菜单的相邻可见项之间各落
+   *  一条分隔线（替代组边界线——跨组交界不叠加双线）；首尾不附孤线，
+   *  分隔线 role=presentation 不进键盘焦点序列。唯一消费方是 Callout
+   *  类型页（同色类型也要有清晰边界）；其他子菜单不启用 */
+  itemSeparators?: boolean
   danger?: boolean
   /** 覆写层专用：隐藏不删（内置项保底可用性的载体） */
   hidden?: boolean
@@ -240,8 +264,11 @@ export interface MenuItemDescriptor {
 
 /** 簇序（组间分隔线的落点 = 组边界；渲染按此序产出组）。tableOps /
  *  graphicOps 是 #436 为场景簇（#437 表格 / #438 图形块）预登记的组位
- *  ——位于链接簇后、块与格式簇前；场景票在此落项，本表不加项 */
-export const CONTEXT_MENU_GROUP_ORDER = ['link', 'tableOps', 'graphicOps', 'blockFormat', 'clipboard'] as const
+ *  ——位于链接簇后、块与格式簇前；calloutOps 是 #656/T05 为 Live 标题
+ *  右键「Callout 类型」子菜单预登记的组位（链接簇之前——右键命中的
+ *  上下文动作排首，#439 链接场景三项同理念）；场景票在此落项，本表不
+ *  加项 */
+export const CONTEXT_MENU_GROUP_ORDER = ['calloutOps', 'link', 'tableOps', 'graphicOps', 'blockFormat', 'clipboard'] as const
 export type ContextMenuGroupId = (typeof CONTEXT_MENU_GROUP_ORDER)[number]
 
 /** 图标 key 表：40 枚菜单接线 key + 3 枚备用记账 key。#441 已补齐
@@ -330,12 +357,55 @@ const paragraphChildren: readonly MenuItemDescriptor[] = [
   { id: 'quote', group: 'paragraphQuote', order: 0, command: 'quote', labelKey: 'format.quote', iconKey: 'quote', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).quoted },
 ]
 
+// ---- #656（T05）Callout 类型子菜单（「插入 → Callout → 类型」第三级与
+// Live 标题右键「Callout 类型」复用同一列表与执行通道——规格 callout.md §7）----
+// 谓词口径：类型项 checked 按语法归类（别名归目标类型点亮：cite → quote；
+// 未知自定义类型回落条目 knownType=false 不点亮任何内置项——经「自定义」
+// 入口修改）；「无 Callout」在普通正文为当前状态（勾选）且执行不改文档
+// （§6.2——可点选、规划器无操作，不置灰）；叶项不设 enable（调用侧 zone
+// 已由父项 enabledOutsideStructure 传播置灰——安全矩阵不破例）。颜色预览
+// （隐藏探针取当前文档/主题/片段下的有效色——T01 §8 方法）与逐项分隔线
+// （itemSeparators，两个父项都标记——同一列表两处挂载同形态）由 #658/T07
+// 落地；装配在 webview/calloutMenuPreview（菜单打开期创建、关闭即回收）。
+
+/** 类型项勾选：当前类型（原样标识）经语法归类比对；未知类型不点亮 */
+const calloutTypeChecked = (ctx: MenuContextSnapshot, id: string): boolean => {
+  const current = ctx.callout?.currentType
+  if (current === undefined || current === null) {
+    return false
+  }
+  const entry = calloutTypeOf(current)
+  return entry.knownType && entry.id === id
+}
+
+/** 「无 Callout」勾选：普通正文（无 callout 命中）即当前状态 */
+const calloutNoneChecked = (ctx: MenuContextSnapshot): boolean =>
+  ctx.callout === undefined || ctx.callout.currentType === null
+
+/** 类型列表（第三级）：无 Callout｜13 规范类型（注册表序，别名不重复排列
+ *  ——经源文或自定义输入使用）｜自定义输入。命令形如 calloutType:<id>，
+ *  执行分派在 syncController（runCalloutTypeCommand 前缀分支） */
+const calloutTypeChildren: readonly MenuItemDescriptor[] = [
+  { id: 'calloutNone', group: 'calloutNone', order: 0, command: 'calloutType:none', labelKey: 'contextMenu.calloutNone', checked: calloutNoneChecked },
+  ...CALLOUT_TYPES.map((entry, index) => ({
+    id: `calloutType.${entry.id}`,
+    group: 'calloutTypes',
+    order: index,
+    command: `calloutType:${entry.id}`,
+    labelKey: `callout.type.${entry.id}` as MessageKey,
+    checked: (ctx: MenuContextSnapshot) => calloutTypeChecked(ctx, entry.id),
+  })),
+  { id: 'calloutCustom', group: 'calloutCustom', order: 0, command: 'calloutType:custom', labelKey: 'contextMenu.calloutCustom' },
+]
+
 /** 插入子项（簇 2.3；表格与快速操作条建表同源入口 command=insertTable） */
 const insertChildren: readonly MenuItemDescriptor[] = [
   { id: 'insertTable', group: 'blockFormat', order: 0, command: 'insertTable', labelKey: 'format.insertTable', iconKey: 'table', enable: enabledOutsideStructure },
   { id: 'horizontalRule', group: 'blockFormat', order: 1, command: 'horizontalRule', labelKey: 'format.horizontalRule', iconKey: 'horizontalRule', enable: enabledOutsideStructure },
   { id: 'codeBlock', group: 'blockFormat', order: 2, command: 'codeBlock', labelKey: 'format.codeBlock', iconKey: 'codeBlock', enable: enabledOutsideStructure },
   { id: 'blockMath', group: 'blockFormat', order: 3, command: 'blockMath', labelKey: 'format.blockMath', iconKey: 'blockMath', enable: enabledOutsideStructure },
+  // #656（T05）Callout 第三级：children 数据结构天然支持（内核/DOM 递归）
+  { id: 'insertCallout', group: 'blockFormat', order: 4, command: 'calloutInsert', labelKey: 'contextMenu.insertCallout', iconKey: 'callout', enable: enabledOutsideStructure, itemSeparators: true, children: calloutTypeChildren },
 ]
 
 // ---- 表格专属簇（#437；平铺单簇不设子菜单）----
@@ -378,6 +448,12 @@ const tableOpsChildren: readonly MenuItemDescriptor[] = [
 
 /** 内置项编译期表（照 formatOperations 惯例；运行期覆写层的首个注册者） */
 export const CONTEXT_MENU_ITEMS = [
+  // ---- #656（T05）Live 标题右键「Callout 类型」子菜单：与「插入 →
+  // Callout → 类型」复用同一类型列表（calloutTypeChildren）与执行通道；
+  // 仅命中 callout 标题行时在场（when 谓词，空组自然收起）。排链接簇前
+  // （右键命中的上下文动作排首，#439 同理念）；command 挂键位注册表操作
+  // id（calloutChangeType——提示列自动派生；父项无叶命令，点击只展开）----
+  { id: 'calloutTypeMenu', group: 'calloutOps', order: 0, command: 'calloutChangeType', labelKey: 'contextMenu.calloutType', iconKey: 'callout', when: (ctx: MenuContextSnapshot) => ctx.callout?.hitTitleLine === true, itemSeparators: true, children: calloutTypeChildren },
   // ---- 簇 1：链接 ----
   // #439 链接场景三项排簇首（右键命中的上下文动作优先于常驻插入项）；
   // 图标复用既有接线 key（externalLink/link/copy），不新增资产位
@@ -589,6 +665,8 @@ export interface RenderedMenuItem {
   hint?: string
   /** 组内排序键（DOM 不消费；buildMenuModel / 子菜单排序用） */
   order: number
+  /** #658（T07）子菜单逐项分隔线标记（描述符透传；Callout 类型页） */
+  itemSeparators?: boolean
   children?: readonly RenderedMenuItem[]
 }
 
@@ -632,6 +710,7 @@ function renderDef(
     enabled: selfEnabled,
     checked: def.checked ? def.checked(ctx) : false,
     order: def.order,
+    ...(def.itemSeparators === true ? { itemSeparators: true } : {}),
   }
   if (def.iconKey !== undefined) {
     item.iconKey = def.iconKey

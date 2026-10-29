@@ -76,8 +76,11 @@ describe('styleContract schema', () => {
   })
 
   it('direct 级条目必须给出 aliasTargets（承诺可执行）', () => {
-    // 靠容器别名后的语义标签/元素**天然命中**的 direct 条目（无别名发射点）
-    const NATURAL_DIRECT = new Set(['inline-strikethrough', 'image-slot'])
+    // 靠容器别名后的语义标签/元素**天然命中**的 direct 条目（无别名发射点）。
+    // #653：callout 家族与变量族的主名即 Obsidian 原名（发射侧直接挂
+    // .callout / 直接定义 --callout-*，无 vsidian 前缀名可桥）——比别名桥
+    // 更直接的天然命中，渲染验证走 calloutPaint 绘制层
+    const NATURAL_DIRECT = new Set(['inline-strikethrough', 'image-slot', 'callout', 'var-callout-color'])
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       if (entry.obsidian.support === 'direct' && entry.kind !== 'limitation') {
         // live 视图 direct 依赖别名桥发射（DOM 类名或变量 fallback），必须有
@@ -367,11 +370,13 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   heading: 4,
   'inline-format': 9,
   'list-task': 5,
-  'line-syntax': 5,
+  // #653 增 callout 容器家族条目
+  'line-syntax': 6,
   table: 12,
   'reading-structure': 17,
   'link-image-wikilink': 18,
-  'content-variables': 12,
+  // #653 增 callout 变量族条目
+  'content-variables': 13,
   'content-limits': 12,
   // chrome 域（87；#340 增文本视图一条）
   math: 5,

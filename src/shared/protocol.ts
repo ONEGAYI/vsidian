@@ -1187,6 +1187,10 @@ export type HostToWebview =
    *  四态的两轴投影（亮色高对比不为暗）。宿主事件驱动推送（重复值不广播）
    *  + 面板 ready 直发；webview 侧先更新缓存再分发 SDK 订阅 */
   | { kind: 'addonThemeEnvironment.changed'; env: import('./addonThemes').AddonThemeEnvironment }
+  /** #656（T05）Callout 自定义类型输入回执：type 为规范化小写标识；
+   *  取消输入 = null（webview 侧零编辑）。reqId 与
+   *  callout.typeInput.request 配对（webview 侧重验执行上下文后消费） */
+  | { kind: 'callout.typeInput.result'; sessionId: string; reqId: number; type: string | null }
 
 /** #350 T01 附加组件状态载荷（addons.state 消息体；形态与守卫的单一
  * 事实源在 shared/addonIdentity 的 AddonStatusEntry） */
@@ -1358,6 +1362,11 @@ export type WebviewToHost =
     }
   /** 撤销/重做请求：作用于宿主 TextDocument 权威历史（探索笔记 03 §4） */
   | { kind: 'history.request'; op: 'undo' | 'redo' }
+  /** #656（T05）Callout 自定义类型输入请求（宿主 showInputBox 现有输入
+   *  框架的 webview 发起形态）：宿主弹输入框（空白/非单标识符给本地化
+   *  提示，不写半个声明），以 callout.typeInput.result 回执（取消 =
+   *  type:null 零编辑）。current 为当前类型预填值（普通正文缺省空串） */
+  | { kind: 'callout.typeInput.request'; sessionId: string; docUri: string; reqId: number; current: string }
   /** 请求宿主回发全文重同步（外部变更与本地状态无法安全对齐时） */
   | { kind: 'sync.request' }
   /** 冲突/暂停时的本地全文快照上报：宿主保存供用户取回未确认输入 */
@@ -2872,6 +2881,44 @@ export interface HeadingFoldPaintProbe {
   hiddenLinePainted: boolean | null
 }
 
+/** #655（T04）Callout 折叠 UI 绘制观测（采集实体 src/webview/calloutFold.ts
+ *  的 collectCalloutFoldPaint）：可折叠箭头计数、收起区间数、首收起
+ *  callout 的箭头绘制态/标题可见、隐藏正文行是否仍被绘制。结构性字段
+ *  （计数/类判定）jsdom 可断言；visible 类字段只作真宿主/浏览器断言依据。 */
+export interface CalloutFoldPaintProbe {
+  /** 可折叠 callout 区间总数（派生视图口径——无符号与标题-only 不计） */
+  foldableCount: number
+  /** 收起中的区间数（默认 `-` + 手动收起） */
+  foldCount: number
+  /** 视口内已绘制箭头控件计数（.callout-fold DOM 实测；触及标题行的退场） */
+  arrowCount: number
+  /** 首收起 callout 箭头绘制态（中心点 elementFromPoint 命中） */
+  firstArrowVisible: boolean
+  /** 首收起箭头是否携带 is-collapsed 类（T01 固定口径） */
+  firstArrowCollapsedClass: boolean
+  /** 首收起 callout 标题文字是否可见（收起只隐正文；无收起为 null） */
+  titleVisible: boolean | null
+  /** 首收起区间隐藏正文行是否仍被绘制（不可见断言面：收起后应 false；
+   *  无收起为 null） */
+  hiddenBodyPainted: boolean | null
+}
+
+/** #655（T04）阅读态 callout 折叠绘制观测（采集实体 src/webview/
+ *  readingVirtualView.ts 的 collectCalloutFoldPaint）：阅读视图消费折叠
+ *  视图后的箭头/收起呈现——箭头计数、收起 callout 的 content 是否仍
+ *  绘制（CSS display:none 断言面）与标题可见。 */
+export interface ReadingCalloutFoldPaintProbe {
+  /** 已挂载块内注入的箭头控件计数 */
+  arrowCount: number
+  /** 收起中的 callout 计数（is-collapsed 类实测） */
+  foldCount: number
+  /** 首收起 callout 的 .callout-content 是否已隐藏（display:none 实测；
+   *  无收起为 null） */
+  contentHidden: boolean | null
+  /** 首收起 callout 标题元素是否可见（无收起为 null） */
+  titleVisible: boolean | null
+}
+
 /** #419 阅读态标题折叠绘制观测（采集实体 src/webview/readingVirtualView.ts
  *  的 collectFoldPaint）：阅读视图消费 Live 折叠状态集后的折叠呈现观测
  *  ——折叠区间数、可折叠标题箭头计数、首折叠标题的省略号/箭头绘制态、
@@ -2918,6 +2965,10 @@ export interface PaintProbe {
   /** #419 阅读态标题折叠绘制观测（仅 reading 模式采集；无折叠交互装配
    *  时缺省） */
   readingFold?: ReadingFoldPaintProbe
+  /** #655（T04）Callout 折叠绘制观测（无 Live 视图时缺省） */
+  calloutFold?: CalloutFoldPaintProbe
+  /** #655（T04）阅读态 callout 折叠绘制观测（仅 reading 模式采集） */
+  readingCalloutFold?: ReadingCalloutFoldPaintProbe
   /** #358 T09 渲染提供者接管绘制观测：文档内图形容器的生效提供者与
    *  绘制层证据（组件容器计算色/几何；SVG 在场数按容器所有权分桶）——
    *  「实际选中内容」的断言面（非 DOM 存在性）。无图形容器为空数组
@@ -4026,6 +4077,19 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       typeof v.readingFold.arrowCollapsed === 'boolean' &&
       (v.readingFold.hiddenTextInDom === null || typeof v.readingFold.hiddenTextInDom === 'boolean') &&
       (v.readingFold.hiddenLinePainted === null || typeof v.readingFold.hiddenLinePainted === 'boolean'))) &&
+    (v.calloutFold === undefined || (isObject(v.calloutFold) &&
+      typeof v.calloutFold.foldableCount === 'number' &&
+      typeof v.calloutFold.foldCount === 'number' &&
+      typeof v.calloutFold.arrowCount === 'number' &&
+      typeof v.calloutFold.firstArrowVisible === 'boolean' &&
+      typeof v.calloutFold.firstArrowCollapsedClass === 'boolean' &&
+      (v.calloutFold.titleVisible === null || typeof v.calloutFold.titleVisible === 'boolean') &&
+      (v.calloutFold.hiddenBodyPainted === null || typeof v.calloutFold.hiddenBodyPainted === 'boolean'))) &&
+    (v.readingCalloutFold === undefined || (isObject(v.readingCalloutFold) &&
+      typeof v.readingCalloutFold.arrowCount === 'number' &&
+      typeof v.readingCalloutFold.foldCount === 'number' &&
+      (v.readingCalloutFold.contentHidden === null || typeof v.readingCalloutFold.contentHidden === 'boolean') &&
+      (v.readingCalloutFold.titleVisible === null || typeof v.readingCalloutFold.titleVisible === 'boolean'))) &&
     (v.renderers === undefined || (isObject(v.renderers) &&
       Array.isArray(v.renderers.containers) &&
       v.renderers.containers.every((c: unknown) => isObject(c) &&
@@ -4563,6 +4627,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       )
     case 'history.request':
       return v.op === 'undo' || v.op === 'redo'
+    case 'callout.typeInput.request':
+      // #656（T05）自定义类型输入请求：面板身份 + 预填值（空串=普通正文）
+      return isString(v.sessionId) && isString(v.docUri) && isPositiveInt(v.reqId) && isString(v.current)
     case 'sync.request':
       return true
     case 'conflict.report':
@@ -5608,6 +5675,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'view.locate':
       return isNonNegativeInt(v.offset) && (v.head === undefined || isNonNegativeInt(v.head)) &&
         (v.locateId === undefined || isPositiveInt(v.locateId))
+    case 'callout.typeInput.result':
+      // #656（T05）自定义类型输入回执：reqId 配对 + type 二值（规范化
+      // 小写标识 / null=取消）
+      return isPositiveInt(v.reqId) && isString(v.sessionId) &&
+        (v.type === null || (isString(v.type) && (v.type as string).length > 0))
     case 'reading.perf':
       return isPositiveInt(v.scrollRounds)
     case 'reading.test.image':

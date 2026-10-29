@@ -2445,6 +2445,49 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(afterRedo.appliedEdits === 1, `redo 后 appliedEdits 应保持 1，实际 ${afterRedo.appliedEdits}`)
   }],
 
+  // ---- #656（T05）Callout 源文转换：真实菜单路径（钩子打开 + 真实按钮
+  // 点击）经 webview 规划器与标准出站链写入宿主——一步撤销恢复完整原文、
+  // 重做恢复转换结果；CRLF 文档产物与撤销保持 CRLF 行尾 ----
+
+  ['#656 Callout 转换：菜单路径写入宿主，一步撤销/重做恢复完整原文（LF）', async () => {
+    await openWithEditor('callout-plan.md')
+    await waitSessionReady('callout-plan.md')
+    const uri = wsUri('callout-plan.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('callout-plan.md'))
+    const original = '转换首段甲\n转换首段乙\n\n结尾段\n'
+    const converted = '> [!tip]\n> 转换首段甲\n> 转换首段乙\n\n结尾段\n'
+    // 光标移开（右键保选区语义下无选区 → 命中位置所在段落转换）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.contextMenu', pos: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.menuClick', command: 'calloutType:tip' })
+    // 先断言 webview 侧（区分「菜单执行失败」与「出站回写失败」两层）
+    const webviewSide = await waitViewState('callout-plan.md', (v) => v.text === converted)
+    assert(webviewSide.text === converted, 'webview 侧应完成转换')
+    await poll('转换写入宿主文档', () => (doc.getText() === converted ? true : undefined))
+    // 一步撤销恢复完整原文（一次菜单操作 = 一条宿主撤销项）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('一步撤销恢复原文', () => (doc.getText() === original ? true : undefined))
+    await waitViewState('callout-plan.md', (v) => v.text === original)
+    // 重做恢复转换结果
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'redo' })
+    await poll('重做恢复转换结果', () => (doc.getText() === converted ? true : undefined))
+  }],
+
+  ['#656 Callout 转换：CRLF 文档产物与撤销保持 CRLF 行尾', async () => {
+    await openWithEditor('callout-plan-crlf.md')
+    await waitSessionReady('callout-plan-crlf.md')
+    const uri = wsUri('callout-plan-crlf.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('callout-plan-crlf.md'))
+    const original = 'CRLF 转换甲行\r\nCRLF 转换乙行\r\n'
+    const converted = '> [!note]\r\n> CRLF 转换甲行\r\n> CRLF 转换乙行\r\n'
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.contextMenu', pos: 2 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'contextMenu.test.menuClick', command: 'calloutType:note' })
+    await poll('CRLF 转换写入宿主', () => (doc.getText() === converted ? true : undefined), 15000)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('CRLF 撤销恢复原文（行尾保持）', () => (doc.getText() === original ? true : undefined), 15000)
+  }],
+
   ['宿主全局 undo/redo 命令作用于同一文档历史（命令面板路径）', async () => {
     await openWithEditor('undo2.md')
     const session = await waitSessionReady('undo2.md')

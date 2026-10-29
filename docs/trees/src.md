@@ -53,7 +53,7 @@ vsidian/
     │   ├── jiebaTar.ts                   # npm tarball 最小提取器
     │   ├── keybindingService.ts          # 快捷键全局存储服务
     │   ├── linkTarget.ts                 # 宿主侧链接目标分类纯逻辑（#10）
-    │   ├── nativeDiffFallback.ts         # 旧宿主原生文本对比退让
+    │   ├── nativeDiffFallback.ts         # 旧版宿主 Git 对比视图退让
     │   ├── pasteHistoryTracker.ts        # 宿主粘贴阶段历史解释
     │   ├── pdfExport/                    # PDF 导出宿主端链路
     │   │   ├── browserFind.ts          # 导出浏览器发现三通道
@@ -127,6 +127,9 @@ vsidian/
     │   ├── addonUi.ts                 # 附加组件界面贡献共享形状与校验
     │   ├── behaviorFilterQuery.ts     # 行为筛选查询与分页纯函数
     │   ├── blockId.ts                 # 块 id 与块边界单一事实源
+    │   ├── calloutIcon.ts             # Callout 图标值解析与锁版库
+    │   ├── calloutPlan.ts             # Callout 源文转换规划器
+    │   ├── calloutSyntax.ts           # Callout 识别单一事实源
     │   ├── changeMapping.ts           # 变更重定位纯函数
     │   ├── chromeContract.ts          # 界面域样式契约探针表
     │   ├── codeLangs.ts               # 代码块语言注册表与别名路由
@@ -228,6 +231,9 @@ vsidian/
         ├── backlinkPanel.ts              # 反链面板 DOM 与四态渲染（#197）
         ├── behaviorQueryBuilder.ts       # 行为筛选积木查询编辑器
         ├── blockIdStrip.ts               # 阅读渲染块标记剥离纯函数
+        ├── calloutFold.ts                # Callout 折叠状态机与箭头
+        ├── calloutIconMount.ts           # Callout 图标装载器
+        ├── calloutMenuPreview.ts         # Callout 类型菜单取色预览
         ├── clipboardPaste.ts             # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts              # 卡片共享状态中立模块
         ├── codeHighlight.ts              # 语法高亮引擎装配与缓存

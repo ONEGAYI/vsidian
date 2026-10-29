@@ -330,7 +330,7 @@ defineAddonPage('publisher.my-addon', (sdk) => {
 - **与 Obsidian 上游的关键对照**（上游 `getPosLineType` / `detectRuleScope` 移植者必读）：
   - **frontmatter**：fm 判定是**文档头部 8192 字符的有界扫描**（与平台呈现同源）——超长头块按未识别降级为普通 Markdown，fm 行类型随之变化；fm 区间按**行级**判定（fm 结束行行尾仍属 frontmatter）。上游若在 fm 内判 `code` 等，移植时改为 `frontmatter` + `none`（fm 是源码态，无行内标记语义）。
   - **公式**：上游块级判定通常逐行扫描 `$$`；本平台跨行块表 + 单行扫描的口径差异——**段内形态 `text $$x$$ tail` 行类型是 `text`**（不是公式行；行内维度 `inlineAt` 在公式位置返回 `formula`），**单行闭合块 `$$x$$`（独占一行、内容非空）是 `formula`**；未闭合 `$$` 稳定降级 `text`。
-  - **callout**：一期**不入枚举**——live 侧无 callout 识别管线，`> [!note]` 系列统一 `quote`。上游有 callout 细分语义的组件，移植时按 `quote` 处理或自判标记行。
+  - **callout**：**不入枚举（历史理由已失效，现行边界如下）**——live 侧自 #654（T03）起已有完整 callout 识别与渲染管线（`> [!note]` 全类型/别名/嵌套，识别器 `src/shared/calloutSyntax.ts`），但公开行类型枚举保持八值稳定不细分：callout 行统一判 `quote`，公开签名与既有查询语义不变（`experimental.syntax` 无 callout 专用 API，规格明确不新增）。上游有 callout 细分语义的组件，移植时按 `quote` 处理或自判标记行。
   - **嵌套优先级**：引用内列表、列表内引用等组合按 code > table > heading > list > quote 取先命中者（如 `> - item` 的列表项内容处判 `list`、行首 `>` 标记处判 `quote`——链式下降按位置走，两种位置各判各的）。
 - **pos 口径**：全文 UTF-16 code unit 偏移（页面全程 LF）；非负整数否则 `invalid-request`，超出文档长度**钳制到文末**（行尾是合法光标位）。
 - **nodeNames 诊断载荷**：光标处祖先链节点名快照（根→叶）。**显式声明非稳定**——节点名随解析器升级变化，不构成兼容承诺；诊断用途（如观察平台树形态）可用，逻辑分支不要依赖它。fm 行的快照会如实包含树上反语义节点（如 `SetextHeading2`）——这正是它作为诊断载荷的价值。

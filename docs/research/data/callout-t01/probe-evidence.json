@@ -1,0 +1,348 @@
+{
+ "purpose": "T01 可编辑容器浏览器探针结果（#652）。生产 WebviewSyncController + 生产 CSS + 探针扩展（mount extraExtensions 注入，零生产源码改动）。fixture 与驱动：.scratch/callout/calloutProbeFixture.ts 与 callout-probe.mjs（本票工作树内，不入库）。",
+ "environment": {
+  "commit": "63b96ab9",
+  "playwright": "1.62.1",
+  "chromiumHeadless": true,
+  "node": "v24.20.0"
+ },
+ "summary": {
+  "passed": 31,
+  "failed": 0
+ },
+ "routeA": [
+  {
+   "name": "G1-标题行类与属性",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-正文行类与末行圆角类",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-标记默认隐藏且标题文字真实在场",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-折叠符号 widget 与 is-collapsed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-标题文字 span.callout-title-inner",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-嵌套：最内层身份胜出",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-普通引用不误挂 callout",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-光标进标题行显形标记、离开复隐",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G1-识别统计",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G2-正文两行拖选",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G2-标题行到正文行跨行拖选",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G3-正文行中文 IME 定稿",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G3-标题行 IME（显形态下编辑标题文字）",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G4-编辑走标准出站链 edit.request",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G4-外部增量回流后装饰重对齐（撤销同构通道）",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G5-表格行与 callout 行级类共存",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G5-代码行与 callout 行级类共存",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G5-双链与嵌入在 callout 行内呈现",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G6-默认底色按类型命中（标准色走渐变通道）",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G6-片段按 data-callout 覆盖 + 双形态接收 + 热更新",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G6-变量继承与图标 mask",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G6-圆角首末行",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G6-Live 选择器矩阵（如实记录可达/不可达）",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G6-阅读样例的严格容器选择器（T02 计划发射形态）",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G10-1k",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G10-10k",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G10-100k",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "name": "G10-10k-无callout",
+   "status": "PASS",
+   "detail": ""
+  }
+ ],
+ "routeEvidence": {
+  "reparent": {
+   "wrapped": {
+    "wrapped": 6
+   },
+   "structure": {
+    "container": false
+   },
+   "clickSelection": {
+    "expected": 41,
+    "actual": 41
+   },
+   "afterType": {
+    "changed": true,
+    "errors": []
+   },
+   "domAfter": {
+    "stillWrapped": false,
+    "contentChildren": 36
+   }
+  },
+  "blockWidget": {
+   "dom": {
+    "widget": true,
+    "childContent": true,
+    "grandTitle": true,
+    "lineClassGone": 0
+   },
+   "clickInsideReplaced": {
+    "from": 41,
+    "inside": true
+   },
+   "typed": {
+    "changed": false,
+    "newText": "> 正文第二"
+   }
+  }
+ },
+ "menuColorProbe": {
+  "assertion": "G7-隐藏探针元素求有效色 + 热更新 + 布局隔离",
+  "status": "PASS",
+  "measured": {
+   "snippetTripletColor": "255, 0, 0",
+   "docScopeOverrideColor": "12, 34, 56",
+   "afterDocStyleRemoval": "255, 0, 0",
+   "layoutStable": true
+  },
+  "source": "callout-probe.mjs:479-512；断言值以探针脚本与 probe.log 为准（.scratch/callout/，不入库）"
+ },
+ "measurements": [
+  {
+   "name": "G1-calloutCount",
+   "value": 7
+  },
+  {
+   "name": "G5-tableLineClass",
+   "value": "cm-line vsidian-quote-line HyperMD-quote vsidian-table-grid-row vsidian-table-header-line vsidian-table-line HyperMD-table-line callout callout-content"
+  },
+  {
+   "name": "G5-embedInCallout",
+   "value": "vsidian-live-embed"
+  },
+  {
+   "name": "G6-selectorMatrixLive",
+   "value": {
+    "classCallout": true,
+    "attrDataCallout": true,
+    "descendantTitleInner": true,
+    "descendantIcon": true,
+    "childContent": false,
+    "descendantContent": false,
+    "nestedCalloutCallout": false,
+    "childTitle": false,
+    "snippetScope": true
+   }
+  },
+  {
+   "name": "G6-selectorMatrixReading",
+   "value": {
+    "childContent": true,
+    "childTitle": true,
+    "grandchildInner": true,
+    "scoped": true,
+    "bg": "rgb(0, 0, 0)"
+   }
+  },
+  {
+   "name": "G8-reparent",
+   "value": {
+    "wrapped": {
+     "wrapped": 6
+    },
+    "structure": {
+     "container": false
+    },
+    "clickSelection": {
+     "expected": 41,
+     "actual": 41
+    },
+    "afterType": {
+     "changed": true,
+     "errors": []
+    },
+    "domAfter": {
+     "stillWrapped": false,
+     "contentChildren": 36
+    }
+   }
+  },
+  {
+   "name": "G9-blockWidget",
+   "value": {
+    "dom": {
+     "widget": true,
+     "childContent": true,
+     "grandTitle": true,
+     "lineClassGone": 0
+    },
+    "clickInsideReplaced": {
+     "from": 41,
+     "inside": true
+    },
+    "typed": {
+     "changed": false,
+     "newText": "> 正文第二"
+    }
+   }
+  },
+  {
+   "name": "G10-1k",
+   "value": {
+    "initMs": 47,
+    "topChildren": 57,
+    "bottomChildren": 59,
+    "visibleCallouts": 1,
+    "typeBuilds": 6,
+    "avgBuildMs": 0.267,
+    "lastBuildMs": 0.1,
+    "lastVisibleLen": 1414
+   }
+  },
+  {
+   "name": "G10-10k",
+   "value": {
+    "initMs": 103,
+    "topChildren": 82,
+    "bottomChildren": 59,
+    "visibleCallouts": 1,
+    "typeBuilds": 6,
+    "avgBuildMs": 1.917,
+    "lastBuildMs": 2.3,
+    "lastVisibleLen": 1494
+   }
+  },
+  {
+   "name": "G10-100k",
+   "value": {
+    "initMs": 1373,
+    "topChildren": 82,
+    "bottomChildren": 59,
+    "visibleCallouts": 1,
+    "typeBuilds": 6,
+    "avgBuildMs": 21.733,
+    "lastBuildMs": 21.8,
+    "lastVisibleLen": 1574
+   }
+  },
+  {
+   "name": "G10-10k-无callout",
+   "value": {
+    "initMs": 70,
+    "topChildren": 57,
+    "bottomChildren": 57,
+    "visibleCallouts": 0,
+    "typeBuilds": 5,
+    "avgBuildMs": 0,
+    "lastBuildMs": 0,
+    "lastVisibleLen": 1524
+   }
+  },
+  {
+   "name": "pageErrors",
+   "value": []
+  }
+ ],
+ "notes": [
+  "G6-selectorMatrixLive.childContent/descendantContent/nestedCalloutCallout/childTitle = false 是路线 A 的既知边界（跨行容器语义在 Live 行级形态下不可达），非缺陷——矩阵如实登记",
+  "G8 路线 B：DOM 手术重挂在 CM6 DOM 观察器下一轮即被回收（stillWrapped=false），不可作稳定容器",
+  "G9 路线 C：点击可把光标映射进被替换区间（from=41 落在区间内），且其后键入被吞（typed.changed=false）——整块替换不可编辑正文，触及拆件（Obsidian 实测路线）必然丢外框",
+  "G10 候选构建耗时随文档规模线性增长：@lezer/common 的 SyntaxNode.childAfter 从 index 0 线性前扫（dist/index.cjs 源证），视口重扫整树下降 O(doc)。T02 不得按此形态实现，须骑 liveDecorationsField 既有增量窗口发射（生产 Blockquote 行类即在该窗口内）",
+  "断言对账：summary.passed=31 = routeA 28 + routeEvidence 2（G8/G9）+ menuColorProbe 1（G7）；G7 三条实测值（片段三元组 255, 0, 0、文档样式身份 12, 34, 56、布局 rect 稳定）随 2026-10-28 复核修正首次入库",
+  "measurements 中 G8-reparent/G9-blockWidget 为 routeEvidence 同源快照，消费以 routeEvidence 为准"
+ ]
+}

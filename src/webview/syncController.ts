@@ -51,6 +51,20 @@ import {
   unfoldAround,
   type HeadingFoldOperationId,
 } from './headingFold'
+import {
+  applyCalloutToggleAt,
+  calloutFoldField,
+  calloutFoldSpansCached,
+  calloutFoldView,
+  collectCalloutFoldPaint,
+  setCalloutFoldBindingHints,
+  toggleCalloutFoldAt,
+  unfoldCalloutAround,
+} from './calloutFold'
+import { innermostCalloutAt, type LiveCalloutTarget } from './liveDecorations'
+import { planCalloutRemove, planCalloutRetype, planCalloutWrap } from '../shared/calloutPlan'
+import { isValidCalloutTypeInput } from '../shared/calloutSyntax'
+import type { CalloutMenuHit } from '../shared/contextMenu'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
 import { ToastChannel } from './toast'
@@ -163,7 +177,7 @@ import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
-import { liveDocStyle, liveHtmlDocScope, revealHtmlSourceAtCursor } from './liveHtml'
+import { liveDocStyle, liveHtmlDocScope, liveHtmlDocScopeOf, revealHtmlSourceAtCursor, ROOT_DOC_SCOPE } from './liveHtml'
 import {
   hubResourcePort,
   invalidateAllHtmlResources,
@@ -324,6 +338,7 @@ import {
   outlineStructuralExpand,
 } from './outlineMenu'
 import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES, focusMenuDom } from './contextMenuDom'
+import { mountCalloutMenuPreview, type CalloutMenuPreviewHandle } from './calloutMenuPreview'
 import { WIKILINK_SUGGEST_CLASS_NAMES, wikilinkFileResultFresh } from './wikilinkSuggest'
 import {
   PLAIN_MENU_LINE,
@@ -376,6 +391,12 @@ import {
 import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
 import { SnippetLoader } from './snippetLoader'
+import {
+  initCalloutIconStyleWatch,
+  mountCalloutIcons,
+  scheduleCalloutIconRefresh,
+  setCalloutIconDiagnosticsSink,
+} from './calloutIconMount'
 import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidianAlias'
 import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
@@ -846,6 +867,9 @@ export class WebviewSyncController {
   private contextMenuSnapshot: MenuContextSnapshot | null = null
   /** 菜单打开时的文档快照（命令执行时 doc 已变则放弃——锚点过期防御） */
   private contextMenuDoc: Text | null = null
+  /** #658（T07）Callout 类型页取色预览生命周期（探针 + 观察器；菜单打开
+   *  期在场，closeContextMenu 即 dispose 归零；不含类型页的菜单为 null） */
+  private calloutMenuPreview: CalloutMenuPreviewHandle | undefined
   /** 菜单外点关闭监听（document capture pointerdown；close 时摘除） */
   private contextMenuDismissPointer: ((e: PointerEvent) => void) | undefined
   /** 菜单 Esc 关闭监听（document capture keydown；close 时摘除） */
@@ -1085,6 +1109,22 @@ export class WebviewSyncController {
         id === 'headingFoldAll' || id === 'headingUnfoldAll') {
         this.runHeadingFoldCommand(id)
       }
+      // #655（T04）切换当前 callout 折叠：本地分支直执行（视图态零写回，
+      // 不出站宿主往返；命令面板经 ui.command 回发共用 runCalloutToggleCommand
+      // ——router 已按注册表 mode: both 路由，阅读态同样生效）
+      else if (id === 'calloutToggleFold') {
+        this.runCalloutToggleCommand()
+      }
+      // #656（T05）Callout 源文操作两项：本地分支直执行（写操作走 CM6
+      // 事务 → edit.request 标准出站链，一步宿主撤销；router 按注册表
+      // mode: live 路由）。插入/转换按焦点光标定目标（callout 内幂等改
+      // note）；改类型经宿主输入框架往返
+      else if (id === 'calloutInsert') {
+        this.runCalloutInsertCommand()
+      }
+      else if (id === 'calloutChangeType') {
+        this.runCalloutChangeTypeCommand()
+      }
       // #567（T02）编辑当前 HTML 源码：本地分支直执行（纯选区事务零写
       // 回，不出站宿主往返）；命令面板经 ui.command 回发共用
       // runHtmlEditSourceCommand（目标按焦点实例光标解析，无命中静默）
@@ -1169,6 +1209,12 @@ export class WebviewSyncController {
     // （webview 是编辑器本体；无表单后端）。控制器是生产唯一装配入口，
     // 浏览器 fixture 直驱时同样生效
     installHtmlSubmitGuard(document)
+    // #657/T06 callout 图标装载接线：诊断进 TestDiagnostics 观测面；样式
+    // 影响面观察器（片段链装配/文档样式产物 → head 子元素增删、明暗主题
+    // → body class 翻转）触发全量重解析（Live widget 与阅读块挂载另走
+    // 各自时机，见 liveDecorations/onBlockMounted）
+    setCalloutIconDiagnosticsSink((stage, data) => this.diagnostics.record(stage, data))
+    initCalloutIconStyleWatch()
     this.images = new ImageResourceManager({
       // http/https 图源直连（可加载性由 webview CSP 决定），其余经宿主解析
       isDirectSrc: isDirectImageSrc,
@@ -1299,7 +1345,7 @@ export class WebviewSyncController {
       // #567（T02）主文档身份标记（T01 探针 b2 隔离基座）：html 块渲染根
       // 挂 data-vsidian-doc-scope="doc"（嵌入实例的目标身份键随 T04 装载
       // 器接线）
-      docScope: 'doc',
+      docScope: ROOT_DOC_SCOPE,
       // #419 阅读态折叠交互：翻转主文 Live 的折叠 StateField（单一事实源
       // ——阅读与 Live 共享同一折叠状态集）；阅读呈现刷新经下方折叠侦测
       // updateListener 闭环（dispatch → 折叠集变化 → syncReadingFolds）
@@ -1308,9 +1354,19 @@ export class WebviewSyncController {
           toggleHeadingFoldAt(this.view, key)
         }
       },
+      // #655（T04）callout 折叠交互回调：翻转主文 Live 的 callout 折叠
+      // StateField（同一状态源；呈现刷新经上方 callout 折叠侦测闭环）
+      onCalloutFoldToggle: (key) => {
+        if (this.view) {
+          toggleCalloutFoldAt(this.view, key)
+        }
+      },
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
       onBlockMounted: (el) => {
+        // #657/T06：callout 图标解析（块挂载时机——阅读容器计算值已就绪；
+        // 视口回收重挂天然重解析）
+        mountCalloutIcons(el)
         if (this.images) {
           // #570（T05）：HTML 资源装配（img/srcset/媒体属性——A 面板身份；
           // 内部覆盖既有 prepareReadingImages 的 img[src] 面并扩展属性矩阵）
@@ -1871,8 +1927,8 @@ export class WebviewSyncController {
       // 起同键装载全文 <style> 产物（Reading 共享同一 CM6 doc——双模式
       // 单一装载链；dispose 随视图销毁释放）；#570（T05）产物 url()/字体
       // 经 hub 端口按 A 身份解析（sourceDocUri 缺省 = 面板文档）
-      liveHtmlDocScope('doc'),
-      liveDocStyle('doc', hubResourcePort()),
+      liveHtmlDocScope(ROOT_DOC_SCOPE),
+      liveDocStyle(ROOT_DOC_SCOPE, hubResourcePort()),
       // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
       // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
       ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
@@ -1996,6 +2052,12 @@ export class WebviewSyncController {
           }
           if (tr.startState.field(headingFoldField, false) !== tr.state.field(headingFoldField, false)) {
             this.syncReadingFolds()
+            return
+          }
+          // #655（T04）callout 折叠集变化（阅读态箭头点击回环、键位或落点
+          // 展开的 effect 直驱）时重装饰阅读块的折叠呈现——同款侦测闭环
+          if (tr.startState.field(calloutFoldField, false) !== tr.state.field(calloutFoldField, false)) {
+            this.syncReadingCalloutFolds()
             return
           }
         }
@@ -2491,6 +2553,8 @@ export class WebviewSyncController {
         // #414 T03 折叠箭头/省略号的键位徽章数据源（同 quickBindingHints
         // 源注入：widget 与 marker 物化时读取）
         setHeadingFoldBindingHints((op) => getEffectiveBindings(overrides, op))
+        // #655（T04）callout 折叠箭头的键位徽章数据源（同款注入）
+        setCalloutFoldBindingHints(() => getEffectiveBindings(overrides, 'calloutToggleFold'))
         break
       }
       case 'addonPasteRules.snapshot': {
@@ -2593,8 +2657,17 @@ export class WebviewSyncController {
           if (outcome.ok) {
             this.scheduleSnippetMeasure()
             this.scheduleSnippetMeasureOnFontArrival()
+            // #657/T06：片段装载完成 → callout 图标重解析（--callout-icon
+            // 计算值随新 sheet 变化；应用即摘链的场景由 head 观察器兜底）
+            scheduleCalloutIconRefresh()
+            // #658（T07）：菜单打开期间片段落地 → 类型页预览显式重读
+            // （观察器在 <link> 插入时已触发过一次，此处覆盖装载完成时机）
+            this.calloutMenuPreview?.refresh()
           }
         })
+        // 摘链（停用/删除）无装载回报——apply 返回后统一调度一轮
+        scheduleCalloutIconRefresh()
+        this.calloutMenuPreview?.refresh()
         break
       }
       case 'backlinks.snapshot': {
@@ -3067,6 +3140,13 @@ export class WebviewSyncController {
         this.setViewMode(message.mode)
         this.clearAnchorFlash()
         break
+      case 'callout.typeInput.result':
+        // #656（T05）自定义类型输入回执（宿主 showInputBox）：reqId 配对
+        // + 执行上下文重验（实例在场/文档未换版）后消费；取消零编辑
+        if (message.sessionId === this.sessionId) {
+          this.handleCalloutTypeInputResult(message.reqId, message.type)
+        }
+        break
       case 'view.find.open':
         // 查找会话（#14）：webview 内浮动面板；open/step 为纯只读视图操作。
         // replace 语义（命令面板替换入口，与 Ctrl+H 同命令）在阅读模式
@@ -3202,6 +3282,14 @@ export class WebviewSyncController {
           case 'headingToggleFold': this.runHeadingFoldCommand('headingToggleFold'); break
           case 'headingFoldAll': this.runHeadingFoldCommand('headingFoldAll'); break
           case 'headingUnfoldAll': this.runHeadingFoldCommand('headingUnfoldAll'); break
+          // #655（T04）切换当前 callout 折叠：命令面板入口（快捷键走 router
+          // 本地分支直达），两入口共用 runCalloutToggleCommand——Live 按光标、
+          // 阅读按当前锚点解析最内层目标，无目标静默
+          case 'calloutToggleFold': this.runCalloutToggleCommand(); break
+          // #656（T05）Callout 源文操作两项的命令面板入口（快捷键走 router
+          // 本地分支直达），与本地分支共用同一执行体
+          case 'calloutInsert': this.runCalloutInsertCommand(); break
+          case 'calloutChangeType': this.runCalloutChangeTypeCommand(); break
           // #567（T02）编辑当前 HTML 源码：命令面板入口（快捷键走 router
           // 本地分支直达），两入口共用 runHtmlEditSourceCommand——目标按
           // 焦点实例光标解析（焦点在嵌入内部 Live 时落 B 的 html 块），
@@ -4375,7 +4463,7 @@ export class WebviewSyncController {
     // T04（#415）落点展开：modeAnchor 落在折叠隐藏区内时（阅读期间滚动/
     // 定位使锚点回到隐藏区）先展开再回切定位（U12）——折叠态本身随实例
     // 内存驻留保持（setViewMode 不销毁 StateField），此处只处理落点可见性
-    if (this.view) unfoldAround(this.view, pos)
+    if (this.view) this.unfoldAllAround(this.view, pos)
     this.view?.dispatch({
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: 'center' }),
@@ -4451,6 +4539,8 @@ export class WebviewSyncController {
     // 折叠态先行更新（rebuild:false——随后的 setDocument 统一重建消费，
     // 避免双重建；折叠状态未变时 setFoldState 内部短路）
     this.syncReadingFolds(false)
+    // #655（T04）callout 折叠态先行更新（状态集供随后的重建统一装饰）
+    this.syncReadingCalloutFolds()
     this.readingView.setDocument(this.view.state.doc.toString())
     if (keep !== null) {
       this.readingView.scrollToSrcStart(keep)
@@ -4477,6 +4567,27 @@ export class WebviewSyncController {
       keys,
       { rebuild },
     )
+  }
+
+  /**
+   * #655（T04）阅读态 callout 折叠消费同步：从主文 Live StateField 派生
+   * 有效折叠视图（区间派生单一事实源 calloutFold 纯函数族，阅读侧只消费
+   * 不复制）推给阅读视图（已挂块重装饰 + 高度重测——收起是 CSS 隐藏，
+   * 块序列不变）。与 syncReadingFolds 同款调用点（refreshReading 与侦测
+   * 闭环）；派生走 calloutFoldSpansCached 共享缓存（评审修复 P4：此前
+   * 直调 collectCalloutFolds 绕过 WeakMap 缓存，每次折叠侦测闭环全量
+   * 重解析——阅读同步与 Live 装饰读同一 view.state 的 doc/tree，天然
+   * 命中）。
+   */
+  private syncReadingCalloutFolds(): void {
+    const view = this.view
+    if (!view || !this.readingView) {
+      return
+    }
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const spans = calloutFoldSpansCached(view.state.doc, tree)
+    const overrides = view.state.field(calloutFoldField, false) ?? new Map()
+    this.readingView.setCalloutFoldState(calloutFoldView(overrides, spans))
   }
 
   // ---- 任务勾选（#9）：阅读视图的 checkbox 交互 ----
@@ -4522,6 +4633,13 @@ export class WebviewSyncController {
     return Math.max(0, Math.min(offset, this.view?.state.doc.length ?? 0))
   }
 
+  /** 嵌入实例坐标钳制（#662 R1-001）：按传入 view 的文档长度——callout
+   *  执行族的 view 可以是嵌入文档 B（≠ 主文档 A），读主文档长度的
+   *  clampToDoc 会把长 B 的目标坐标截断到 A.length、改写错误段落。 */
+  private clampToViewDoc(view: EditorView, pos: number): number {
+    return Math.max(0, Math.min(pos, view.state.doc.length))
+  }
+
   /**
    * 定位执行（#10 view.locate 宿主消息与 #66 大纲点击共用同一实现）：
    * 光标移到源 offset；reading 滚动到锚点块。纯视图操作——事务不带
@@ -4547,7 +4665,7 @@ export class WebviewSyncController {
       // 展开后落点已进可见序列，锚点不再 floor 到折叠标题。语义与
       // Live 分支同款（reveal 族统一机制，规格「七」）
       if (this.view) {
-        unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
+        this.unfoldAllAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
       }
       const start = this.readingView.anchorStartFor(pos) ?? pos
       this.modeAnchor = start
@@ -4567,7 +4685,7 @@ export class WebviewSyncController {
       // 区间右端在折叠隐藏区内时，先永久展开包含它的全部折叠（嵌套全
       // 展开，effect 直驱）再定位；#419 起阅读分支同款（上方）
       if (this.view) {
-        unfoldAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
+        this.unfoldAllAround(this.view, pos, head !== undefined ? this.clampToDoc(head) : undefined)
       }
       // #57：定位离开表格选区语境时清选区（view.locate 与大纲跳转共用）
       if (this.view) selectTableRegion(this.view, null)
@@ -7760,6 +7878,9 @@ export class WebviewSyncController {
       ...(zone === 'table' ? { table: this.tableMenuHitAt(view, pos) } : {}),
       ...(zone === 'graphic' ? { graphic: this.graphicMenuHitAt(view, lines, lineIndex) } : {}),
       ...(zone === 'normal' ? { link: menuLinkHitAtPos(view, pos) ?? undefined } : {}),
+      // #656（T05）callout 命中负载：normal 区采集（最内层目标类型 + 标题行
+      // 判定——类型菜单 when/checked 谓词数据面与执行期定位输入）
+      ...(zone === 'normal' ? { callout: this.calloutMenuHitAt(view, pos) } : {}),
     }
   }
 
@@ -7899,6 +8020,17 @@ export class WebviewSyncController {
     this.contextMenuSnapshot = snapshot
     this.contextMenuDoc = view.state.doc
     document.body.appendChild(menu)
+    // #658（T07）Callout 类型页取色预览：菜单含类型页时挂隐藏探针绘制
+    // 预览（在 applySubmenuFlip 量宽**之前**——预览槽加宽三级面，翻转与
+    // 低高度封顶按含预览的实际宽度判定）；不含类型页返回 null 零影响。
+    // #659（T08）文档样式身份随菜单目标：嵌入内部 Live 打开时探针取目标
+    // 文档的 docScope（liveHtmlDocScopeOf facet——B 的文档样式产物进
+    // 预览），主文打开缺省根文档 'doc'（预览选项缺省同值）
+    this.calloutMenuPreview?.dispose()
+    this.calloutMenuPreview = mountCalloutMenuPreview(menu, {
+      scopeRoot: this.rootEl ?? document.body,
+      docScope: liveHtmlDocScopeOf(view.state) ?? 'doc',
+    }) ?? undefined
     const size = { w: menu.offsetWidth || 220, h: menu.offsetHeight || 260 }
     const pos = menuViewportPosition(
       { x: clientX, y: clientY },
@@ -7907,7 +8039,8 @@ export class WebviewSyncController {
     )
     menu.style.left = `${Math.max(0, pos.left)}px`
     menu.style.top = `${Math.max(0, pos.top)}px`
-    applySubmenuFlip(menu, window.innerWidth || 1200)
+    // #656：传视口高（子菜单低高度封顶——三级类型列表滚动可达面）
+    applySubmenuFlip(menu, window.innerWidth || 1200, undefined, window.innerHeight || 800)
     // 键盘导航起点：聚焦菜单容器（打开菜单接管方向键；关闭时还焦先前
     // 宿主——见 menuPrevFocus 注释）
     this.captureMenuFocus()
@@ -7945,6 +8078,9 @@ export class WebviewSyncController {
     }
     this.contextMenuEl?.remove()
     this.contextMenuEl = undefined
+    // #658（T07）：预览探针与观察器随菜单关闭归零（无泄漏；幂等）
+    this.calloutMenuPreview?.dispose()
+    this.calloutMenuPreview = undefined
     this.contextMenuView = undefined
     this.contextMenuTarget = null
     this.contextMenuSnapshot = null
@@ -8044,6 +8180,16 @@ export class WebviewSyncController {
       const graphic = menuSnapshot?.graphic
       if (graphic !== undefined) {
         this.runGraphicOp(command, graphic, view)
+      }
+      return
+    }
+    // #656（T05）Callout 类型叶项（三级菜单与标题右键子菜单同一执行通道）：
+    // 目标 = 菜单打开时捕获的命中位置（右键以命中位置定目标，不先破坏选
+    // 区；普通正文负载同样在场——类型项转包裹路径、"无 Callout"零操作）
+    if (command.startsWith('calloutType:')) {
+      const hit = menuSnapshot?.callout
+      if (hit !== undefined) {
+        this.runCalloutTypeMenuCommand(command.slice('calloutType:'.length), view, embed, hit.pos)
       }
       return
     }
@@ -9808,7 +9954,7 @@ export class WebviewSyncController {
       // T04/#415 同款语义），展开的同步回环刷新块序列后再算锚点——命中
       // 块已进可见序列，锚点不再 floor 到折叠标题
       if (this.view) {
-        unfoldAround(this.view, this.clampToDoc(cur.from), this.clampToDoc(cur.to))
+        this.unfoldAllAround(this.view, this.clampToDoc(cur.from), this.clampToDoc(cur.to))
       }
       const start = this.readingView.anchorStartFor(this.clampToDoc(cur.from)) ?? cur.from
       this.modeAnchor = start
@@ -9832,7 +9978,7 @@ export class WebviewSyncController {
       // T04（#415）落点展开：查找下一个/上一个命中（含替换后定位）落在
       // 折叠隐藏区内时，该节自动展开并定位（U10）——匹配区间 [from, to]
       // 任一端在隐藏区即展开
-      if (this.view) unfoldAround(this.view, cur.from, cur.to)
+      if (this.view) this.unfoldAllAround(this.view, cur.from, cur.to)
       this.view?.dispatch({
         selection: { anchor: cur.from, head: cur.to },
         effects: EditorView.scrollIntoView(cur.from, { y: 'center' }),
@@ -10283,6 +10429,194 @@ export class WebviewSyncController {
       return
     }
     applyHeadingFoldOperation(resolved.view, op)
+  }
+
+  /** #655（T04）「切换当前 callout 折叠」执行口：键位本地分支与命令面板
+   *  共用。目标 = 焦点实例内解析位置所在的最内层可折叠 callout——Live
+   *  按光标主位；**阅读态按当前阅读锚点**（modeAnchor ?? 视口锚点——
+   *  规格 §6.3 的 Live/阅读双生效：callout 目标不依赖光标辖域，与
+   *  headingFold live-only 的定案差异依据）。门控不查 viewMode（阅读
+   *  合法），只拒只读/暂停；无目标静默 no-op。 */
+  private runCalloutToggleCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const view = resolved.view
+    if (view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      return
+    }
+    if (resolved.embed ? resolved.embed.isSuspended : this.suspended) {
+      return
+    }
+    let pos: number | null = null
+    if (resolved.embed) {
+      pos = view.state.selection.main.head
+    } else if (this.viewMode === 'live') {
+      pos = view.state.selection.main.head
+    } else {
+      // 阅读态：当前锚点（modeAnchor 用户滚动/定位维护）回退视口顶锚点
+      pos = this.modeAnchor ?? this.readingView?.currentAnchor() ?? null
+    }
+    if (pos === null) {
+      return
+    }
+    applyCalloutToggleAt(view, this.clampToViewDoc(view, pos))
+  }
+
+  /** #655（T04）落点展开的组合入口（reveal 族接线点统一消费——依次消费
+   *  标题折叠与 callout 折叠两者的展开能力，heading-fold.md「定位链依次
+   *  消费两者」约定）：先标题后 callout（两状态集独立，序无语义影响）。 */
+  private unfoldAllAround(view: EditorView, from: number, to?: number): void {
+    unfoldAround(view, from, to)
+    unfoldCalloutAround(view, from, to)
+  }
+
+  // ---- #656（T05）Callout 源文操作执行族（规格 callout.md §6）----
+  // 三入口共用：三级菜单/标题右键子菜单（runContextMenuCommand 的
+  // calloutType: 前缀分支，目标 = 打开菜单时捕获的命中位置）、键位/命令
+  // 面板（calloutInsert / calloutChangeType，目标 = 焦点实例主光标——
+  // 多选区沿主选区口径）、自定义输入回流（callout.typeInput.result，
+  // 目标 = 请求时保存的上下文重验后消费）。每次操作 = 一笔 CM6 事务 =
+  // 一笔 edit.request = 宿主一步撤销；规划产物 null（同类型幂等/普通
+  // 正文执行无 Callout）零 dispatch 零撤销项。
+
+  /** 命中位置 → CalloutMenuHit（快照采集；树解析失败回退全量解析） */
+  private calloutMenuHitAt(view: EditorView, pos: number): CalloutMenuHit {
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit = innermostCalloutAt(view.state.doc, tree, pos)
+    return {
+      pos,
+      currentType: hit ? hit.decl.type : null,
+      hitTitleLine: hit ? view.state.doc.lineAt(pos).number === hit.titleLineNo : false,
+    }
+  }
+
+  /** 单次转换执行（三入口汇合点）：pos 定目标（最内层 callout 命中 →
+   *  改类型/移除；普通正文 → 包裹，选区取 view 当前主选区——右键保选区
+   *  语义下菜单与键位同数据面）。门控 targetEditable；规划 null 静默。 */
+  private applyCalloutTypeAt(view: EditorView, embed: LiveEditorInstance | null, pos: number, target: 'none' | string): void {
+    if (!this.targetEditable(view, embed)) {
+      return
+    }
+    const clamped = this.clampToViewDoc(view, pos)
+    const text = view.state.doc.toString()
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit: LiveCalloutTarget | null = innermostCalloutAt(view.state.doc, tree, clamped)
+    // 包裹范围（普通正文路径）：真选区 → 主选区（右键保选区语义下的用户
+    // 选择）；空选区 → 命中位置本身（规划器按 from===to 展开「命中行所在
+    // 段落／空行骨架」——右键无选区时转换的是命中段落而非光标段落，规格
+    // §6.1 的目标确定方式）
+    const sel = view.state.selection.main
+    const plan = hit
+      ? (target === 'none' ? planCalloutRemove(text, hit) : planCalloutRetype(hit, target))
+      : (target === 'none' ? null : planCalloutWrap(text,
+        sel.empty ? clamped : sel.from, sel.empty ? clamped : sel.to, target))
+    if (!plan) {
+      return // 同类型幂等/普通正文执行无 Callout：零编辑零撤销项
+    }
+    view.dispatch({
+      changes: plan.changes as Array<{ from: number; to: number; insert: string }>,
+      ...(plan.selection ? { selection: plan.selection } : {}),
+    })
+  }
+
+  /** 菜单命令执行体（runContextMenuCommand 分支入口）：目标 = 菜单打开时
+   *  捕获的 CalloutMenuHit.pos（右键以命中位置定目标，不先破坏选区——
+   *  重验后以命中位置与当前主选区执行）；'custom' 发起宿主输入框架 */
+  private runCalloutTypeMenuCommand(target: 'none' | 'custom' | string, view: EditorView, embed: LiveEditorInstance | null, hitPos: number): void {
+    if (target === 'custom') {
+      this.requestCalloutTypeInput(view, embed, hitPos)
+      return
+    }
+    this.applyCalloutTypeAt(view, embed, hitPos, target)
+  }
+
+  /** 键位/命令面板「插入／转换 callout」：目标 = 焦点实例主光标。已有
+   *  callout 内等价改最内层为 note（幂等零编辑），普通正文走包裹（骨架/
+   *  当前段落/主选区扩展整行） */
+  private runCalloutInsertCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const pos = resolved.view.state.selection.main.head
+    this.applyCalloutTypeAt(resolved.view, resolved.embed, pos, 'note')
+  }
+
+  /** 键位/命令面板「修改当前 callout 类型」：焦点光标最内层 callout 经输入
+   *  框改类型；不在 callout 内静默 */
+  private runCalloutChangeTypeCommand(): void {
+    const resolved = this.actionTarget()
+    if (!resolved) {
+      return
+    }
+    const view = resolved.view
+    const pos = this.clampToViewDoc(view, view.state.selection.main.head)
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit = innermostCalloutAt(view.state.doc, tree, pos)
+    if (!hit) {
+      return
+    }
+    this.requestCalloutTypeInput(view, resolved.embed, pos)
+  }
+
+  /** 自定义类型输入的在途上下文（一次只有一个输入框；会话身份由出站
+   *  消息携带，回流的 reqId 与之配对；重验 = 实例在场 + doc 实例判等——
+   *  contextMenuDoc 锚点过期防御同模式） */
+  private pendingCalloutInput: {
+    reqId: number
+    view: EditorView
+    doc: Text
+    pos: number
+    embed: LiveEditorInstance | null
+  } | null = null
+  private calloutTypeInputSeq = 0
+
+  /** 发起宿主输入框架（现有 showInputBox 通道）：保存执行上下文，回流
+   *  （callout.typeInput.result）后重验执行。取消（type=null）零编辑。 */
+  private requestCalloutTypeInput(view: EditorView, embed: LiveEditorInstance | null, pos: number): void {
+    if (!this.sessionId) {
+      return
+    }
+    const tree = view.state.field(liveDecorationsField, false)?.tree
+    const hit = innermostCalloutAt(view.state.doc, tree, this.clampToViewDoc(view, pos))
+    this.calloutTypeInputSeq += 1
+    const reqId = this.calloutTypeInputSeq
+    this.pendingCalloutInput = { reqId, view, doc: view.state.doc, pos: this.clampToViewDoc(view, pos), embed }
+    this.bridge.postMessage({
+      kind: 'callout.typeInput.request',
+      sessionId: this.sessionId,
+      docUri: this.docUri,
+      reqId,
+      current: hit ? hit.decl.type : '',
+    })
+  }
+
+  /** 输入回流消费（callout.typeInput.result）：reqId 配对 + 上下文重验
+   *  （实例在场 / 文档未换版）后按命中路径执行（callout 内改类型／普通
+   *  正文包裹——预填时无命中的普通正文自定义输入在此转换为骨架/选区
+   *  包裹）；取消或重验失败零编辑。 */
+  private handleCalloutTypeInputResult(reqId: number, type: string | null): void {
+    const pending = this.pendingCalloutInput
+    this.pendingCalloutInput = null
+    if (!pending || pending.reqId !== reqId) {
+      return
+    }
+    if (type === null || !isValidCalloutTypeInput(type)) {
+      return // 取消输入不改文档（宿主已拦非法形态，双保险）
+    }
+    // 重验一：目标实例在场（主正文或嵌入注册表）
+    const view = pending.view
+    const isMain = view === this.view
+    if (!isMain && !(this.embedCards?.liveViewEntry(view))) {
+      return
+    }
+    // 重验二：锚点过期防御（输入框期间文档被外部改写即放弃）
+    if (view.state.doc !== pending.doc) {
+      return
+    }
+    this.applyCalloutTypeAt(view, pending.embed, pending.pos, type.trim().toLowerCase())
   }
 
   /** #567（T02）「编辑当前 HTML 源码」：光标所在 html 块 → 选中完整源码
@@ -11519,6 +11853,12 @@ export class WebviewSyncController {
       //  采集；Live 模式缺省不参与断言）
       ...(this.viewMode === 'reading' && this.readingView
         ? { readingFold: this.readingView.collectFoldPaint() }
+        : {}),
+      // #655（T04）callout 折叠绘制观测（Live 侧箭头/收起区间）与阅读侧
+      //  收起呈现（仅 reading 模式采集）
+      calloutFold: collectCalloutFoldPaint(view),
+      ...(this.viewMode === 'reading' && this.readingView
+        ? { readingCalloutFold: this.readingView.collectCalloutFoldPaint() }
         : {}),
       ...(wrapAddonUiPaint(this.collectAddonUiPaint())),
       toast: this.collectToastPaint(),

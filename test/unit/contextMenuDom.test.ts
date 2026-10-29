@@ -70,6 +70,95 @@ describe('子菜单分组分隔线（#183 验收反馈）', () => {
   })
 })
 
+// ---- #658（T07）Callout 类型页逐项分隔线：itemSeparators 子菜单在相邻
+// 可见项之间各落一条（同色类型也有清晰边界），首尾不附孤线，隐藏/置灰不
+// 产生重复线；分隔线 role=presentation 不进键盘焦点序列；仅该类子菜单逐
+// 项分隔，其他子菜单仍按组边界 ----
+
+describe('Callout 类型页逐项分隔线（#658/T07）', () => {
+  const directSeps = (host: HTMLElement) =>
+    [...host.children].filter((el) => el.classList.contains(CONTEXT_MENU_CLASS_NAMES.separator))
+
+  const typeItems = (count: number) =>
+    Array.from({ length: count }, (_, i) => item({ id: `t${i}`, group: 'calloutTypes' }))
+
+  it('itemSeparators 子菜单：相邻可见项之间各恰一条，首尾不附孤线，同组同色也分隔', () => {
+    const menu = build([{
+      id: 'g', items: [item({
+        id: 'calloutInsert', itemSeparators: true,
+        children: [
+          item({ id: 'none', group: 'calloutNone' }),
+          ...typeItems(3),
+          item({ id: 'custom', group: 'calloutCustom' }),
+        ],
+      })],
+    }])
+    const submenu = menu.querySelector<HTMLElement>(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)!
+    const children = [...submenu.children]
+    const seps = directSeps(submenu)
+    // 5 个可见项 → 4 条；跨组交界不叠加组线（组线模式在该子菜单被替代）
+    expect(seps.length).toBe(4)
+    // 首尾不是分隔线（孤线禁止）
+    expect(children[0]!.classList.contains(CONTEXT_MENU_CLASS_NAMES.separator)).toBe(false)
+    expect(children[children.length - 1]!.classList.contains(CONTEXT_MENU_CLASS_NAMES.separator)).toBe(false)
+    // 分隔线不进键盘焦点序列（role=presentation 且非可聚焦元素）
+    expect(seps.every((el) => el.getAttribute('role') === 'presentation' && !(el instanceof HTMLButtonElement))).toBe(true)
+    // 项与分隔线严格交替（每对相邻可见项之间恰一条）
+    const kinds = children.map((el) => el.classList.contains(CONTEXT_MENU_CLASS_NAMES.separator) ? 'sep' : 'item')
+    expect(kinds.join(',')).toBe('item,sep,item,sep,item,sep,item,sep,item')
+  })
+
+  it('隐藏项经模型层移除后不产生重复线（相邻交界收敛为单线）', () => {
+    // renderDef 已过滤隐藏项（模型层职责）——DOM 层拿到的 children 即可见
+    // 序列；模拟隐藏 t1 后剩余 4 项应恰 3 条线、无相邻双线
+    const menu = build([{
+      id: 'g', items: [item({
+        id: 'calloutInsert', itemSeparators: true,
+        children: [
+          item({ id: 'none', group: 'calloutNone' }),
+          item({ id: 't0', group: 'calloutTypes' }),
+          item({ id: 't2', group: 'calloutTypes' }),
+          item({ id: 'custom', group: 'calloutCustom' }),
+        ],
+      })],
+    }])
+    const submenu = menu.querySelector<HTMLElement>(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)!
+    expect(directSeps(submenu).length).toBe(3)
+    const kinds = [...submenu.children].map((el) =>
+      el.classList.contains(CONTEXT_MENU_CLASS_NAMES.separator) ? 'sep' : 'item')
+    expect(kinds.join(',')).not.toMatch(/sep,sep/)
+  })
+
+  it('置灰项仍可见：逐项分隔照常（隐藏/置灰不造孤线——置灰非隐藏）', () => {
+    const menu = build([{
+      id: 'g', items: [item({
+        id: 'calloutInsert', itemSeparators: true,
+        children: [
+          item({ id: 'none', group: 'calloutNone' }),
+          item({ id: 't0', group: 'calloutTypes', enabled: false }),
+          item({ id: 't1', group: 'calloutTypes' }),
+        ],
+      })],
+    }])
+    const submenu = menu.querySelector<HTMLElement>(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)!
+    expect(directSeps(submenu).length).toBe(2)
+  })
+
+  it('未标记 itemSeparators 的子菜单不受影响（仍按组边界，其他菜单不加线）', () => {
+    const menu = build([{
+      id: 'g', items: [item({
+        id: 'textFormat',
+        children: [
+          item({ id: 'a1', group: 'ga' }),
+          item({ id: 'a2', group: 'ga' }),
+        ],
+      })],
+    }])
+    const submenu = menu.querySelector<HTMLElement>(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)!
+    expect(directSeps(submenu).length).toBe(0)
+  })
+})
+
 describe('基础装配（role / 命令锚点 / 分组线）', () => {
   it('容器 role=menu；顶级项 button role=menuitem 携 data-vsidian-command；文案经取词器', () => {
     const menu = build([{ id: 'link', items: [item({ id: 'selectAll' })] }])
@@ -403,5 +492,90 @@ describe('键盘方向键导航（规格交互契约：Up/Down 移动、Right �
     press(menu.ownerDocument.activeElement!, 'ArrowLeft')
     expect(activeCommand(menu)).toBe('copy')
     menu.remove()
+  })
+})
+
+// ---- #656（T05）三级子菜单（Callout 类型路径）DOM 契约 ----
+
+describe('三级子菜单（#656：Callout 类型路径的唯一扩容）', () => {
+  const threeLevelGroups = (): RenderedMenuGroup[] => [{
+    id: 'blockFormat',
+    items: [item({
+      id: 'insert',
+      command: 'insert',
+      children: [item({
+        id: 'insertCallout',
+        command: 'calloutInsert',
+        children: [
+          item({ id: 'calloutNone', command: 'calloutType:none', group: 'calloutNone', checked: true }),
+          item({ id: 'calloutType.note', command: 'calloutType:note', group: 'calloutTypes' }),
+          item({ id: 'calloutType.tip', command: 'calloutType:tip', group: 'calloutTypes' }),
+          item({ id: 'calloutCustom', command: 'calloutType:custom', group: 'calloutCustom' }),
+        ],
+      })],
+    })],
+  }]
+
+  it('孙级 submenu 嵌在二级父项宿主内（递归装配，role=menu 链）', () => {
+    const menu = build(threeLevelGroups())
+    const submenu = menu.querySelector(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)
+    expect(submenu).toBeTruthy()
+    const level2Host = submenu?.querySelector(`:scope > .${CONTEXT_MENU_CLASS_NAMES.itemHost}`)
+    expect(level2Host).toBeTruthy()
+    const grandchild = level2Host?.querySelector(`:scope > .${CONTEXT_MENU_CLASS_NAMES.submenu}`)
+    expect(grandchild?.getAttribute('role')).toBe('menu')
+    expect(grandchild?.querySelectorAll('button').length).toBe(4)
+  })
+
+  it('孙级菜单面分组线：无 Callout｜类型｜自定义 三组两条', () => {
+    const menu = build(threeLevelGroups())
+    const grandchild = menu.querySelectorAll(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)[1]!
+    const seps = [...grandchild.children].filter((el) =>
+      el.classList.contains(CONTEXT_MENU_CLASS_NAMES.separator))
+    expect(seps.length).toBe(2)
+  })
+
+  it('叶命令点击回调直达（三级叶项 onCommand 通道）', () => {
+    const got: string[] = []
+    const menu = buildMenuDom(threeLevelGroups(), { onCommand: (c) => got.push(c), resolveLabel: label })
+    const leaf = menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="calloutType:tip"]')
+    leaf?.click()
+    expect(got).toEqual(['calloutType:tip'])
+  })
+
+  it('父项（insert/insertCallout）点击只展开不执行', () => {
+    const got: string[] = []
+    const menu = buildMenuDom(threeLevelGroups(), { onCommand: (c) => got.push(c), resolveLabel: label })
+    menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="insert"]')?.click()
+    menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="calloutInsert"]')?.click()
+    expect(got).toEqual([])
+  })
+
+  it('键盘导航面判定按最近 role=menu 祖先（三级各自成面）', () => {
+    const menu = build(threeLevelGroups())
+    // jsdom 焦点语义需要连接态（键盘测试先例：挂 body）
+    document.body.appendChild(menu)
+    try {
+      focusMenuDom(menu)
+      const grandchild = menu.querySelectorAll(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)[1]!
+      const leaf = grandchild.querySelector<HTMLButtonElement>('button[data-vsidian-command="calloutType:custom"]')
+      expect(leaf).toBeTruthy()
+      leaf!.focus()
+      // 孙级面内 ArrowUp 循环（custom → tip：面内 4 项循环）
+      leaf!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }))
+      expect(document.activeElement?.getAttribute('data-vsidian-command')).toBe('calloutType:tip')
+      // ArrowLeft 从孙级面退回二级父项
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }))
+      expect(document.activeElement?.getAttribute('data-vsidian-command')).toBe('calloutInsert')
+    } finally {
+      menu.remove()
+    }
+  })
+
+  it('勾选叶项呈现 menuitemcheckbox + aria-checked（无 Callout 当前态）', () => {
+    const menu = build(threeLevelGroups())
+    const none = menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="calloutType:none"]')
+    expect(none?.getAttribute('role')).toBe('menuitemcheckbox')
+    expect(none?.getAttribute('aria-checked')).toBe('true')
   })
 })

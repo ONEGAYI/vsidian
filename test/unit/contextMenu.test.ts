@@ -37,6 +37,7 @@ import {
   type MenuItemDescriptor,
 } from '../../src/shared/contextMenu'
 import { isFormatOperationId } from '../../src/shared/formatOperations'
+import { CALLOUT_TYPE_IDS } from '../../src/shared/calloutPlan'
 import { en } from '../../src/shared/locales/en'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 
@@ -70,9 +71,18 @@ const modelIds = (ctx: MenuContextSnapshot) =>
 describe('描述符表契约（CONTEXT_MENU_ITEMS）', () => {
   const all = flattenItems(CONTEXT_MENU_ITEMS)
 
-  it('id 全局唯一（含子项）', () => {
-    const ids = all.map((def) => def.id)
-    expect(new Set(ids).size).toBe(ids.length)
+  it('id 全局唯一；同 id 多处出现必须是共享子树（同一描述符对象——#656 类型列表两处呈现）', () => {
+    const byId = new Map<string, object>()
+    for (const def of all) {
+      const prev = byId.get(def.id)
+      if (prev !== undefined) {
+        // 复用同一类型列表与执行通道（规格 callout.md §7）——同 id 允许，
+        // 但必须是同一对象（防两份漂移副本）
+        expect(prev).toBe(def)
+      } else {
+        byId.set(def.id, def)
+      }
+    }
   })
 
   it('group 与 labelKey 契约：顶级 group 已登记（簇序受控）；子项 group 非空（子组按首现序排后）；双包 parity 抽查', () => {
@@ -99,9 +109,17 @@ describe('描述符表契约（CONTEXT_MENU_ITEMS）', () => {
     }
   })
 
-  it('内置菜单最深两级（根 → 子菜单）', () => {
-    expect(CONTEXT_MENU_ITEMS.some((def) =>
-      (def as MenuItemDescriptor).children?.some((child) => child.children?.length))).toBe(false)
+  it('内置菜单最深三级，且第三级仅在 Callout 类型路径（#656/T05 规格授权的唯一扩容）', () => {
+    // 三级 = 二级父项（子菜单项）再挂 children；唯一入口是 insertCallout
+    const level2WithChildren: string[] = []
+    for (const def of CONTEXT_MENU_ITEMS) {
+      for (const child of (def as MenuItemDescriptor).children ?? []) {
+        if (child.children?.length) {
+          level2WithChildren.push(child.id)
+        }
+      }
+    }
+    expect(level2WithChildren).toEqual(['insertCallout'])
   })
 
   it('三簇齐全：链接 / 块与格式 / 剪贴板（组序即簇序）', () => {
@@ -121,7 +139,9 @@ describe('覆写层语义（运行期注册表，内置 = 第一个注册者）'
   it('内置全量经运行期层渲染，无第二套代码路径', () => {
     const registryIds = contextMenuRegistrySnapshot().map((def) => def.id).sort()
     const builtinIds = flattenItems(CONTEXT_MENU_ITEMS).map((def) => def.id).sort()
-    expect(registryIds).toEqual(builtinIds)
+    // 共享子树（calloutTypeChildren 两处挂载）flatten 产出重复 id，注册表
+    // 以 Map 收敛——按 id 集合对比（同 id 同对象，语义无第二套路径）
+    expect(new Set(registryIds)).toEqual(new Set(builtinIds))
     // 渲染走 registry：标题行 + 链接命中上下文（#437/#438 场景簇按 zone
     // 过滤、#439 链接三项与块链接两项按命中在场，期望集对谓词求值感知）
     // 能拿到全部顶级项，且子项不因扁平注册表被提升为顶级项
@@ -443,9 +463,9 @@ describe('安全降级矩阵（逐区域 when/enable）', () => {
 })
 
 describe('场景命中负载与场景簇组预登记（#436 基建）', () => {
-  it('组序预登记 tableOps / graphicOps：位于链接簇后、块与格式簇前', () => {
+  it('组序预登记 calloutOps / tableOps / graphicOps：calloutOps 居首，tableOps/graphicOps 位于链接簇后、块与格式簇前', () => {
     expect([...CONTEXT_MENU_GROUP_ORDER]).toEqual([
-      'link', 'tableOps', 'graphicOps', 'blockFormat', 'clipboard',
+      'calloutOps', 'link', 'tableOps', 'graphicOps', 'blockFormat', 'clipboard',
     ])
   })
 
@@ -966,8 +986,8 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
   )
   const root = path.resolve(process.cwd())
 
-  it('被描述符引用的图标 key 恰 40 枚（27 既有 + #441 表格簇 10 枚 + 图形簇 3 枚）', () => {
-    expect(referenced.size).toBe(40)
+  it('被描述符引用的图标 key 恰 41 枚（27 既有 + #441 表格簇 10 枚 + 图形簇 3 枚 + #656 callout 转正）', () => {
+    expect(referenced.size).toBe(41)
   })
 
   it('每个被引用 key 都有明暗两套 SVG 资产文件', () => {
@@ -979,13 +999,14 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
     }
   })
 
-  it('备用 3 key（media/footnote/callout）不被任何描述符引用（显式记账）', () => {
-    for (const key of ['media', 'footnote', 'callout']) {
+  it('备用 key（media/footnote）不被任何描述符引用；callout 已于 #656 转正接线', () => {
+    for (const key of ['media', 'footnote']) {
       expect(referenced.has(key), `备用 key ${key} 不应被描述符引用`).toBe(false)
       // 资产在表登记（KEYS 同步）：备用资产文件同样在场
       expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
         `备用 key ${key} 的资产应在场（记账）`).toBe(true)
     }
+    expect(referenced.has('callout'), 'callout 应随 #656 接线被引用').toBe(true)
   })
 
   it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则', () => {
@@ -1156,6 +1177,14 @@ describe('命令分派契约（三簇叶命令可执行；显式分支另有面�
       if (def.children && def.children.length > 0) {
         continue // 父项点击只展开不执行（无叶命令）
       }
+      // #656 Callout 类型叶项：calloutType:<id> 前缀分支（runContextMenuCommand
+      // 的 startsWith 分派——行为级用例在 contextMenuPanel.test.ts）
+      if (def.command.startsWith('calloutType:')) {
+        expect(['none', 'custom'].includes(def.command.slice('calloutType:'.length)) ||
+          CALLOUT_TYPE_IDS.includes(def.command.slice('calloutType:'.length)),
+          `${def.id} 的命令 ${def.command} 不在类型域（none/custom/13 规范类型）`).toBe(true)
+        continue
+      }
       expect(
         isFormatOperationId(def.command) || explicit.has(def.command),
         `${def.id} 的命令 ${def.command} 无执行路径（formatOperations 与显式分支均未覆盖）`,
@@ -1231,5 +1260,109 @@ describe('图形专属簇（#438：弹窗/导出/复制的谓词矩阵与簇位�
     const states = graphicStates(normalCtx({ zone: 'graphic' }))
     expect(states['graphicPopup']).toBe(false)
     expect(states['graphicExportSvg']).toBe(false)
+  })
+})
+
+// ---- #656（T05）Callout 类型菜单：谓词矩阵与三级结构 ----
+
+describe('Callout 类型菜单（#656：三级结构与谓词矩阵）', () => {
+  const calloutCtx = (over: Partial<NonNullable<MenuContextSnapshot['callout']>> = {}): MenuContextSnapshot =>
+    normalCtx({ callout: { pos: 0, currentType: null, hitTitleLine: false, ...over } })
+
+  it('标题右键子菜单仅在命中标题行时在场（calloutOps 空组自然收起）', () => {
+    const onTitle = calloutCtx({ pos: 8, currentType: 'note', hitTitleLine: true })
+    expect(modelIds(onTitle)).toContain('calloutTypeMenu')
+    const inBody = calloutCtx({ pos: 20, currentType: 'note', hitTitleLine: false })
+    expect(modelIds(inBody)).not.toContain('calloutTypeMenu')
+    const plain = normalCtx()
+    expect(modelIds(plain)).not.toContain('calloutTypeMenu')
+  })
+
+  it('普通正文：「无 Callout」勾选、类型项全不勾选（当前状态呈现）', () => {
+    const ctx = calloutCtx()
+    const model = buildContextMenuModel(ctx)
+    const submenu = model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+      ?.children?.find((item) => item.id === 'insertCallout')?.children ?? []
+    const none = submenu.find((item) => item.id === 'calloutNone')
+    expect(none?.checked).toBe(true)
+    expect(submenu.filter((item) => item.id.startsWith('calloutType.')).every((item) => !item.checked)).toBe(true)
+  })
+
+  it('callout 内：当前类型按语法归类点亮（别名归目标；未知类型不点亮任何内置项）', () => {
+    const inCallout = (type: string) => {
+      const model = buildContextMenuModel(calloutCtx({ pos: 8, currentType: type }))
+      return model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+        ?.children?.find((item) => item.id === 'insertCallout')?.children ?? []
+    }
+    expect(inCallout('note').find((i) => i.id === 'calloutType.note')?.checked).toBe(true)
+    // 别名 cite 语法归类 quote
+    expect(inCallout('cite').find((i) => i.id === 'calloutType.quote')?.checked).toBe(true)
+    // 未知自定义类型：不点亮任何内置项（经自定义入口修改）
+    expect(inCallout('my-type').filter((i) => i.checked)).toEqual([])
+    // 无 Callout 项不再勾选
+    expect(inCallout('note').find((i) => i.id === 'calloutNone')?.checked).toBe(false)
+  })
+
+  it('类型列表 = 无 Callout + 13 规范类型（注册表序，别名不重复）+ 自定义输入', () => {
+    const model = buildContextMenuModel(calloutCtx())
+    const submenu = model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+      ?.children?.find((item) => item.id === 'insertCallout')?.children ?? []
+    expect(submenu.map((item) => item.id)).toEqual([
+      'calloutNone',
+      ...CALLOUT_TYPE_IDS.map((id) => `calloutType.${id}`),
+      'calloutCustom',
+    ])
+    // 命令与 id 对应（calloutType: 前缀执行通道）
+    expect(submenu.find((i) => i.id === 'calloutNone')?.command).toBe('calloutType:none')
+    expect(submenu.find((i) => i.id === 'calloutCustom')?.command).toBe('calloutType:custom')
+    expect(submenu.find((i) => i.id === 'calloutType.tip')?.command).toBe('calloutType:tip')
+  })
+
+  it('结构敏感区（表格/围栏/图形）整簇置灰：父项 enable 传播（安全矩阵不破例）', () => {
+    for (const zone of ['table', 'fence', 'graphic'] as const) {
+      const ctx = normalCtx({ zone })
+      const model = buildContextMenuModel(ctx)
+      const insert = model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+      const callout = insert?.children?.find((item) => item.id === 'insertCallout')
+      expect(callout?.enabled, `zone=${zone} 的 Callout 父项应置灰`).toBe(false)
+      for (const leaf of callout?.children ?? []) {
+        expect(leaf.enabled, `zone=${zone} 的 ${leaf.id} 应随父项置灰`).toBe(false)
+      }
+    }
+  })
+
+  it('标题右键子菜单与插入路径共享同一类型列表对象（复用同一执行通道）', () => {
+    const top = CONTEXT_MENU_ITEMS.find((def) => def.id === 'calloutTypeMenu') as MenuItemDescriptor
+    const insert = CONTEXT_MENU_ITEMS.find((def) => def.id === 'insert') as MenuItemDescriptor
+    const insertCallout = insert.children!.find((child) => child.id === 'insertCallout')!
+    expect(top.children).toBe(insertCallout.children)
+  })
+
+  // ---- #658（T07）：类型页逐项分隔线标记——仅两个 Callout 类型页父项携带，
+  // 渲染模型透传（DOM 装配按标记在相邻可见项间各落一条）----
+  it('itemSeparators 仅标记两个 Callout 类型页父项，渲染模型透传（#658/T07）', () => {
+    const flagged: string[] = []
+    for (const entry of CONTEXT_MENU_ITEMS) {
+      const def = entry as MenuItemDescriptor
+      for (const child of def.children ?? []) {
+        if (child.itemSeparators === true) {
+          flagged.push(child.id)
+        }
+      }
+    }
+    expect(flagged).toEqual(['insertCallout'])
+    const top = CONTEXT_MENU_ITEMS.find((def) => def.id === 'calloutTypeMenu') as MenuItemDescriptor
+    expect(top.itemSeparators).toBe(true)
+    // 渲染模型透传：buildContextMenuModel 产出的父项携带标记
+    const model = buildContextMenuModel(calloutCtx({ pos: 8, currentType: 'note', hitTitleLine: true }))
+    const calloutPageParent = model.flatMap((g) => g.items).find((item) => item.id === 'calloutTypeMenu')
+    expect(calloutPageParent?.itemSeparators).toBe(true)
+    const insertParent = model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+      ?.children?.find((item) => item.id === 'insertCallout')
+    expect(insertParent?.itemSeparators).toBe(true)
+    // 其他子菜单父项不带标记（不逐项分隔）
+    const others = model.flatMap((g) => g.items).find((item) => item.id === 'insert')
+      ?.children?.filter((item) => item.id !== 'insertCallout' && item.children) ?? []
+    expect(others.every((item) => item.itemSeparators !== true)).toBe(true)
   })
 })

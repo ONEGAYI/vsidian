@@ -1,0 +1,966 @@
+{
+ "purpose": "T01 两端语法对拍夹具与结果（#652）。夹具供 T02/T03 消费：Live 树侧为 @codemirror/lang-markdown（src/shared/markdownDoc.markdownTreeParser），阅读侧为 markdown-it 15.0.2（readingMarkdown 同版同安全配置，块级容器边界由核心产生）。识别器输入=容器直属首段首行「段起点→行尾」子串（两端已各自剥前缀）。",
+ "recognizer": {
+  "source": "/^\\[!([^\\]]*)\\]([+-])?/ 上接空类型拒绝、类型须单标识符 [A-Za-z0-9_-]+、声明后须空白或行尾、类型小写规范化",
+  "fields": [
+   "type(小写规范化)",
+   "fold(+/-/undefined)",
+   "title"
+  ],
+  "proposedModule": "src/shared/calloutSyntax.ts（T02 落地）"
+ },
+ "generatedAt": "2026-10-28T10:29:57.628Z",
+ "commit": "63b96ab9",
+ "fixtureCount": 35,
+ "disagreements": 0,
+ "fixtures": [
+  {
+   "id": "F01-basic",
+   "desc": "基本成型：显式标题 + 正文",
+   "lines": [
+    "> [!note] 标题文字",
+    "> 正文第一行",
+    "> 正文第二行",
+    "后随段落"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||标题文字"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||标题文字"
+    }
+   ]
+  },
+  {
+   "id": "F02-title-only",
+   "desc": "只有声明没有正文（只有标题也成型）",
+   "lines": [
+    "> [!note]",
+    "后随段落"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||"
+    }
+   ]
+  },
+  {
+   "id": "F03-title-only-text",
+   "desc": "声明 + 显式标题、无正文",
+   "lines": [
+    "> [!tip] 提示一下"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "tip||提示一下"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "tip||提示一下"
+    }
+   ]
+  },
+  {
+   "id": "F04-fold-plus",
+   "desc": "可折叠默认展开 +",
+   "lines": [
+    "> [!note]+ 可折叠",
+    "> 正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note|+|可折叠"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note|+|可折叠"
+    }
+   ]
+  },
+  {
+   "id": "F05-fold-minus",
+   "desc": "可折叠默认收起 -",
+   "lines": [
+    "> [!note]- 收起",
+    "> 正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note|-|收起"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note|-|收起"
+    }
+   ]
+  },
+  {
+   "id": "F06-case",
+   "desc": "类型大小写不敏感",
+   "lines": [
+    "> [!NoTe] 大小写",
+    "> [!NOTE] 第二行正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||大小写"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||大小写"
+    }
+   ]
+  },
+  {
+   "id": "F07-empty-type",
+   "desc": "空类型未成型",
+   "lines": [
+    "> [!] 空类型",
+    "> 正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "unformed:empty-type"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "unformed:empty-type"
+    }
+   ]
+  },
+  {
+   "id": "F08-space-type",
+   "desc": "类型含空格未成型",
+   "lines": [
+    "> [!note extra] 非法"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "unformed:type-not-identifier"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "unformed:type-not-identifier"
+    }
+   ]
+  },
+  {
+   "id": "F09-unclosed",
+   "desc": "未闭合标记未成型",
+   "lines": [
+    "> [!note 标题"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "none"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "none"
+    }
+   ]
+  },
+  {
+   "id": "F10-junk-after",
+   "desc": "闭合后紧贴非空白未成型",
+   "lines": [
+    "> [!note]-标题紧贴"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "unformed:junk-after-decl"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "unformed:junk-after-decl"
+    }
+   ]
+  },
+  {
+   "id": "F11-later-para",
+   "desc": "后续段落伪标记不升级为 callout",
+   "lines": [
+    "> [!note] 标题",
+    ">",
+    "> [!tip] 第二段的伪标记按正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    }
+   ]
+  },
+  {
+   "id": "F12-plain-then-marker",
+   "desc": "首段普通文字，后段标记不回溯",
+   "lines": [
+    "> 普通引用首段",
+    ">",
+    "> [!note] 后段标记按正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "none"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "none"
+    }
+   ]
+  },
+  {
+   "id": "F13-lazy",
+   "desc": "lazy continuation 行归属",
+   "lines": [
+    "> [!note] 标题",
+    "lazy 无前缀续行",
+    "正文段落"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    }
+   ]
+  },
+  {
+   "id": "F14-lazy-body",
+   "desc": "正文段落的 lazy 续行",
+   "lines": [
+    "> [!note] 标题",
+    "> 正文",
+    "lazy 续行",
+    "",
+    "普通段落"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    }
+   ]
+  },
+  {
+   "id": "F15-no-space",
+   "desc": "无空格形态 >[!note]",
+   "lines": [
+    ">[!note] 无空格",
+    ">正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||无空格"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||无空格"
+    }
+   ]
+  },
+  {
+   "id": "F16-extra-space",
+   "desc": "多空格形态 >   [!note]",
+   "lines": [
+    ">   [!note] 多空格",
+    ">   正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||多空格"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||多空格"
+    }
+   ]
+  },
+  {
+   "id": "F17-nested-callout",
+   "desc": "多层嵌套 callout",
+   "lines": [
+    "> [!note] 外层",
+    "> > [!tip] 内层",
+    "> > 内层正文",
+    "> 外层正文",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||外层"
+    },
+    {
+     "depth": 2,
+     "fromLine": 2,
+     "toLine": 4,
+     "decl": "tip||内层"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||外层"
+    },
+    {
+     "depth": 2,
+     "fromLine": 2,
+     "toLine": 4,
+     "decl": "tip||内层"
+    }
+   ]
+  },
+  {
+   "id": "F18-nested-direct",
+   "desc": "直接双前缀嵌套",
+   "lines": [
+    "> > [!warning] 内层即首段",
+    "> > 正文",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "none"
+    },
+    {
+     "depth": 2,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "warning||内层即首段"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "none"
+    },
+    {
+     "depth": 2,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "warning||内层即首段"
+    }
+   ]
+  },
+  {
+   "id": "F19-quote-in-callout",
+   "desc": "callout 内普通引用",
+   "lines": [
+    "> [!note] 标题",
+    "> > 内层普通引用",
+    "> 正文",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    },
+    {
+     "depth": 2,
+     "fromLine": 2,
+     "toLine": 3,
+     "decl": "none"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "note||标题"
+    },
+    {
+     "depth": 2,
+     "fromLine": 2,
+     "toLine": 3,
+     "decl": "none"
+    }
+   ]
+  },
+  {
+   "id": "F20-callout-in-quote",
+   "desc": "普通引用内 callout（后段首段）",
+   "lines": [
+    "> 外层普通引用",
+    "> > [!bug] 内层 callout",
+    "> > 内层正文",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "none"
+    },
+    {
+     "depth": 2,
+     "fromLine": 2,
+     "toLine": 3,
+     "decl": "bug||内层 callout"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "none"
+    },
+    {
+     "depth": 2,
+     "fromLine": 2,
+     "toLine": 3,
+     "decl": "bug||内层 callout"
+    }
+   ]
+  },
+  {
+   "id": "F21-list-in-callout",
+   "desc": "callout 内列表",
+   "lines": [
+    "> [!todo] 待办",
+    "> - 条目一",
+    "> - 条目二",
+    ">   - 子条目",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "todo||待办"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "todo||待办"
+    }
+   ]
+  },
+  {
+   "id": "F22-callout-in-list",
+   "desc": "列表项内 callout",
+   "lines": [
+    "- 前置条目",
+    "- > [!info] 列表内 callout",
+    "  > 列表内正文",
+    "- 后置条目",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 2,
+     "toLine": 3,
+     "decl": "info||列表内 callout"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 2,
+     "toLine": 3,
+     "decl": "info||列表内 callout"
+    }
+   ]
+  },
+  {
+   "id": "F23-code-in-callout",
+   "desc": "callout 内围栏代码（闭合）",
+   "lines": [
+    "> [!example] 示例",
+    "> ```js",
+    "> const x = 1",
+    "> ```",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "example||示例"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "example||示例"
+    }
+   ]
+  },
+  {
+   "id": "F24-unclosed-fence",
+   "desc": "callout 内未闭合围栏",
+   "lines": [
+    "> [!example] 示例",
+    "> ```js",
+    "> const x = 1",
+    "后续普通段落"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "example||示例"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 3,
+     "decl": "example||示例"
+    }
+   ]
+  },
+  {
+   "id": "F25-pseudo-in-code",
+   "desc": "代码内伪标记字面",
+   "lines": [
+    "> [!note] 标题",
+    "> ```md",
+    "> [!tip] 代码里的伪标记",
+    "> ```",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||标题"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||标题"
+    }
+   ]
+  },
+  {
+   "id": "F26-inline-code-title",
+   "desc": "标题含行内代码",
+   "lines": [
+    "> [!note] 用 `code` 说明"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "note||用 `code` 说明"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "note||用 `code` 说明"
+    }
+   ]
+  },
+  {
+   "id": "F27-marker-in-title",
+   "desc": "标题文字中的第二个标记按字面",
+   "lines": [
+    "> [!note] 见 [!tip] 文档"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "note||见 [!tip] 文档"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 1,
+     "decl": "note||见 [!tip] 文档"
+    }
+   ]
+  },
+  {
+   "id": "F28-escaped",
+   "desc": "转义方括号字面",
+   "lines": [
+    "> \\[!note\\] 转义非 callout",
+    "> 正文"
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "none"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "none"
+    }
+   ]
+  },
+  {
+   "id": "F29-empty-quote-line",
+   "desc": "声明后空引用行再正文",
+   "lines": [
+    "> [!note] 标题",
+    ">",
+    "> 正文",
+    ">",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||标题"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||标题"
+    }
+   ]
+  },
+  {
+   "id": "F30-indented-code-in-callout",
+   "desc": "callout 内缩进代码",
+   "lines": [
+    "> [!note] 标题",
+    ">     indented code",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||标题"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||标题"
+    }
+   ]
+  },
+  {
+   "id": "F31-table-in-callout",
+   "desc": "callout 内表格",
+   "lines": [
+    "> [!note] 表格",
+    "> | a | b |",
+    "> | - | - |",
+    "> | 1 | 2 |",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||表格"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 4,
+     "decl": "note||表格"
+    }
+   ]
+  },
+  {
+   "id": "F32-unknown-type",
+   "desc": "未知自定义类型",
+   "lines": [
+    "> [!custom-question] 自定义",
+    "> 正文",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "custom-question||自定义"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "custom-question||自定义"
+    }
+   ]
+  },
+  {
+   "id": "F33-frontmatter",
+   "desc": "frontmatter 内伪标记",
+   "lines": [
+    "---",
+    "[!note] frontmatter 伪标记",
+    "---",
+    "正文",
+    ""
+   ],
+   "agree": true,
+   "live": [],
+   "mdit": []
+  },
+  {
+   "id": "F34-blank-first-body",
+   "desc": "声明行即全部 + 空行收尾",
+   "lines": [
+    "",
+    "> [!note]",
+    "",
+    "正文",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 2,
+     "toLine": 2,
+     "decl": "note||"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 2,
+     "toLine": 2,
+     "decl": "note||"
+    }
+   ]
+  },
+  {
+   "id": "F35-cjk-title",
+   "desc": "中文标题与全角符号",
+   "lines": [
+    "> [!note] 中文标题「测试」",
+    "> 正文含【】",
+    ""
+   ],
+   "agree": true,
+   "live": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||中文标题「测试」"
+    }
+   ],
+   "mdit": [
+    {
+     "depth": 1,
+     "fromLine": 1,
+     "toLine": 2,
+     "decl": "note||中文标题「测试」"
+    }
+   ]
+  }
+ ]
+}

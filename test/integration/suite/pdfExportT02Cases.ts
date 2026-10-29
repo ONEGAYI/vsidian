@@ -158,6 +158,12 @@ export const pdfExportT02Cases: Array<[string, () => Promise<void>]> = [
     assert.ok(dense.includes('填充段20'), '中段填充正文应入版')
     assert.ok(whole.includes('EMBED-BASE-TEXT'), '嵌入目标预置正文应展开')
     assert.ok(dense.includes('EMBED-UNSAVED-TEXT'), '嵌入目标未保存内容应进入本次结果')
+    // T08（#659）callout 强制展开：`-` 收起声明的三层嵌套正文全部入版
+    // （导出不消费面板折叠态——隐藏正文不遗漏）
+    assert.ok(dense.includes('PDF-T02-CALLOUT-OUTER'), 'callout 外层标题应入版')
+    assert.ok(dense.includes('PDF-T02-CALLOUT-OUTER-BODY'), 'callout 外层收起声明正文应完整可见')
+    assert.ok(dense.includes('PDF-T02-CALLOUT-MIDDLE-BODY'), 'callout 中层收起声明正文应完整可见')
+    assert.ok(dense.includes('PDF-T02-CALLOUT-INNER-BODY'), 'callout 内层收起声明正文应完整可见')
     assert.ok(whole.includes('pdf-export-t02-clip.mp4'), '媒体降级说明应含真实文件名链接')
     assert.ok(whole.includes('https://example.com/t02-clip.mp4'), 'HTML video 降级应含远端原链接')
     assert.ok(!whole.includes('graph TD; Start-->Check;'), 'mermaid 渲染成功后源码不应以文本呈现')
