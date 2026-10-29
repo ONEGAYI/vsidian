@@ -4633,6 +4633,13 @@ export class WebviewSyncController {
     return Math.max(0, Math.min(offset, this.view?.state.doc.length ?? 0))
   }
 
+  /** 嵌入实例坐标钳制（#662 R1-001）：按传入 view 的文档长度——callout
+   *  执行族的 view 可以是嵌入文档 B（≠ 主文档 A），读主文档长度的
+   *  clampToDoc 会把长 B 的目标坐标截断到 A.length、改写错误段落。 */
+  private clampToViewDoc(view: EditorView, pos: number): number {
+    return Math.max(0, Math.min(pos, view.state.doc.length))
+  }
+
   /**
    * 定位执行（#10 view.locate 宿主消息与 #66 大纲点击共用同一实现）：
    * 光标移到源 offset；reading 滚动到锚点块。纯视图操作——事务不带
@@ -10454,7 +10461,7 @@ export class WebviewSyncController {
     if (pos === null) {
       return
     }
-    applyCalloutToggleAt(view, this.clampToDoc(pos))
+    applyCalloutToggleAt(view, this.clampToViewDoc(view, pos))
   }
 
   /** #655（T04）落点展开的组合入口（reveal 族接线点统一消费——依次消费
@@ -10492,7 +10499,7 @@ export class WebviewSyncController {
     if (!this.targetEditable(view, embed)) {
       return
     }
-    const clamped = this.clampToDoc(pos)
+    const clamped = this.clampToViewDoc(view, pos)
     const text = view.state.doc.toString()
     const tree = view.state.field(liveDecorationsField, false)?.tree
     const hit: LiveCalloutTarget | null = innermostCalloutAt(view.state.doc, tree, clamped)
@@ -10545,7 +10552,7 @@ export class WebviewSyncController {
       return
     }
     const view = resolved.view
-    const pos = this.clampToDoc(view.state.selection.main.head)
+    const pos = this.clampToViewDoc(view, view.state.selection.main.head)
     const tree = view.state.field(liveDecorationsField, false)?.tree
     const hit = innermostCalloutAt(view.state.doc, tree, pos)
     if (!hit) {
@@ -10573,10 +10580,10 @@ export class WebviewSyncController {
       return
     }
     const tree = view.state.field(liveDecorationsField, false)?.tree
-    const hit = innermostCalloutAt(view.state.doc, tree, this.clampToDoc(pos))
+    const hit = innermostCalloutAt(view.state.doc, tree, this.clampToViewDoc(view, pos))
     this.calloutTypeInputSeq += 1
     const reqId = this.calloutTypeInputSeq
-    this.pendingCalloutInput = { reqId, view, doc: view.state.doc, pos: this.clampToDoc(pos), embed }
+    this.pendingCalloutInput = { reqId, view, doc: view.state.doc, pos: this.clampToViewDoc(view, pos), embed }
     this.bridge.postMessage({
       kind: 'callout.typeInput.request',
       sessionId: this.sessionId,
