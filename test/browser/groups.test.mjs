@@ -1,7 +1,7 @@
 // 浏览器测试分组契约（仿集成第五敏感组，2026-10-14）：钉住分组环境变量
 // 语义、敏感名单内容、名单与 run.mjs 全量清单不失配，以及 run.mjs/ci.yml
 // 的接线在场。名单与维护口径的正文见 docs/specs/integration-test-groups.md
-// 「浏览器测试分组」节；未定性失败跟踪在 #446（条目 9）。
+// 「浏览器测试分组」节；历史证据在 #446（条目 9），新增未定性失败跟踪在 #552。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFile } from 'node:fs/promises'
@@ -24,9 +24,9 @@ test('分组环境变量只接受 all/core/sensitive，缺省 all（本地默认
 test('组别过滤保持文档序：core 排除敏感、sensitive 只留敏感', () => {
   const names = ['alpha', 'tableCaret', 'beta', 'addonT10Commands', 'addonRendererTakeover', 'tableInput']
   assert.deepEqual(selectBrowserSuites(names, names, 'all'), names)
-  assert.deepEqual(selectBrowserSuites(names, names, 'core'), ['alpha', 'tableCaret', 'beta'])
+  assert.deepEqual(selectBrowserSuites(names, names, 'core'), ['alpha', 'tableCaret', 'beta', 'tableInput'])
   assert.deepEqual(selectBrowserSuites(names, names, 'sensitive'),
-    ['addonT10Commands', 'addonRendererTakeover', 'tableInput'])
+    ['addonT10Commands', 'addonRendererTakeover'])
 })
 
 test('敏感名单引用全量清单之外的套件时立即失败（任意组别，防拼写漂移）', () => {
@@ -38,13 +38,14 @@ test('敏感名单引用全量清单之外的套件时立即失败（任意组�
 test('定向 --suite 与组别取交集，空集报错（不静默跑空）', () => {
   const names = ['alpha', 'tableCaret', 'beta', 'addonT10Commands', 'addonRendererTakeover', 'tableInput']
   assert.deepEqual(selectBrowserSuites(names, ['tableCaret'], 'core'), ['tableCaret'])
+  assert.deepEqual(selectBrowserSuites(names, ['tableInput'], 'core'), ['tableInput'])
   assert.deepEqual(selectBrowserSuites(names, ['alpha'], 'all'), ['alpha'])
   assert.deepEqual(selectBrowserSuites(names, ['beta', 'alpha'], 'core'), ['beta', 'alpha'])
   assert.throws(() => selectBrowserSuites(names, ['tableCaret'], 'sensitive'), /交集为空/)
 })
 
-test('当前敏感名单保留三个未归因套件，tableCaret 恢复 core（#446；tableInput 入组 #552）', () => {
-  assert.deepEqual(BROWSER_SENSITIVE_SUITES, ['addonT10Commands', 'addonRendererTakeover', 'tableInput'])
+test('当前敏感名单保留两个未归因附加组件套件，tableCaret/tableInput 恢复 core（#552）', () => {
+  assert.deepEqual(BROWSER_SENSITIVE_SUITES, ['addonT10Commands', 'addonRendererTakeover'])
 })
 
 test('真实全量清单包含全部敏感套件（run.mjs 的 names 与名单不失配）', async () => {
