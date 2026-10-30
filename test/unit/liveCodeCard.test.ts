@@ -767,7 +767,11 @@ describe('头部 widget 形态', () => {
     expect(w.eq(new CodeCardHeaderWidget('JavaScript', 'javascript', false, 'let a'))).toBe(false)
     expect(w.eq(new CodeCardHeaderWidget('JavaScript', 'javascript', true, 'other'))).toBe(false)
     const dom = w.toDOM()
-    expect(dom.className).toBe(CODE_CARD_CLASS_NAMES.header)
+    // 2026-10-30 偏移修复：widget 根是挂载层（块顶间距由其 padding 承担，
+    // margin 折叠出行盒不进 CM6 高度记账），横带本体是挂载层直接子层
+    expect(dom.className).toBe(CODE_CARD_CLASS_NAMES.headerMount)
+    const band = dom.querySelector(`:scope > .${CODE_CARD_CLASS_NAMES.header}`)
+    expect(band, '挂载层内应有横带本体').not.toBeNull()
     const label = dom.querySelector(`.${CODE_CARD_CLASS_NAMES.headerLabel}`)!
     // #83 语言徽标在标签内（'JS' + 显示名文本节点）
     expect(label.querySelector(`.${CODE_CARD_CLASS_NAMES.headerIcon}`)?.textContent).toBe('JS')

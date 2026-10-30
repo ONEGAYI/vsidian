@@ -32,6 +32,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 覆写已实测块、末尾意图保持，恒差修复回归本体）紧随 readingWidthProbe。
 // #189/#190/#191 合并入列：codeCardChrome（代码块卡片绘制层——围栏
 // 真实对齐、head 按钮换位与整卡恒显、折行开关与续行悬挂缩进）。
+// 2026-10-30 合并入列：codeCardClickOffset（块顶间距 margin 漏记 CM6 高度
+// 记账致块内行点击/拖选落点系统性偏下——行为、模型对拍与反查三组断言）
+// 紧随 codeCardChrome（同卡片族输入/光标侧套件）。
 // live SVG 塌缩修复入列：liveImageLayout（独立成行图片布局——viewBox-only
 // 百分比宽 SVG 铺满正文列、固有尺寸不拉伸、限宽联动、阅读非回归）。
 // #212 合并入列：imagePopup（图片弹窗与防误触——悬停按钮组、吞点击、
@@ -105,7 +108,7 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageSize', 'imageResize', 'imageEmbedParity', 'imageRefresh', 'imagePopup', 'hoverPreview', 'webLinkCard', 'webPageView', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite',
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'codeCardClickOffset', 'liveImageLayout', 'imageSize', 'imageResize', 'imageEmbedParity', 'imageRefresh', 'imagePopup', 'hoverPreview', 'webLinkCard', 'webPageView', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite',
   // #495 多光标 IME 定稿：紧随多光标族（CDP imeSetComposition 真实组合序列）
   'multicursorIme',
   'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor',

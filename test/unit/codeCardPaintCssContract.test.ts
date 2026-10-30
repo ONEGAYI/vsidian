@@ -53,6 +53,13 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     expect(header).toMatch(/background-color:\s*var\(--vsidian-code-card-background/)
   })
 
+  it('块顶间距入模形态（2026-10-30 偏移修复）：live 侧由挂载层 padding 等值承担、横带 margin 归零——间距若回迁横带自身 margin 会折叠出行盒、不进 CM6 高度记账，块内行点击/拖选落点将系统性偏下', () => {
+    expect(rule('#app .vsidian-code-card-header-mount'))
+      .toMatch(/padding-top:\s*4px/)
+    expect(rule('#app .vsidian-code-card-header-mount > .vsidian-code-card-header'))
+      .toMatch(/margin-top:\s*0/)
+  })
+
   it('语言标签加粗；按钮区内联排布（#81 复用容器）', () => {
     expect(rule('#app .vsidian-code-card-header .vsidian-code-card-header-label'))
       .toMatch(/font-weight:\s*600/)

@@ -834,7 +834,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   'live-code-card-header': {
     purpose:
       'The card header band: the language label + the button area on the right, with a bottom 1px separator (the look references the Code Styler plugin direction; the structure is vsidian-specific).',
-    dom: "The band above the card's first line (a live block widget / the reading block's first child).",
+    dom: "The band above the card's first line (inside the live block widget's mount layer / the reading block's first child).",
     obsidian: { counterpart: '.code-styler-header-container (the Code Styler plugin direction)' },
   },
   'live-code-card-header-parts': {
