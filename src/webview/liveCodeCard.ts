@@ -59,8 +59,13 @@ export const CODE_CARD_CLASS_NAMES = {
   edgeTop: 'vsidian-code-card-edge-top',
   /** 尾行圆角修饰（卡片底边圆角） */
   edgeBottom: 'vsidian-code-card-edge-bottom',
-  /** 头部横带（block widget 外层；阅读侧容器同源类名） */
+  /** 头部横带（block widget 内层横带本体；阅读侧容器同源类名） */
   header: 'vsidian-code-card-header',
+  /** 头部挂载层（block widget 根，内部类不入公开契约）：块顶间距由其
+   *  padding 承担——间距若挂在横带自身 margin 上会折叠出行盒、不进 CM6
+   *  高度记账，块内行 DOM 行位比模型低出该值，点击/拖选落点系统性偏下
+   *  （2026-10-30 修复；阅读侧无 CM6 模型，不经过本层） */
+  headerMount: 'vsidian-code-card-header-mount',
   /** 语言标签（首字母大写显示名） */
   headerLabel: 'vsidian-code-card-header-label',
   /** 按钮区（#81 复制按钮、#82 折叠 chevron 挂载点） */
@@ -177,6 +182,13 @@ export class CodeCardHeaderWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
+    // 挂载层承担块顶间距（padding-top）：margin 折叠出行盒不进 CM6 高度
+    // 记账，块内行点击/拖选落点会系统性偏下（2026-10-30 修复，详见
+    // CODE_CARD_CLASS_NAMES.headerMount 注释）。findFromDOM/posAtDOM 的锚点
+    // 须用挂载层（widget 根，携带 cmTile）——横带本体降为其子层后不再持
+    // 有 tile 标记，findFromDOM 不向上遍历
+    const mount = document.createElement('div')
+    mount.className = CODE_CARD_CLASS_NAMES.headerMount
     const div = document.createElement('div')
     div.className = CODE_CARD_CLASS_NAMES.header
     div.setAttribute('data-vsidian-code-lang', this.languageId ?? '')
@@ -191,10 +203,10 @@ export class CodeCardHeaderWidget extends WidgetType {
     // 折行钮（#191 交付）届时插在复制钮左侧
     if (this.copy) {
       actions.appendChild(buildCopyButton(this.code, (code) => {
-        // findFromDOM 只认携带 cmTile 的节点（本版本 CM6 的 Tile.get 语义）：
-        // 按钮是头部 widget 子孙无标记，须从头部根查找；块 widget 的 posAtDOM
-        // 即其挂点位置 = 围栏起始 offset
-        const view = EditorView.findFromDOM(div)
+        // findFromDOM 只认携带 cmTile 的节点（本版本 CM6 的 Tile.get 语义，
+        // 不向上遍历）：按钮与横带本体都是 widget 子孙无标记，须从挂载层
+        // 根查找；块 widget 的 posAtDOM 即其挂点位置 = 围栏起始 offset
+        const view = EditorView.findFromDOM(mount)
         if (view) {
           view.dispatch({ effects: codeCardCopyRequest.of(code) })
         }
@@ -202,9 +214,9 @@ export class CodeCardHeaderWidget extends WidgetType {
     }
     // 折叠切换闭包：按钮与整条热区共用同一入口（#190）
     const toggleFold = () => {
-      const view = EditorView.findFromDOM(div)
+      const view = EditorView.findFromDOM(mount)
       if (view) {
-        view.dispatch({ effects: codeCardFoldToggle.of(view.posAtDOM(div)) })
+        view.dispatch({ effects: codeCardFoldToggle.of(view.posAtDOM(mount)) })
       }
     }
     actions.appendChild(buildFoldButton(this.folded, toggleFold))
@@ -227,7 +239,8 @@ export class CodeCardHeaderWidget extends WidgetType {
       toggleFold()
     })
     div.append(label, actions)
-    return div
+    mount.appendChild(div)
+    return mount
   }
 
   ignoreEvent(): boolean {
@@ -661,7 +674,9 @@ export const CODE_CARD_REVEAL_CLASS = 'vsidian-code-card-reveal'
  * 否则目标所在行是卡片行时，向 previousElementSibling 方向遍历找头部
  * （途中遇到非卡片行的 .cm-line 即中止，防越界到上一块；CM6 视口虚拟化
  * 下兄弟节点数天然受视口限制，遍历代价有界）。其余（正文行、编辑器
- * 空白区等）返回 null。
+ * 空白区等）返回 null。头部在 block widget 中经挂载层（headerMount）
+ * 与卡片行成兄弟——遍历识别挂载层并返回其内横带本体（reveal 类挂横带，
+ * CSS 规则以横带携带 reveal 为准）。
  */
 function cardHeaderFromTarget(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) {
@@ -671,15 +686,26 @@ function cardHeaderFromTarget(target: EventTarget | null): HTMLElement | null {
   if (direct instanceof HTMLElement) {
     return direct
   }
+  const headerFromSibling = (node: Element): HTMLElement | null => {
+    if (node.classList.contains(CODE_CARD_CLASS_NAMES.header)) {
+      return node as HTMLElement
+    }
+    if (node.classList.contains(CODE_CARD_CLASS_NAMES.headerMount)) {
+      const inner = node.querySelector(`:scope > .${CODE_CARD_CLASS_NAMES.header}`)
+      return inner instanceof HTMLElement ? inner : null
+    }
+    return null
+  }
   const line = target.closest('.cm-line')
   if (!(line instanceof HTMLElement) || !line.classList.contains(CODE_CARD_CLASS_NAMES.line)) {
     return null
   }
   for (let node = line.previousElementSibling; node; node = node.previousElementSibling) {
-    if (node instanceof HTMLElement && node.classList.contains(CODE_CARD_CLASS_NAMES.header)) {
-      return node
+    const header = headerFromSibling(node)
+    if (header) {
+      return header
     }
-    if (node.classList.contains('cm-line') && !node.classList.contains(CODE_CARD_CLASS_NAMES.line)) {
+    if (node instanceof Element && node.classList.contains('cm-line') && !node.classList.contains(CODE_CARD_CLASS_NAMES.line)) {
       return null
     }
   }

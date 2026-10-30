@@ -2162,7 +2162,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     target: '.vsidian-code-card-header（live block widget / 阅读头部容器共用）',
     purpose: '卡片头部横带：语言标签 + 右侧按钮区，底部 1px 分隔线（观感参照 Code Styler 插件方向，本项目自有结构）。',
     views: ['live', 'reading'],
-    dom: '卡片首行上方横带（live block widget / 阅读块首子元素）。',
+    dom: '卡片首行上方横带（live block widget 挂载层内 / 阅读块首子元素）。',
     example: '.vsidian-code-card-header {\n  border-bottom: 1px solid rgba(128, 128, 128, 0.3);\n}',
     obsidian: { counterpart: '.code-styler-header-container（Code Styler 插件方向）', support: 'native' },
     verification: [

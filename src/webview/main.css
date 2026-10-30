@@ -3159,6 +3159,8 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   align-items: center;
   justify-content: space-between;
   box-sizing: border-box;
+  /* 块顶间距双轨（2026-10-30）：阅读侧由此 margin 承担；live 侧被下方
+     挂载层规则（更高特异性）归零、改由挂载层 padding-top 等值承担 */
   margin: 4px 0 0;
   padding: 5px 12px 4px;
   background-color: var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12));
@@ -3168,6 +3170,19 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   /* #190 整条折叠热区：横带整体可点击切换折叠的视觉暗示（按钮仍各自 cursor:pointer） */
   cursor: pointer;
   user-select: none;
+}
+
+/* 块顶间距的入模形态（2026-10-30 偏移修复）：live 侧头部是 CM6 block
+   widget，横带自身 margin 会折叠出行盒、不进 CM6 高度记账——块内每行
+   DOM 行位比模型低出该 margin，点击/拖选行下半部即被判到下一行。间距
+   改由挂载层 padding-top 等值承担（计入 widget 实测高度）；阅读侧无
+   CM6 模型，不经挂载层，保留上方 margin 形态 */
+#app .vsidian-code-card-header-mount {
+  padding-top: 4px;
+}
+
+#app .vsidian-code-card-header-mount > .vsidian-code-card-header {
+  margin-top: 0;
 }
 
 #app .vsidian-code-card-header .vsidian-code-card-header-label {

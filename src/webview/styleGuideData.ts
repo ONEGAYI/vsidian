@@ -3057,7 +3057,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "live",
       "reading"
     ],
-    "dom": "卡片首行上方横带（live block widget / 阅读块首子元素）。",
+    "dom": "卡片首行上方横带（live block widget 挂载层内 / 阅读块首子元素）。",
     "example": ".vsidian-code-card-header {\n  border-bottom: 1px solid rgba(128, 128, 128, 0.3);\n}",
     "obsidian": {
       "counterpart": ".code-styler-header-container（Code Styler 插件方向）",
@@ -6612,7 +6612,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   },
   "live-code-card-header": {
     "purpose": "The card header band: the language label + the button area on the right, with a bottom 1px separator (the look references the Code Styler plugin direction; the structure is vsidian-specific).",
-    "dom": "The band above the card's first line (a live block widget / the reading block's first child).",
+    "dom": "The band above the card's first line (inside the live block widget's mount layer / the reading block's first child).",
     "obsidian": {
       "counterpart": ".code-styler-header-container (the Code Styler plugin direction)"
     }
