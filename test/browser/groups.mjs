@@ -4,7 +4,7 @@
 //
 // 敏感名单是本模块的单一事实源，按套件名与 run.mjs 的 names 精确匹配；
 // 每项的证据、跟踪票与移入/移出条件维护在 docs/specs/integration-test-groups.md
-// 「浏览器测试分组」节（未定性失败跟踪在 #446）。分组不修复产品行为、
+// 「浏览器测试分组」节（新增未定性失败跟踪在 #552，历史证据见 #446）。分组不修复产品行为、
 // 不放宽断言、不自动重试；敏感组失败保留红灯与非零退出码，只是不阻断
 // 必需检查。移回 core 须同提交多次 CI 验证，不因单次通过或失败自动迁移。
 //
@@ -16,14 +16,12 @@
 // - addonT10Commands：attempt 1 断言失败（10.3s）
 // - addonRendererTakeover：attempt 3 断言失败（16.9s），与 #446 条目 5
 //   的初始化等待超时同套件
-// - tableInput：PR #650 run 40656739949 两个 attempt 同位挂红
-//  （tableInput.mjs:217 边沿 IME 用例 waitForFunction 30s 超时，非断言
-//   失败）；本地单套件 3/3 与三并发全量双绿（4.4s/次，远低于预算），
-//   与当期改动零交集（正文行首 IME 定稿不涉代码上下文门控），合并后
-//   main 同代码 CI 过——CI 环境时序敏感，根因未定（#552 条目登记）
+// tableInput 的边沿 IME 等待已在 Linux 0.5CPU 三并发复现：度量回投覆盖
+// keyup 前的原生落点；纯布局回投先接回原生选区，新增按住导航键期间重配的
+// 回归。2026-10-30 用户要求恢复 core；候选合并前仍按同提交多轮 CI 口径核对。
 
 /** 敏感名单（单一事实源；增删须同步文档台账、#552/#446 条目与契约测试钉住项） */
-export const BROWSER_SENSITIVE_SUITES = ['addonT10Commands', 'addonRendererTakeover', 'tableInput']
+export const BROWSER_SENSITIVE_SUITES = ['addonT10Commands', 'addonRendererTakeover']
 
 /**
  * 解析分组环境变量：缺省（未设或空串）为 'all'；只接受 all/core/sensitive，

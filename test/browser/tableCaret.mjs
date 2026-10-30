@@ -247,7 +247,7 @@ try {
     } finally { await page.close() }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'handle-hover-refresh', 'handle-hover-visible-refresh', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-column-refresh', 'handle-row-refresh', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'handle-hover-refresh', 'handle-hover-visible-refresh', 'handle-hover-bounds-refresh', 'column-width', 'height-optimize', 'height-optimize-multi', 'height-optimize-wide', 'height-optimize-rework', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -443,14 +443,13 @@ try {
         await page.mouse.up()
         const text = (await page.evaluate(() => window.readEditor())).text
         assert(text.includes('| H2 | H1 |\n| ---: | :--- |\n| B2 | B1 |'), `列拖排须连对齐信息一同移动: ${text}`)
-      } else if (scenario === 'handle-hover' || scenario === 'handle-hover-refresh' || scenario === 'handle-hover-visible-refresh') {
+      } else if (scenario.startsWith('handle-hover')) {
         if (scenario === 'handle-hover-visible-refresh') {
           // v1.0.0 的公开格选择器示例；重要声明让夹具中的历史片段优先于内置规则。
           await page.addStyleTag({ content: '.vsidian-table-grid-cell { padding: 2px 8px !important; }' })
           assert.equal(await cell(1, 1).evaluate(el => getComputedStyle(el).paddingLeft), '8px',
             '旧格选择器片段应实际改变单元格绘制')
         }
-        const band = page.locator('.vsidian-table-insert-row')
         const rect = await cell(2, 0).boundingBox()
         // 查询与样式读取同一回调执行，避免 Locator 句柄在控件重建后指向脱离 DOM 的按钮。
         const opacity = () => page.evaluate(() =>
@@ -464,9 +463,22 @@ try {
           assert.equal(await opacity(), '1', '指针静止时度量重配后新增行带应保持出现')
         }
         await captureTable('table-add-row-band.png')
-        const bandRect = await band.boundingBox()
-        await page.mouse.move(bandRect.x + bandRect.width / 2, bandRect.y + bandRect.height / 2)
-        assert.equal(await opacity(), '1', '移入新增带不得闪退')
+        // #552：度量重配可能落在查询控件与读取几何之间；可见态也须覆盖连续重建。
+        const boundsRefresh = scenario === 'handle-hover-bounds-refresh'
+          ? await page.evaluate(() => setInterval(() => window.refreshTableLayout(), 1)) : null
+        try {
+          for (let i = 0; i < (boundsRefresh === null ? 1 : 10); i++) {
+            // Locator.boundingBox 跨协议取元素句柄与几何；度量重建会使旧句柄脱离 DOM。
+            const bandRect = await page.evaluate(() =>
+              document.querySelector('.vsidian-table-insert-row').getBoundingClientRect().toJSON())
+            assert(bandRect.width > 0 && bandRect.height > 0, '新增行带须有真实布局盒')
+            await page.mouse.move(bandRect.x + bandRect.width / 2, bandRect.y + bandRect.height / 2)
+            assert.equal(await opacity(), '1', '移入新增带不得闪退')
+          }
+        } finally {
+          if (boundsRefresh !== null) await page.evaluate(id => clearInterval(id), boundsRefresh)
+        }
+        assert.equal((await page.evaluate(() => window.readEditor())).text, source, '新增带悬停与度量重建不得写回源文')
         await page.mouse.move(600, 400)
         // #446 条目 9：度量重配可在取样期间重建控件；仍须读取当前按钮的绘制状态。
         const refreshTimer = scenario === 'handle-hover-refresh'

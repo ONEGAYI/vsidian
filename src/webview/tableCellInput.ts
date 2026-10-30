@@ -177,11 +177,17 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
       }
       if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged ||
           update.transactions.some(tr => tr.reconfigured) ||
-          update.startState.field(tableBoundaryField) !== update.state.field(tableBoundaryField)) this.refresh()
+          update.startState.field(tableBoundaryField) !== update.state.field(tableBoundaryField)) {
+        this.refresh(!update.docChanged && !update.selectionSet &&
+          update.startState.field(tableBoundaryField) === update.state.field(tableBoundaryField) &&
+          update.startState.field(tableRegionField, false) === update.state.field(tableRegionField, false)
+          ? update.state : undefined)
+      }
     }
-    refresh() {
+    refresh(nativeSelectionState?: EditorState) {
       queueMicrotask(() => {
-        if (this.destroyed || this.forwarding || this.composing || this.view.compositionStarted) return
+        if (this.destroyed || this.forwarding || this.composing || this.view.compositionStarted ||
+            (nativeSelectionState && nativeSelectionState !== this.view.state)) return
         const view = this.view, active = view.dom.ownerDocument.activeElement, cell = this.cell()
         const edge = !view.state.readOnly && view.state.facet(EditorView.editable) && view.state.field(tableBoundaryField)
         const focused = active === this.input || view.hasFocus
@@ -190,6 +196,8 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
         // 拖选期间由 CM6 管理原生 selection；松手后再交给独立输入，避免焦点切换打断鼠标选择。
         if (this.pointerSelecting) return
         if ((!cell && !edge) || !focused) { if (active === this.input) view.focus(); return }
+        // 纯布局刷新先接回 keyup 前的原生选区；新文档/显式选区事务仍按模型投影。
+        if (nativeSelectionState) this.syncSelection()
         const region = view.state.field(tableRegionField, false)
         const projection = tableCellInputView(cell && !region ? view.state.sliceDoc(cell.contentFrom, cell.contentTo) : '')
         const range = view.state.selection.main

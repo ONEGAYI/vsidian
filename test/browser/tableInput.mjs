@@ -48,6 +48,42 @@ try {
   assert.equal(inserted.head, inserted.text.indexOf('| | |') + 2, '插行后的内容落点须在异步 select 后保持')
   console.log('PASS 结构命令的空格落点不被独立输入的异步选区事件改写')
 
+  for (const [key, from, to] of [['Home', 1, 0], ['End', 0, 1], ['ArrowLeft', 1, 0], ['ArrowRight', 0, 1]]) {
+    await init()
+    const start = source.indexOf('A')
+    await page.evaluate(pos => window.moveCaret(pos), start + from)
+    await page.keyboard.down(key)
+    // 原生默认动作已改 textarea 选区，keyup 尚未到达；此时允许既有异步度量重配。
+    await page.evaluate(() => window.refreshTableLayout())
+    await page.keyboard.up(key)
+    assert.equal((await read()).head, start + to, `${key} 的原生落点不得被度量重配恢复成旧落点`)
+    assert.equal((await read()).text, source, '导航与度量重配不得写入源文')
+    assert.equal(await page.evaluate(() => window.__editRequests), 0)
+  }
+  console.log('PASS 原生 Home/End 与格内方向键的落点跨度量重配保持')
+
+  await init()
+  await page.keyboard.down('Shift')
+  await page.keyboard.down('ArrowLeft')
+  await page.evaluate(() => window.refreshTableLayout())
+  await page.keyboard.up('ArrowLeft')
+  await page.keyboard.up('Shift')
+  const selected = await read()
+  assert.equal(selected.from, source.indexOf('A'))
+  assert.equal(selected.to, source.indexOf('A') + 1, '原生 Shift 选字跨度量重配保持范围')
+  await page.keyboard.insertText('X')
+  assert.equal((await read()).text, source.replace('A', 'X'), '重配后的选区替换仍只写原格')
+  console.log('PASS 原生选区同步后保持真实替换落点')
+
+  await init()
+  await page.locator('.vsidian-table-grid-cell').last().click()
+  await page.keyboard.press('End')
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowLeft')
+  assert.equal((await read()).head, source.indexOf('y') + 1, '从后边沿回格仍落在末格内容尾')
+  assert.equal((await read()).text, source, '边沿返格只改变模型选区，不写入源文')
+  console.log('PASS 边沿空输入投影不覆盖模型驱动的返格落点')
+
   await init()
   await page.keyboard.press('Home')
   await page.keyboard.press('ArrowLeft')

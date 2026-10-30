@@ -72,9 +72,10 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 | --- | --- |
 | addonT10Commands | 同 run attempt 1 断言失败（10.3s）；本地定向单跑稳定通过——CI 时序敏感，根因未定（#446 条目 9） |
 | addonRendererTakeover | 同 run attempt 3 断言失败（16.9s），与条目 5 的初始化等待超时同套件（#446 条目 5/9）；本地全绿 |
-| tableInput | PR #650 run 40656739949 attempt 1/2 同位挂红（边沿 IME 用例 `waitForFunction` 30s 超时，非断言失败，2026-10-28）；本地单套件 3/3 与三并发全量双绿、与当期改动零交集、合并后 main 同代码 CI 通过——CI 时序敏感，根因未定（#552 条目登记；用户裁决入组） |
 
 tableCaret 的原始两次失败已确认是 `handle-hover` 读隐藏新增带 opacity 时得到空串，报告 `TIMEOUT=false`；约 70s 是套件总耗时。控件重建期间取到脱离 DOM 的节点可稳定复现同款失败。修复将查询与样式读取合在同一浏览器回调，补充重建期间的连续采样回归，并恢复 core；该候选须在同一提交两轮独立 CI 通过后合并，远端证据与勾销状态记录于修复 PR 和 #446 条目 9。根因与本地红绿证据见本文末节。
+
+tableInput 曾因 PR #650 / run40656739949 两次边沿 IME 超时由 #660 移入敏感组。2026-10-30 在 Linux 0.5CPU 三并发下复现同一30秒等待；原生事件显示 Home 落点在 keyup 前被度量回投重置，随后中文写入表头。生产回投修订与原生按住导航键重配回归随本批交付，用户要求恢复 core；两个未修复的附加组件套件继续敏感。合并前仍按同提交多轮 CI 核对恢复候选，记录见本文末尾及 #552。
 
 ### CI 语义
 
@@ -596,3 +597,67 @@ symbolInput 原 76 场景本机基线为 37.024s；复用夹具并新增隔离�
 **未定因部分**：条目25 的 88 项单测及 #246/#381 原等待本机通过，只作为负样本；条目12仍按既定安排等待新证据。PR #606 的跨功能八项超时未取得新的 runner/文件事件证据，不作同因判断。GitHub 台账未勾销，Linux CI 与人工验收未由本机检查替代。
 
 日志在工作树 `out/test/552/`：readiness-red-report.json、readiness-green.log、table-counter-red-confirmed.log、final-unit.log、addon-red.log / addon-green.log、symbol-slow-red/ / symbol-slow-reuse/、browser-final.log、integration-targets-host.log、integration-381-host.log、integration-table-fixed.log、typecheck-final.log。最终 browser 完整报告为 `out/test/browser-runs/run-KouZ4g/`。失败与通过记录分别保留，不因阶段切换重跑全量。
+
+## #552：新增行带几何采样竞态（2026-10-30）
+
+**本轮修复测试采样竞态**。发布轮 [CI 40813981472](https://github.com/ONEGAYI/vsidian/actions/runs/40813981472) 的 `tableCaret/handle-hover` 在 `bandRect.x` 处报空引用，原报告为 `EXIT=1 TIMEOUT=false`。本轮固定 main `964c358c`，用既有 `refreshTableLayout()` 每毫秒触发度量重配，约 3 秒内复现同款错误；原始运行没有控件连接状态，不能据此证明全部历史样本唯一同因。
+
+**原因是两次协议调用之间的节点替换**。`TableControlsView` 度量刷新时重建控件；`Locator.boundingBox()` 先取得元素句柄，再读取几何，旧节点可能已脱离 DOM。红态后在同一浏览器回调中查询当前新增行带，得到 opacity=1、882×12 像素的布局盒，说明本次失败时当前控件仍在绘制。
+
+| 待判别原因 | 本轮结果 |
+| --- | --- |
+| 旧句柄跨重建后失效 | 原读取在持续重配下报 `null.x`；查询当前节点并立即读几何的对照 10/10 通过 |
+| 当前控件实际隐藏或消失 | 红态后当前节点仍在场，opacity=1 且布局盒非零，不支持作为该受控样本的解释 |
+| 布局位移导致指针离开新增带 | 连续重配下，修订后的真实鼠标移入与可见性断言 10 次通过；不据此排除其他未观测的历史布局问题 |
+
+修订把当前节点查询与 `getBoundingClientRect()` 放进同一个 `page.evaluate`，保留移入后的 opacity 断言，补充布局盒非零和源文零写回断言。新增永久场景 `handle-hover-bounds-refresh`，在原生产控制器持续重配时连续读取并移动真实鼠标 10 次；该场景先在旧采样上失败，再随修订通过。生产代码、预算和分组不变。
+
+**本机验证**：Windows、Node 24.20.0、锁定 Chromium；三并发 `tableInput,blockquoteTablePaint,tableCaret,contextMenu` 四套件全部通过（55.28 秒）。修订前真 VS Code 1.82.3 独立桌面定向 11/11 通过，CSS/IME 两文件单测 91/91 通过；本轮仅改浏览器驱动，复用上述未变输入的记录。它们不替代 Linux CI 或用户人工验收。
+
+其余本轮未复现项继续未定因：表格边沿 IME 原生回放 12 次、六倍 CPU 减速 12 次均过；引用表格边界导航、四类渲染链接、未加持续重配的新增带悬停分别在六倍 CPU 减速下通过 12/8/10 轮。集成定向覆盖 #246、#381、#570、#13、#281、#569、#43、中格光标与 T10 注册目录。中格光标等待与 T10 全目录等待已分别由 `e69867e3`、`c8ca1c7f` 修改，不计本轮成果。条目12按既定安排等待新证据，未追加主动复现实验；PR #606 跨功能文件事件故障没有本轮新现场，不并因、不勾销。
+
+证据留在本轮工作树 `out/test/552/`：`hover-refresh-red.log`、`hover-refresh-red-confirm.log` 为受控红态，`hover-refresh-atomic.log` 为单变量对照，`hover-permanent-red.log` 为永久回归修复前失败，`browser-final.log`、`unit-baseline.log`、`integration-baseline.log` 为完整验证输出与退出码。永久红态报告为 `out/test/browser-runs/run-f1xWWE/`，修订后报告为 `out/test/browser-runs/run-lVomIa/`。修订登记于独立票 [#664](https://github.com/ONEGAYI/vsidian/issues/664) 及 [#552](https://github.com/ONEGAYI/vsidian/issues/552)；按用户后续要求，本轮修订在 PR 前不打勾，已取消对应勾选，已有主线修订的勾选保留。代码仍仅在本地。
+
+文件树严格校验另报主线已有三项漏登记：`test/browser/codeCardClickOffset.mjs`、`test/browser/codeCardClickOffsetFixture.ts`、`test/unit/calloutCommands.test.ts`，本轮未扩大修复范围。首轮 Linux 镜像下载未完成，未启动容器回放；后续 Linux 补证见下节。
+
+## #552：T06 内部正文初始化等待缺口（2026-10-30，#665）
+
+**已确认的是测试输入前提不足**。T06 原 `waitEmbedLiveBound()` 只等端口；生产 `notifyBound()` 此时创建空 EditorView，后续 `refEdit.push/init` 才装载 B 正文。原钩子 `focusEmbed()` 将坐标限制在当前正文长度内，因此对空实例按 B 段末坐标定位会落到0。
+
+同一生产控制器、原 `embed.test.focus/domType` 输入步骤，首次 init 延后200ms时，原条件看到 `liveBound=true/liveTextLen=0`，最后得到 `[[t06-c.md#^]]# 目标乙…`；先等目标正文装载后，相同延迟的输入回到指定段末。0ms对照通过。修订只在既有等待内加入“内部正文长度等于本次 B 原文的 LF 长度”，三处调用传 B0，未改变生产输入、候选断言或原20秒预算。该判据针对本套非空 B 夹具，不宣称能区分空文档的初始化阶段。
+
+| 验证层 | 修订前与修订后 |
+| --- | --- |
+| 真实 T06 用例的准备链单测 | 模拟已绑定而正文只有0/1字，两例先红后绿；相关三文件24/24通过，类型检查通过 |
+| Linux 真宿主受控延迟 | 保持宿主 bound 后 ready 握手延后1000ms，旧驱动在“↓ 高亮首项”超时25615ms；只换本轮等待，T06三项3/3通过，块用例4581ms |
+| 移除临时探针后的真宿主 | 三项3/3通过，6766/2837/2089ms，宿主EXIT=0；生产宿主文件已还原 |
+
+Linux 环境为隔离 Docker、Ubuntu24.04、Node22.23.4、VS Code1.82.3、Xvfb、CI=1，1CPU/4GiB，以root运行本套不含权限负向的定向用例；不声称等同完整 CI runner。代码固定主线 `964c358c` 加本轮测试修订，依赖锁的暂存副本只替换 npm 下载域名，integrity 与版本不变，仓库 lockfile 未改。
+
+**历史归因仍有限制**。条目31原失败在“B 内块候选可见”，本轮受控真实宿主失败在“↓ 高亮首项”，等待点不同。修复固定已证明的初始化窗口，不把它写成历史全部样本的唯一原因。本轮修订在 PR 建立前不勾选；PR 与实际合入状态由独立票 [#665](https://github.com/ONEGAYI/vsidian/issues/665) 和 #552 维护。
+
+继续排查的负样本分别保留：Windows 快速原生按键下边沿IME和引用表格边界导航通过；混排深度3→1→3在0/200ms子响应两组各10轮通过。Linux默认三并发原 `tableInput,blockquoteTablePaint,contextMenu` 三套件在1CPU通过，耗时21.89/30.01/34.75秒；它们仍未定因，不因本次通过勾销。
+
+新增日志位于本轮 `out/test/552/`：`embed-hooks-red.log` / `embed-hooks-wait.log`、`wikilink-embed-readiness-red.log` / `embed-readiness-final.log`、`linux-381-init-red.log` / `linux-381-init-green.log` / `linux-381-clean-final.log`。Linux原浏览器报告为 `linux-native-reports/run-dPi6y6/`。临时夹具替换首次因CRLF未命中、Linux宿主首次缺libgtk导致0用例启动，分别留证，不计产品红态；相关日志不覆盖。
+
+## #552：表格原生选区回投竞态与本期收尾（2026-10-30，#666）
+
+**本次修复生产输入落点**。同一 Linux 环境只将 CPU 从1核降为0.5核，原三个浏览器套件默认三并发，`tableInput.mjs:217` 的边沿 IME 等待30秒超时，其他两套件通过（run-oFHkja，tableInput75.00秒，TIMEOUT=false）。缩小后的事件记录显示：Home 已将 textarea 光标移到0，keyup前度量回投却恢复到旧位置1；ArrowLeft随后只退到格首，未进入表外边沿，中文最终写入表头成为“你A”。
+
+快速确定性回放用真实 `keyboard.down('Home')`、既有 `refreshTableLayout()`、`keyboard.up('Home')` 固定该窗口，3秒内得到 head=3、预期2。永久回归覆盖Home/End、格内方向键及Shift选字期间重配，并保留边沿返格的模型落点；先红后绿。原脚本后部的边沿IME业务断言及30秒预算保持。
+
+**修订在回投入口完成交接**：文档、显式选区、边沿与格区状态均未改变时，布局回投先接回原生选区；文档或模型导航变化仍消费模型落点。延迟回调只接回其对应状态快照的原生选区，避免覆盖后续命令。未新增全局选区监听，未改组合定稿时序、只读门控或源码坐标的投影等价保护。
+
+| 最终验证 | 结果 |
+| --- | --- |
+| Windows原生浏览器四套件 | tableInput、tableCaret、blockquoteTablePaint、contextMenu全部通过，55.23秒（run-kqIfD1） |
+| Linux原始脚本同负载对照 | 保留修订前原脚本，仍0.5CPU/三并发，只改生产回投，三套件全过：47.70/65.90/68.30秒（run-2hXE0T） |
+| Linux核心组永久回归 | 0.5CPU下通过 core 入口执行含新增场景的tableInput，17.32秒通过（run-ASGg0b） |
+| Windows真实下界宿主 | VS Code1.82.3独立桌面，T06三项、中格光标及#43轮廓五项全部通过，宿主EXIT=0 |
+| 相关单测与运行器契约 | 347/347及14/14通过；compile与类型检查通过 |
+
+按用户收尾要求，`tableInput` 恢复 core，名单与分组契约同步；两个尚未修复的附加组件敏感套件保留。恢复候选合并前仍按同提交多轮 CI 核对。独立记录见 [#666](https://github.com/ONEGAYI/vsidian/issues/666)；原CI缺少事件流，不将全部历史样本写成已获唯一归因。
+
+本期在这项修复后结束排查，连同 #664 的几何采样和 #665 的正文初始化等待一并交付 PR。#12、#25、#27、#43及其他未定因项继续留在 #552，未扩大修复或调整其归组。0.5CPU下CSS/IME八文件八worker另有222/222负样本（CSS子进程902ms，原5秒预算），不勾销条目25。
+
+原始事件与失败日志为 `linux-ime-probes/parallel-tableInput552.log`、`home-metrics-red.log`、`table-input-permanent-red.log`；最终记录为 `final-browser-local.log`、`final-unit.log`、`browser-runner-final.log`、`final-compile.log`、`linux-ime-final-control.log`，均位于本轮 `out/test/552/`。中间方案在边沿返格和几何取样处的失败另留原日志，不据最终通过抹去，也不作为额外问题已修复的证据。

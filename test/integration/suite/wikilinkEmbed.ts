@@ -81,14 +81,16 @@ async function waitSessionReady(file: string): Promise<void> {
   })
 }
 
-/** A 面板内嵌入卡就绪到内部 Live 绑定（端口在场 + 实例装载） */
-async function waitEmbedLiveBound(): Promise<string> {
-  return poll('嵌入 B 绑定内部 Live 端口', async () => {
+/** T06 的非空 B 夹具：端口绑定后还需等待 init 装载目标正文，才可按源坐标输入。 */
+async function waitEmbedLiveBound(text: string): Promise<string> {
+  const expectedLength = text.replaceAll('\r\n', '\n').length
+  return poll('嵌入 B 绑定端口并装载目标正文', async () => {
     const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri(A_FILE).toString())) as
-      | { readingEmbed?: Array<{ inner?: string; liveBound?: boolean; livePortId?: string | null }> }
+      | { readingEmbed?: Array<{ inner?: string; liveBound?: boolean; livePortId?: string | null; liveTextLen?: number }> }
       | undefined
     const entry = v?.readingEmbed?.find((c) => c.inner === B_INNER)
-    return entry?.liveBound === true && typeof entry.livePortId === 'string' ? entry.livePortId : undefined
+    return entry?.liveBound === true && entry.liveTextLen === expectedLength &&
+      typeof entry.livePortId === 'string' ? entry.livePortId : undefined
   })
 }
 
@@ -139,7 +141,7 @@ export const wikilinkEmbedCases: Array<[string, () => Promise<void>]> = [
     try {
       await openWithEditor(A_FILE)
       await waitSessionReady(A_FILE)
-      await waitEmbedLiveBound()
+      await waitEmbedLiveBound(B0)
       // 光标进 B 第三行表格格内的预置闭合围栏（[[]] 中间）
       const cellAt = B0.indexOf('| [[ ]] | t |') + 4
       await post({ kind: 'embed.test.focus', inner: B_INNER, pos: cellAt })
@@ -209,7 +211,7 @@ export const wikilinkEmbedCases: Array<[string, () => Promise<void>]> = [
     try {
       await openWithEditor(A_FILE)
       await waitSessionReady(A_FILE)
-      await waitEmbedLiveBound()
+      await waitEmbedLiveBound(B0)
       // 光标进 B 正文段末，真实输入块锚点前缀（#^ 为普通字符插入——
       // execCommand 不经 keymap，无转阶段按键语义）
       const anchor = B0.indexOf('目标乙正文与落点。') + '目标乙正文与落点。'.length
@@ -264,7 +266,7 @@ export const wikilinkEmbedCases: Array<[string, () => Promise<void>]> = [
     try {
       await openWithEditor(A_FILE)
       await waitSessionReady(A_FILE)
-      const portId = await waitEmbedLiveBound()
+      const portId = await waitEmbedLiveBound(B0)
       // 切 Reading：端口 teardown（unbind + 实例销毁）
       await post({ kind: 'embed.test.mode', inner: B_INNER, mode: 'reading' })
       await poll('端口释放', async () => {
