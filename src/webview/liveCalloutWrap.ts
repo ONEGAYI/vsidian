@@ -19,7 +19,7 @@ import type { Text } from '@codemirror/state'
 import { BlockWrapper, EditorView } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { docInput, FM_SCAN_LIMIT, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
-import { calloutOfBlockquote, calloutWrapFacet, liveDecorationsField } from './liveDecorations'
+import { CALLOUT_CONTAINER_NAMES, calloutOfBlockquote, calloutWrapFacet, liveDecorationsField } from './liveDecorations'
 
 /** wrapper 区间派生产物（纯数据——单测与浏览器断言共用口径） */
 export interface CalloutWrapRange {
@@ -33,26 +33,30 @@ export interface CalloutWrapRange {
   type: string
 }
 
-/** 引用深度 → wrapper rank（外层大内层小：数值小者嵌内层，0-100 语义） */
+/** 引用深度 → wrapper rank（外层大内层小：数值小者嵌内层，0-100 语义）。
+ *  边界登记（评审 T04）：深度 >6 时算式为负——CM6 侧 BlockWrapper.create
+ *  对 rank 做 [0,100] 钳制（@codemirror/view dist index.js 的
+ *  Math.max(0, Math.min(rank, 100))），深度 6 与 7+ 同饱和为 0；同 rank
+ *  嵌套由 updateBlockWrappers 的区间 tie-break 维持栈序，不破坏嵌套归属。
+ *  rank 语义未写入公开契约（相对大小只是实现手段），此处不预钳制——
+ *  6 层以上嵌套 callout 超出实测范围（探针三层内验证），维持算式直白。 */
 export function calloutWrapRank(depth: number): number {
   return 60 - depth * 10
 }
 
-/** 块级剪枝遍历白名单（与 liveDecorations.CALLOUT_CONTAINER_NAMES 同集） */
-const WRAP_DESCEND_NAMES = new Set(['Blockquote', 'BulletList', 'OrderedList', 'ListItem'])
-
 /**
  * 全量派生 callout wrapper 区间（纯函数）：沿容器块剪枝下探枚举 Blockquote，
  * 命中 callout 声明即产区间；fmEnd 之前（frontmatter 区域）不产。列表内
- * callout（v1 边界）跳过但继续下探（其嵌套亦在列表内，同界排除）。
+ * callout（v1 边界）跳过但继续下探（其嵌套亦在列表内，同界排除——先判
+ * inList 再识别，列表内不做声明白扫描）。
  */
 export function collectCalloutWrappers(tree: Tree, doc: Text, fmEnd = 0): CalloutWrapRange[] {
   const out: CalloutWrapRange[] = []
   const descend = (node: SyntaxNode, quoteDepth: number, inList: boolean): void => {
     for (let child = node.firstChild; child; child = child.nextSibling) {
       if (child.name === 'Blockquote') {
-        const info = calloutOfBlockquote(doc, child)
-        if (info && !inList && doc.line(info.titleLineNo).from >= fmEnd) {
+        const info = inList ? null : calloutOfBlockquote(doc, child)
+        if (info && doc.line(info.titleLineNo).from >= fmEnd) {
           out.push({
             from: doc.line(info.titleLineNo).from,
             to: doc.line(info.lastLineNo).to,
@@ -61,8 +65,9 @@ export function collectCalloutWrappers(tree: Tree, doc: Text, fmEnd = 0): Callou
           })
         }
         descend(child, quoteDepth + 1, inList)
-      } else if (WRAP_DESCEND_NAMES.has(child.name)) {
-        descend(child, quoteDepth, inList || child.name !== 'Blockquote')
+      } else if (CALLOUT_CONTAINER_NAMES.has(child.name)) {
+        // 进入本分支的必非 Blockquote（上方已拦截）——列表容器即置 inList
+        descend(child, quoteDepth, true)
       }
     }
   }

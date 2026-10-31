@@ -88,6 +88,9 @@ try {
   }
   // v1 边界：列表内 callout 维持行级形态（无 wrapper 承载）
   assert.equal(lineOf('列表内标题')?.wrapDepth, null, '列表内 callout 行 v1 不入 wrapper')
+  // 正文行直接断言（此前仅由 count=3 间接排除——标题行断言不覆盖正文行
+  // 混入 wrapper 的情形）
+  assert.equal(lineOf('列表内正文')?.wrapDepth, null, '列表内 callout 正文行 v1 不入 wrapper')
   assert.equal(lineOf('结尾段落')?.wrapDepth, null, '容器外正文不入 wrapper')
 
   // ---- 20 次同坐标点击（S1 口径）----

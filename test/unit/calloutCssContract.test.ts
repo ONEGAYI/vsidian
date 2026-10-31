@@ -239,3 +239,39 @@ describe('#657/T06：容器变量补全与 --callout-icon 公开接线', () => {
     expect(svgRule).toMatch(/height:\s*1em/)
   })
 })
+
+describe('#673/T05：Live wrapper 容器视觉与行级让位', () => {
+  // 评审 T05-S1：契约条目 verification 登记的「T05 wrapper 容器视觉与行级
+  // 让位」单元覆盖在此落为真实断言；行号落位/底色等用户可见形态由浏览器
+  // calloutPaint/calloutWrap 与一次性探针（out/test/callout-codecard-probe）
+  // 兜底，本契约钉规则形态——误删/误改时先在此失败。
+  it('wrapper 容器规则：margin 归零（探针 S1b/S1c 禁令的规则半边）+ padding/radius/border 三件套/双通道底色', () => {
+    const rule = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-callout-wrap.callout')
+    // 垂直 margin 禁令落地：常见片段 .callout{margin:10px 0} (0,1,0) 命中
+    // wrapper 时被本声明归零（margin 不入 posAtCoords 记账——错行证据探针
+    // S1b/S1c；此前禁令只有契约注释半边）
+    expect(rule).toMatch(/(^|[^-])margin:\s*0\s*;/)
+    expect(rule).toMatch(/padding:\s*var\(--callout-padding\)/)
+    expect(rule).toMatch(/border-style:\s*solid/)
+    expect(rule).toMatch(
+      /border-color:\s*color-mix\(in oklch, var\(--callout-color\) calc\(var\(--callout-border-opacity\) \* 100%\), transparent\)/)
+    expect(rule).toMatch(/border-width:\s*var\(--callout-border-width\)/)
+    expect(rule).toMatch(/border-radius:\s*var\(--callout-radius\)/)
+    expect(rule).toMatch(/background-color:\s*rgba\(var\(--callout-color\),\s*0?\.1\)/)
+    expect(rule).toMatch(/background-image:\s*linear-gradient\(\s*color-mix\(in oklch, var\(--callout-color\) 10%, transparent\)/)
+  })
+
+  it('wrapper 内行级让位规则：排除代码卡行（:not 防雷）+ 四项让位声明', () => {
+    // 评审 T05-P1（探针 §4.3 复现）：T06 起引用内围栏成代码卡行，让位规则
+    // (1,5,0) 若命中会清零卡行 padding-left 而 text-indent 负值存活（悬挂
+    // 缩进塌陷、行号甩出 wrapper 盒外、卡底色一并被清）。:not 在场 = 代码
+    // 卡行保住卡形态（padding-left/text-indent 同源对由卡行规则族承载）
+    const rule = cssRule(css, '.vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line)')
+    expect(rule).toMatch(/box-shadow:\s*none/)
+    expect(rule).toMatch(/padding-left:\s*0/)
+    expect(rule).toMatch(/background-color:\s*transparent/)
+    expect(rule).toMatch(/background-image:\s*none/)
+    // 让位仍压过基础 quote 规则：排除后特异性 (1,6,0) > (1,4,0)
+    // （:not 计入其内简单选择器），且排除面只含代码卡行——quiet 语义不变
+  })
+})
