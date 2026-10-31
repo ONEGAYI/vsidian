@@ -149,6 +149,53 @@ describe('live 公式装饰：显形与渲染切换', () => {
     const text = '$$\nx\n```\ncode\n```\ny\n$$'
     expect(buildBlocks(text, 0)).toHaveLength(0)
   })
+
+  // #675（T07）：引用内公式锚定矩阵——「$$ 标记隐藏/替换装饰」的锚点
+  // 是全文坐标（扫描产物 T06 起前缀折算），期望值按源文手算（非实现回算）：
+  // replace/mark 从开行 `$$` 起、到闭行 `$$` 尾止，不吞开行 `>` 前缀
+  //（QuoteMark 隐藏装饰的职责区）；行内路径一行不动（原行原坐标）。
+  it('引用内多行块：replace 区间从开行 $$ 到闭行 $$ 尾（tex 剥前缀），不吞开行 > 前缀', () => {
+    const text = '> $$\n> x^2\n> $$'
+    const rendered = buildBlocks(text, 0)
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0]!.from).toBe(2) // 开行 `$$`（`> ` 之后）
+    expect(rendered[0]!.to).toBe(15) // 闭行 `$$` 尾后（含中间行 `> ` 前缀一并被 replace 覆盖）
+    expect(rendered[0]!.widget).toBeInstanceOf(LiveMathWidget)
+    // tex 含开行余文与闭行前段——开行 `$$` 后余空、闭行 `$$` 前余空，
+    // 即首尾空段以 \n 相接（与 @vscode/markdown-it-katex 的 content 语义
+    // 同源；KaTeX 对首尾空白不敏感，渲染层自理）
+    expect(rendered[0]!.widget!.tex).toBe('\nx^2\n')
+    expect(rendered[0]!.widget!.displayMode).toBe(true)
+  })
+
+  it('引用内多行块：光标进入 → 源码态 mark 同锚定（$$ 到 $$，前缀在外）', () => {
+    const text = '> $$\n> x^2\n> $$'
+    const editing = buildBlocks(text, 5)
+    expect(editing).toHaveLength(1)
+    expect(editing[0]!.cls).toBe(MATH_CLASS_NAMES.mathSource)
+    expect(editing[0]!.from).toBe(2)
+    expect(editing[0]!.to).toBe(15)
+  })
+
+  it('引用行内公式：原行原坐标（前缀是普通字符，$ 折算即行内位置）', () => {
+    const text = '> 价格 $x^2$ 元'
+    const items = collect(build(text, 0))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.from).toBe(5)
+    expect(items[0]!.to).toBe(10)
+    expect(items[0]!.widget!.tex).toBe('x^2')
+    expect(items[0]!.widget!.displayMode).toBe(false)
+  })
+
+  it('引用内单行块（段内 $$…$$）：行内通道折算前缀后锚定', () => {
+    const text = '> $$a+b$$ 尾'
+    const items = collect(build(text, 0))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.from).toBe(2)
+    expect(items[0]!.to).toBe(9)
+    expect(items[0]!.widget!.tex).toBe('a+b')
+    expect(items[0]!.widget!.displayMode).toBe(true)
+  })
 })
 
 describe('跨行块表：StateField 增量维护', () => {

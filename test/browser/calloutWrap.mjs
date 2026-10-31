@@ -216,8 +216,196 @@ try {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   assert.equal(await page.locator('.vsidian-callout-wrap').count(), 0, '无 callout 文档不得产 wrapper')
 
+  // ---- T07（#675）：引用内子块组合——代码卡 + 多行公式 + 嵌套 callout
+  //      单一 wrapper 承载（T04 结构 + T05 视觉 + T06 扫描全在场）----
+  const T07_DOC = [
+    '> [!note] 外层标题',
+    '> 外层正文',
+    '> ```js',
+    '> const a = 1',
+    '> const bb = 2',
+    '> ```',
+    '> $$',
+    '> x = a^2 + b',
+    '> $$',
+    '> > [!tip] 内层标题',
+    '> > 内层正文',
+    '外层尾部',
+  ].join('\n')
+  await page.evaluate((text) => window.initCallout(text), T07_DOC)
+  await page.waitForSelector('.vsidian-callout-wrap')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+
+  // 结构 + 绘制层：卡 chrome / 行号入盒（T05 防雷）/ token 对位 / 公式成型
+  // 与无泄漏 / 前缀全隐 / 尾部不吞（S3：QuoteMark × 围栏行 replace × 跨行
+  // math replace 并存）
+  const combo = await page.evaluate(() => {
+    const wraps = [...document.querySelectorAll('.vsidian-callout-wrap')]
+    const outer = wraps.find((w) => (w.textContent ?? '').includes('外层标题'))
+    const inner = wraps.find((w) => (w.textContent ?? '').includes('内层标题'))
+    const header = document.querySelector('.vsidian-code-card-header')
+    const headerLabel = document.querySelector('.vsidian-code-card-header-label')
+    const copyBtn = document.querySelector('.vsidian-code-card-copy')
+    const foldBtn = document.querySelector('.vsidian-code-card-fold')
+    const linenos = [...document.querySelectorAll('.vsidian-code-card-linenumber')].map((el) => el.textContent)
+    const wrapRect = outer?.getBoundingClientRect()
+    const firstNo = document.querySelector('.vsidian-code-card-linenumber')?.getBoundingClientRect()
+    // token 对位（第二行起）：mark 覆盖的可见文本必须恰是 token 文本
+    const toks = [...document.querySelectorAll('.cm-line [class*="tok-"]')]
+      .map((el) => ({ cls: [...el.classList].filter((c) => c.startsWith('tok-')).join(','), text: el.textContent ?? '' }))
+    // 无泄漏：wrapper 内移除公式 widget 子树后不得残留源文
+    const outerClone = outer ? outer.cloneNode(true) : null
+    if (outerClone) {
+      outerClone.querySelectorAll('.vsidian-math').forEach((el) => el.remove())
+    }
+    // 前缀全隐 + 尾部不吞：行文本不以 > 开头；尾部行完整
+    const lines = [...document.querySelectorAll('.cm-line')].map((el) => ({ text: el.textContent ?? '' }))
+    return {
+      wrapCount: wraps.length,
+      singleHost: !!(outer && header && outer.contains(header)),
+      mathInOuter: !!(outer && outer.querySelector('.vsidian-math .katex')),
+      innerInOuter: !!(outer && inner && outer.contains(inner)),
+      headerLabel: headerLabel?.textContent ?? null,
+      hasCopy: !!copyBtn,
+      hasFold: !!foldBtn,
+      linenos,
+      linenoInBox: !!(wrapRect && firstNo && firstNo.left >= wrapRect.left && firstNo.right <= wrapRect.right),
+      keywords: toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text),
+      numbers: toks.filter((t) => t.cls.includes('tok-number')).map((t) => t.text).sort(),
+      mathLeak: outerClone ? (outerClone.textContent ?? '').includes('a^2') : true,
+      quotePrefixed: lines.filter((l) => l.text.trimStart().startsWith('>')).length,
+      tailIntact: lines.some((l) => l.text.includes('外层尾部')),
+      emptyFenceRows: lines.filter((l) => l.text === '').length,
+    }
+  })
+  assert.equal(combo.wrapCount, 2, `组合文档应恰 2 个 wrapper（外层+内层嵌套）: ${combo.wrapCount}`)
+  assert.ok(combo.singleHost, '代码卡头部应在外层 wrapper 内（单一容器承载）')
+  assert.ok(combo.mathInOuter, 'KaTeX 公式应成型且在外层 wrapper 内')
+  assert.ok(combo.innerInOuter, '内层 callout wrapper 应嵌套于外层（单一容器承载）')
+  assert.ok(combo.headerLabel?.includes('JavaScript'), `语言标签应为 JavaScript: ${combo.headerLabel}`)
+  assert.ok(combo.hasCopy && combo.hasFold, '复制与折叠按钮应在场')
+  assert.deepEqual(combo.linenos, ['1', '2'], `卡内行号应为 1/2（围栏行不占号）: ${JSON.stringify(combo.linenos)}`)
+  assert.ok(combo.linenoInBox, '行号应落在 wrapper 盒内（T05 防雷回归——悬挂缩进对不被清零）')
+  assert.deepEqual(combo.keywords, ['const', 'const'],
+    `引用内两行 keyword 着色应各覆盖 'const'（逐行前缀映射，§4.2 错位不得回潮）: ${JSON.stringify(combo.keywords)}`)
+  assert.deepEqual(combo.numbers, ['1', '2'],
+    `数字着色应覆盖 '1'/'2': ${JSON.stringify(combo.numbers)}`)
+  assert.equal(combo.mathLeak, false, '移除公式 widget 后 wrapper 内不得残留源文（§4.1 泄漏不得回潮）')
+  assert.equal(combo.quotePrefixed, 0, `可见行不得以 > 前缀呈现（QuoteMark 隐藏 × replace 并存）: ${combo.quotePrefixed}`)
+  assert.ok(combo.tailIntact, '跨行 replace 并存时尾部文字不得被吞（S3 形态）')
+
+  // 20 次同坐标点击：先无显隐扰动的行（光标自文档头直击——内层正文/
+  // 懒延续尾部），再代码行（首击进编辑态、围栏行由清空恢复显形会改行高
+  // ——先单击一次让几何落地再连击，热样式场景同款沉淀），公式行只做
+  // 首击（进入即显源码、行几何变化是显隐语义）
+  await clickTwenty(await posOf('内层正文'), '组合文档内层正文')
+  await clickTwenty(await posOf('外层尾部'), '组合文档懒延续尾部')
+  const codeWarm = await clickPoint(await posOf('const bb = 2'))
+  await page.mouse.click(codeWarm.x, codeWarm.y)
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await clickTwenty(await posOf('const bb = 2'), '引用内代码第二行（编辑态几何落地后）')
+  const mathPoint = await clickPoint(await posOf('x = a^2 + b'))
+  await page.mouse.click(mathPoint.x, mathPoint.y)
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  // inline replace widget 的点击定位落在块端点（CM6 posAtDOM 语义）——
+  // head 落在区间或端点即触发光标进入；随后断言源码态显形（widget 退场）
+  const mathHit = await page.evaluate(() => {
+    const view = window.controller.getView()
+    const doc = view.state.doc.toString()
+    const i = doc.indexOf('x = a^2 + b')
+    return {
+      head: view.state.selection.main.head,
+      from: i - 4, // 开行 `> $$` 的 $$ 起点
+      to: i + 16, // 闭行 `> $$` 的 $$ 尾后
+      sourceRevealed: !document.querySelector('.vsidian-math'),
+    }
+  })
+  assert.ok(mathHit.head >= mathHit.from && mathHit.head <= mathHit.to,
+    `公式首击应落入块区间或端点（widget 点击定位链路通）: ${JSON.stringify(mathHit)}`)
+  assert.ok(mathHit.sourceRevealed, '光标进入公式后应显源码（widget 退场，编辑入口通）')
+
+  // 折叠展开往返：收起（体消失、头部留）→ 展开（行号/token/内容恢复）
+  await page.click('.vsidian-code-card-fold')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const folded = await page.evaluate(() => ({
+    bodyGone: (document.querySelector('.vsidian-callout-wrap')?.textContent ?? '').includes('const a = 1') === false,
+    headerAlive: !!document.querySelector('.vsidian-code-card-header'),
+    foldBtnAlive: !!document.querySelector('.vsidian-code-card-fold'),
+  }))
+  assert.ok(folded.bodyGone, '折叠收起后代码体不得可见')
+  assert.ok(folded.headerAlive && folded.foldBtnAlive, '折叠收起后头部与展开钮保留')
+  await page.click('.vsidian-code-card-fold')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const unfolded = await page.evaluate(() => {
+    const toks = [...document.querySelectorAll('.cm-line [class*="tok-keyword"]')].map((el) => el.textContent)
+    return {
+      bodyBack: (document.querySelector('.vsidian-callout-wrap')?.textContent ?? '').includes('const a = 1'),
+      linenos: [...document.querySelectorAll('.vsidian-code-card-linenumber')].map((el) => el.textContent),
+      keywords: toks,
+    }
+  })
+  assert.ok(unfolded.bodyBack, '展开后代码体恢复')
+  assert.deepEqual(unfolded.linenos, ['1', '2'], '展开后行号恢复')
+  assert.deepEqual(unfolded.keywords, ['const', 'const'], `展开后 token 对位仍准: ${JSON.stringify(unfolded.keywords)}`)
+
+  // 复制内容（剥前缀后的代码）：hover 卡头触发整卡显现 → 点复制 → 出站断言
+  await page.hover('.vsidian-code-card-header')
+  await page.click('.vsidian-code-card-copy')
+  const copyMsg = await page.evaluate(() =>
+    window.postedCallout().filter((m) => m.kind === 'codeblock.copy').pop() ?? null)
+  assert.ok(copyMsg, '复制点击应产出 codeblock.copy 出站消息')
+  assert.equal(copyMsg.text, 'const a = 1\nconst bb = 2',
+    `复制内容应为剥前缀后的代码: ${JSON.stringify(copyMsg.text)}`)
+
+  // 增量编辑：代码行键入后 token 对位仍准；公式内容行删字符后仍渲染
+  await page.evaluate(() => window.locateCallout(
+    window.controller.getView().state.doc.toString().indexOf('const bb = 2') + 7))
+  await page.keyboard.type('X')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const typedInCard = await page.evaluate(() => {
+    const toks = [...document.querySelectorAll('.cm-line [class*="tok-"]')]
+      .map((el) => ({ cls: [...el.classList].filter((c) => c.startsWith('tok-')).join(','), text: el.textContent ?? '' }))
+    return {
+      keywords: toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text),
+      inDoc: window.controller.getView().state.doc.toString().includes('const bXb = 2'),
+      mathAlive: !!document.querySelector('.vsidian-math .katex'),
+    }
+  })
+  assert.ok(typedInCard.inDoc, '容器内键入应写入文档（const bXb = 2）')
+  assert.deepEqual(typedInCard.keywords, ['const', 'const'],
+    `增量键入后 token 对位仍准（增量重建路径同 lineMap 折算）: ${JSON.stringify(typedInCard.keywords)}`)
+  assert.ok(typedInCard.mathAlive, '代码行键入后公式仍渲染')
+  // 公式内容行删一字符（行尾 b）：块表增量重建、公式仍成型
+  await page.evaluate(() => window.locateCallout(
+    window.controller.getView().state.doc.toString().indexOf('x = a^2 + b') + 'x = a^2 + b'.length))
+  await page.keyboard.press('Backspace')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const trimming = await page.evaluate(() => ({
+    sourceRevealed: !document.querySelector('.vsidian-math'),
+    texInDoc: window.controller.getView().state.doc.toString().includes('x = a^2 + '),
+  }))
+  assert.ok(trimming.texInDoc, '公式内容行删字符应写入文档')
+  assert.ok(trimming.sourceRevealed, '光标在公式内编辑应显源码（widget 退场）')
+  // 光标移出公式：块表增量重建后恢复渲染（tex 已变 'x = a^2 + '）
+  await page.evaluate(() => window.locateCallout(0))
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const remathed = await page.evaluate(() => ({
+    mathAlive: !!document.querySelector('.vsidian-math .katex'),
+    mathText: document.querySelector('.vsidian-math')?.textContent ?? '',
+  }))
+  assert.ok(remathed.mathAlive, '光标移出后公式块表增量重建恢复渲染')
+  assert.ok(!remathed.mathText.includes('a^2 + b'), '恢复渲染的公式不得再含已删的 b')
+
+  // 截图对照（gitignored，out/test/ 留证）
+  await page.screenshot({ path: path.join(root, 'out/test/t07-callout-combo-live.png') })
+  // 光标进入公式的源码态形态一并留证（显形后源文可见是显隐语义）
+  await page.evaluate(() => window.locateCallout(
+    window.controller.getView().state.doc.toString().indexOf('x = a^2 + ') + 2))
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await page.screenshot({ path: path.join(root, 'out/test/t07-callout-combo-source.png') })
+
   assert.deepEqual(errors, [], '页面不得有脚本错误')
-  console.log('calloutWrap: 全部断言通过（结构/嵌套/懒延续归属 × 20 点击 × 键入 × 热样式 × 视口 × 模式往返）')
+  console.log('calloutWrap: 全部断言通过（结构/嵌套/懒延续归属 × 20 点击 × 键入 × 热样式 × 视口 × 模式往返 × T07 组合：卡 chrome/token 对位/公式无泄漏/折叠往返/复制/增量编辑）')
 } finally {
   await browser.close()
 }

@@ -28,6 +28,7 @@ import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { mermaidFencesField } from './liveMermaid'
 import { RENDERED_FENCE_LABELS, type FenceSpan } from '../shared/mermaid'
+import { mapContentOffsetToDoc } from '../shared/math'
 import { effectiveGraphicLabel, hasEffectiveGraphicRenderer } from './graphicRenderers'
 import { resolveCodeLanguage } from '../shared/codeLangs'
 import { hasHighlightEngine, highlightCodeRanges, splitRangeAtLineBreaks } from './codeHighlight'
@@ -549,13 +550,15 @@ export function buildCodeCardDecorations(
       if (to > from) out.push(Decoration.mark({ class: CODE_CARD_CLASS_NAMES.selection }).range(from, to))
     }
     const lang = resolveCodeLanguage(fence.info)
-    // 语法高亮（#83）：卡片关闭时朴素围栏仍可着色；折叠块不可见跳过
+    // 语法高亮（#83）：卡片关闭时朴素围栏仍可着色；折叠块不可见跳过。
+    // token 区间经 FenceSpan.lineMap 逐段折算回原文坐标（#675 T07）——
+    // 直加映射（openLine.to + 1 + tokenOffset）假设行首即裸内容起点，
+    // 引用内每行有 `> ` 前缀，第二行起错位逐行累积（探针 §4.2）
     if (config.highlight && !isFolded && lang && hasHighlightEngine(lang.id)) {
-      const contentStart = openLine.to + 1
       for (const token of highlightCodeRanges(lang.id, fence.code)) {
         for (const seg of splitRangeAtLineBreaks(fence.code, token.from, token.to)) {
-          const from = contentStart + seg.from
-          const to = contentStart + seg.to
+          const from = mapContentOffsetToDoc(fence.lineMap, seg.from)
+          const to = mapContentOffsetToDoc(fence.lineMap, seg.to)
           if (to > from && to <= closeLine.from) {
             out.push(tokenMarkDeco(token.cls).range(from, to))
           }

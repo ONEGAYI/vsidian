@@ -703,6 +703,64 @@ describe('语法高亮 mark（#83）', () => {
   })
 })
 
+// #675（T07）：引用内代码卡的 token 逐行前缀感知映射。断言口径是行为级
+// 对位——每个 tok mark 覆盖的**原文片段**必须与该 token 的应然文本一致
+// （直加映射 openLine.to + 1 + tokenOffset 的错位形态：token 右移每行
+// 前缀长、且逐行累积——探针报告 §4.2 实证）。期望值来自已知正确的
+// token 文本（keyword='const'、number='1'/'2'），非实现回算。
+describe('引用内代码卡 token 逐行前缀映射（#675 T07）', () => {
+  /** tok mark → { cls, text }（text = mark 区间覆盖的原文片段） */
+  const tokenSlices = (text: string): Array<{ cls: string; text: string }> =>
+    decos(text, 0)
+      .filter((i) => typeof i.cls === 'string' && i.cls.includes('tok-'))
+      .map((i) => ({ cls: i.cls!, text: text.slice(i.from, i.to) }))
+
+  it('一层 `> ` 前缀：两行的 keyword/number 都对准原文（不右移、不累积）', () => {
+    const doc = ['> [!note] t', '> ```js', '> const a = 1', '> const bb = 2', '> ```'].join('\n')
+    const toks = tokenSlices(doc)
+    const keywords = toks.filter((t) => t.cls.includes('tok-keyword'))
+    expect(keywords.map((t) => t.text)).toEqual(['const', 'const'])
+    const numbers = toks.filter((t) => t.cls.includes('tok-number'))
+    expect(numbers.map((t) => t.text).sort()).toEqual(['1', '2'])
+  })
+
+  it('不定长前缀：`> > `（两层）与 `>`（无空格）各自对位', () => {
+    const nested = ['> > ```js', '> > const a = 1', '> > ```'].join('\n')
+    const toksN = tokenSlices(nested)
+    expect(toksN.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const'])
+    expect(toksN.filter((t) => t.cls.includes('tok-number')).map((t) => t.text)).toEqual(['1'])
+
+    const tight = '>```js\n>const a = 1\n>```'
+    const toksT = tokenSlices(tight)
+    expect(toksT.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const'])
+    expect(toksT.filter((t) => t.cls.includes('tok-number')).map((t) => t.text)).toEqual(['1'])
+  })
+
+  it('内容行首缩进折算：剥前缀后仍有缩进时 token 对准缩进后的正文', () => {
+    // 缩进属于 code 内容（FenceSpan.code 保留），lineMap.prefixLen 只含
+    // 引用前缀——token 应越过 `>   ` 落到 const
+    const doc = ['> ```js', '>   const a = 1', '> ```'].join('\n')
+    const toks = tokenSlices(doc)
+    expect(toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const'])
+    expect(toks.filter((t) => t.cls.includes('tok-number')).map((t) => t.text)).toEqual(['1'])
+  })
+
+  it('顶层围栏对照：既有直加语义不回归（每行 token 仍对准原文）', () => {
+    const doc = ['```js', 'const a = 1', 'const bb = 2', '```'].join('\n')
+    const toks = tokenSlices(doc)
+    expect(toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const', 'const'])
+    expect(toks.filter((t) => t.cls.includes('tok-number')).map((t) => t.text).sort()).toEqual(['1', '2'])
+  })
+
+  it('引用内空内容行不产生错位段（空行后的行 token 仍对准）', () => {
+    // code 含空行（''）：lineMap 有零长段，折算不得落到空段或后移
+    const doc = ['> ```js', '> const a = 1', '>', '> const bb = 2', '> ```'].join('\n')
+    const toks = tokenSlices(doc)
+    expect(toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const', 'const'])
+    expect(toks.filter((t) => t.cls.includes('tok-number')).map((t) => t.text).sort()).toEqual(['1', '2'])
+  })
+})
+
 describe('头部装饰缓存有界（LRU，照 mermaidWidgetDeco 形态）', () => {
   it('同 key 复用装饰实例（RangeSet.eq 前提）', () => {
     const a = headerDeco('JavaScript', 'javascript', true, 'let a', false)

@@ -62,6 +62,35 @@ export interface ContentLineMapEntry {
   prefixLen: number
 }
 
+/** 裸内容串 offset → 原文全文 LF offset 的逐段折算（#675 T07）：
+ *  找 offset 所在内容段（lineMap 按 contentOffset 有序），返回
+ *  lineStart + prefixLen + (offset − contentOffset)。FenceSpan（mermaid）
+ *  与 MathOccurrence（math）的内容段消费共用本折算——装饰锚定/着色
+ *  不得在消费端再建第二份映射。lineMap 为空（无内容段）返回 -1，调用方
+ *  按不可折算丢弃。二分查找（长块 token 总量 O(n log n)，不随行数平方）。 */
+export function mapContentOffsetToDoc(
+  lineMap: readonly ContentLineMapEntry[],
+  offset: number,
+): number {
+  if (lineMap.length === 0) {
+    return -1
+  }
+  let lo = 0
+  let hi = lineMap.length - 1
+  // 最大 contentOffset ≤ offset 的条目（段起点）；offset 落在段内或段尾
+  //（段与段由 \n 分隔，offset == 段尾 < 下一段 contentOffset，仍属本段）
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (lineMap[mid]!.contentOffset <= offset) {
+      lo = mid
+    } else {
+      hi = mid - 1
+    }
+  }
+  const seg = lineMap[lo]!
+  return seg.lineStart + seg.prefixLen + (offset - seg.contentOffset)
+}
+
 /** 剥除行首全部引用前缀（#674 T06）：每层 `>` + 可选一个空格（CommonMark
  *  blockquote 标记消耗口径；Tab 不属前缀，`>` 后直接 Tab 时该 Tab 保留在
  *  裸行中）。返回裸行、层数（`>` 个数）与剥除字符数。纯字符扫描无分配。 */

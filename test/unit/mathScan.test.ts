@@ -4,7 +4,8 @@
 // 转义、空内容、$$ 优先于 $、行内代码 span 排除），保证同一文本在
 // 实时预览与阅读模式呈现一致语义。
 import { describe, expect, it } from 'vitest'
-import { opensMathBlockLine, scanMathRanges, stripInlineTexTicks } from '../../src/shared/math'
+import { mapContentOffsetToDoc, opensMathBlockLine, scanMathRanges, stripInlineTexTicks } from '../../src/shared/math'
+import { scanFencesDetailed } from '../../src/shared/mermaid'
 
 /** 文本按行拆分后扫描（行首 offset 自动累加，与 CM6 行迭代同构） */
 function scan(text: string) {
@@ -328,5 +329,64 @@ describe('多行输入与 offset 基值', () => {
   it('空输入与无 $ 文本零成本返回', () => {
     expect(scanMathRanges([], 0)).toEqual([])
     expect(scanMathRanges(['纯文本', '没有公式'], 0)).toEqual([])
+  })
+})
+
+// #675（T07）：ContentLineMapEntry 折算的纯函数契约——裸内容 offset →
+// 原文全文 offset。期望值按源文手算（段起点/段中/段尾/零长段/空表）。
+describe('mapContentOffsetToDoc：lineMap 逐段折算（#675 T07）', () => {
+  // 原文：`> $$\n> a+b\n> > c\n> $$`（块 depth=1；第三行剩一层 `> ` 属内容）
+  // tex = '\na+b\n> c\n'，lineMap 段（手算）：
+  //   开行余段 ''：contentOffset=0,  lineStart=0,  prefixLen=4（`> $$` 后即段尾）
+  //   a+b 行：     contentOffset=1,  lineStart=5,  prefixLen=2
+  //   > c 行：     contentOffset=5,  lineStart=11, prefixLen=2（剩 `> ` 入内容）
+  //   闭行前段 ''：contentOffset=9,  lineStart=16, prefixLen=2
+  const LM = scanMathRanges(['> $$', '> a+b', '> > c', '> $$'], 0)[0]!.lineMap
+
+  it('段内 offset 折算（含保留的嵌套 > 前缀与内容缩进的越过量）', () => {
+    // tex offset 1 = 'a'（a+b 行段首）→ 原文 5+2=7（行首 `> ` 之后）
+    expect(mapContentOffsetToDoc(LM, 1)).toBe(7)
+    // tex offset 3 = '+' → 原文 9
+    expect(mapContentOffsetToDoc(LM, 3)).toBe(9)
+    // 第三行段首 offset 5 = '>'（保留前缀入内容）→ 原文 13
+    expect(mapContentOffsetToDoc(LM, 5)).toBe(13)
+  })
+
+  it('段尾 offset 属本段（不落入下一段——段间由 \n 分隔）', () => {
+    // tex offset 4 = 'b'（a+b 段尾）→ 原文 10；offset 5 已是下一段
+    expect(mapContentOffsetToDoc(LM, 4)).toBe(10)
+    expect(mapContentOffsetToDoc(LM, 5)).not.toBe(10)
+  })
+
+  it('零长段（空内容行）不劫持后续 offset', () => {
+    // `>\n` 行：剥 depth=1 层后 consumed=''，零长段；其后 offset 属下一段
+    const lm = scanMathRanges(['> $$', '>', '> x', '> $$'], 0)[0]!.lineMap
+    // 段序列：''(开行余), ''(空行), 'x'；tex='\n\nx\n'
+    // 'x' 段 contentOffset=2 → 折算到第三行 `> x` 的 x 处 = 行首+2
+    const thirdLineStart = '> $$\n>\n'.length
+    expect(mapContentOffsetToDoc(lm, 2)).toBe(thirdLineStart + 2)
+  })
+
+  it('空 lineMap（行内命中/空内容）返回 -1（调用方按不可折算丢弃）', () => {
+    expect(mapContentOffsetToDoc([], 0)).toBe(-1)
+  })
+
+  it('FenceSpan.lineMap（mermaid 侧同语义）逐行折算一致', () => {
+    // 手算：`> ```js`(7字符) + 换行 + `> const a = 1`(13字符) + 换行 +
+    // `> const bb = 2` + 换行 + `> ```；code='const a = 1' + LF + 'const bb = 2'，
+    // 段1 contentOffset=0/lineStart=8/prefixLen=2，
+    // 段2 contentOffset=12/lineStart=22/prefixLen=2
+    const spans = scanFencesDetailed(['> ```js', '> const a = 1', '> const bb = 2', '> ```'], 0).spans
+    expect(spans).toHaveLength(1)
+    const lm = spans[0]!.lineMap
+    // code offset 0（'c'）→ 第二行行首+2
+    expect(mapContentOffsetToDoc(lm, 0)).toBe(8 + 2)
+    // code offset 12（第二行 'c'）→ 第三行行首+2
+    expect(mapContentOffsetToDoc(lm, 12)).toBe(22 + 2)
+    // code offset 10（第一段尾 '1'）→ 第二行的 '1'
+    expect(mapContentOffsetToDoc(lm, 10)).toBe(8 + 2 + 10)
+    // code offset 11 = 段间换行符本身：归前段（折到该行行尾 8+2+11=21，
+    // 第二行长 13 → 行内 13 即行尾）；段 2 自 contentOffset=12 起
+    expect(mapContentOffsetToDoc(lm, 11)).toBe(21)
   })
 })

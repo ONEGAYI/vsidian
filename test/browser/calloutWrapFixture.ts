@@ -10,8 +10,11 @@ import '../../src/webview/main.css'
 
 bootLocaleFromDocument()
 let saved: unknown
+// T07（#675）组合验证：出站消息捕获（复制内容断言——codeblock.copy
+// 经宿主桥出站，fixture 桥 no-op 但留观测量）
+const posted: Array<{ kind: string; text?: string }> = []
 const controller = new WebviewSyncController({
-  postMessage() {},
+  postMessage(msg) { posted.push(msg as { kind: string; text?: string }) },
   getState<T>() { return saved as T | undefined },
   setState(state) { saved = state },
 })
@@ -32,4 +35,6 @@ Object.assign(window, {
   locateCallout(offset: number) {
     controller.handleHostMessage({ kind: 'view.locate', offset })
   },
+  /** T07：出站消息快照（复制断言用；取后不清，调用方按序取尾） */
+  postedCallout() { return posted.slice() },
 })
