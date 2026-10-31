@@ -2445,12 +2445,13 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-color: transparent;
 }
 
-#app .cm-editor .cm-scroller .vsidian-quote-line {
+#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line) {
   box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color);
   /* #143 验收修复：QuoteMark 呈现态隐藏后内容左移至行首，文字与竖条
      重合——补左内边距对齐阅读 blockquote 的排版（0.9em 内容距 + 3px
      竖条占位；源码显形时前缀从同一缩进起点显示，与列表行 padding 常驻
-     同款取舍） */
+     同款取舍）。:not 排除代码卡行（A86-③ 2026-10-31 处置）：卡行不吃
+     基础引用行视觉——卡片自带边界（底色/边框），紫条属双重强调 */
   padding-left: calc(0.9em + 3px);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
 }

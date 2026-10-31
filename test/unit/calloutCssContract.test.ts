@@ -121,7 +121,7 @@ describe('live 行级形态：替代紫条与双通道底色', () => {
   })
 
   it('普通引用行紫条规则不被改动（callout 接入不回归引用契约）', () => {
-    const quote = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line')
+    const quote = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line)')
     expect(quote).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--vsidian-quote-bar-color\)/)
   })
 
