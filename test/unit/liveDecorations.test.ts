@@ -497,6 +497,57 @@ describe('mark 作用域显形', () => {
   })
 })
 
+describe('选区覆盖显形（2026-10-31 A86 验收改判）', () => {
+  it('非空选区跨越多行引用：覆盖行的 > 全部显形（不再只显端点行）', () => {
+    const doc = '> 甲行\n> 乙行\n> 丙行\n'
+    const a = doc.indexOf('甲')
+    const c = doc.indexOf('丙') + 1
+    const body = build(doc, { anchor: a, head: c })
+    expect(hiddenRanges(body)).not.toContainEqual([0, 2])
+    expect(hiddenRanges(body)).not.toContainEqual([5, 7])
+    expect(hiddenRanges(body)).not.toContainEqual([10, 12])
+  })
+
+  it('非空选区从行中起拖到下一行：起点行标记同样显形（行级相交，非标记区相交）', () => {
+    const doc = '> 甲行甲行\n> 乙行\n'
+    const body = build(doc, { anchor: doc.indexOf('甲') + 2, head: doc.indexOf('乙') + 1 })
+    expect(hiddenRanges(body)).not.toContainEqual([0, 2])
+    expect(hiddenRanges(body)).not.toContainEqual([7, 9])
+  })
+
+  it('空选区（折叠光标）在引用行中间：标记仍隐藏（端点语义分寸不动）', () => {
+    const doc = '> 甲行甲行\n> 乙行\n'
+    const body = build(doc, { anchor: doc.indexOf('甲') + 2 })
+    expect(hiddenRanges(body)).toContainEqual([0, 2])
+    expect(hiddenRanges(body)).toContainEqual([7, 9])
+  })
+
+  it('非空选区覆盖列表行：圆点显形且挂 marker-visible 类', () => {
+    const doc = '- 甲项\n- 乙项\n'
+    const body = build(doc, { anchor: doc.indexOf('甲'), head: doc.indexOf('乙') + 1 })
+    expect(hiddenRanges(body)).not.toContainEqual([0, 2])
+    expect(hiddenRanges(body)).not.toContainEqual([5, 7])
+    expect(byClass(body).get('vsidian-list-marker-visible')).toHaveLength(2)
+  })
+
+  it('非空选区覆盖 callout 标题行：[!type] 标记显形（不发射隐藏 marker）', () => {
+    const doc = '> [!note] 标题\n> 正文\n'
+    const body = build(doc, { anchor: doc.indexOf('标'), head: doc.indexOf('正文') + 2 })
+    const hidden = hiddenRanges(body)
+    const markerFrom = doc.indexOf('[!note]')
+    const markerTo = markerFrom + '[!note] '.length
+    expect(hidden.some(([f, t]) => f <= markerFrom && t >= markerTo)).toBe(false)
+  })
+
+  it('表格行的 > 在非空选区跨越时仍隐藏（#296 三轮端点语义在表格内不动）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n'
+    // 两端点都放格内容中间（不踩前缀区/格缘），跨越中间行
+    const body = build(doc, { anchor: doc.indexOf('a') + 1, head: doc.indexOf('2') })
+    expect(hiddenRanges(body)).toContainEqual([0, 2])
+    expect(hiddenRanges(body)).toContainEqual([28, 30])
+  })
+})
+
 describe('高亮 ==text==（#105）：#29 行内标记组语义', () => {
   it('光标离开：内容 span 常显高亮底色类、两端 == 定界符隐藏', () => {
     const doc = '正文 ==高亮== 文本'

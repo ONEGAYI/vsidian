@@ -277,6 +277,33 @@ describe('退格不触发条件（交默认逐字符删除）', () => {
   })
 })
 
+// ---- 引用内代码围栏的 Enter 延续（2026-10-31 A86 验收） ----
+
+describe('引用内代码围栏的 Enter 延续', () => {
+  it('callout 内代码内容行 Enter 接管并延续 > 前缀（裸行会掉出容器）', () => {
+    const doc = '> [!note] t\n> ```js\n> const a = 1\n> ```\n'
+    const lineEnd = doc.indexOf('const a = 1') + 'const a = 1'.length
+    const out = typed(makeEditView(doc, lineEnd))
+    expect(out.text).toContain('const a = 1\n> ')
+    expect(out.text.slice(out.head - 2, out.head)).toBe('> ')
+  })
+
+  it('嵌套引用内围栏行 Enter 延续完整 > > 前缀', () => {
+    const doc = '> [!note] t\n> > ```js\n> > const a = 1\n> > ```\n'
+    const lineEnd = doc.indexOf('const a = 1') + 'const a = 1'.length
+    const out = typed(makeEditView(doc, lineEnd))
+    expect(out.text).toContain('const a = 1\n> > ')
+    expect(out.text.slice(out.head - 4, out.head)).toBe('> > ')
+  })
+
+  it('顶层围栏内 Enter 仍不接管（代码字面编辑边界不动）', () => {
+    const doc = '```js\nconst a = 1\n```\n'
+    const view = makeEditView(doc, doc.indexOf('const a = 1') + 'const a = 1'.length)
+    expect(continueListMarkup(view)).toBe(false)
+    view.destroy()
+  })
+})
+
 // ---- 块级公式内不接管（按源码字面编辑） ----
 
 describe('块级公式内不接管', () => {

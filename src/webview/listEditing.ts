@@ -10,7 +10,9 @@
 //   先升一级（缩进对齐父项标记列，父项信息取自语法树）、顶级一次清
 //   整段标记（保留引用前缀）、纯引用行逐层剥除；任务标记与列表标记
 //   是一个单元。其余位置（前缀中间、选区、多光标、IME 组合中）不接管
-// - 不接管：块级公式内（源码字面编辑）、表格、代码围栏、frontmatter
+// - 不接管：块级公式内（源码字面编辑）、表格、代码围栏（顶层；引用内
+//   围栏行 Enter 延续引用前缀——2026-10-31 A86 验收，裸行会掉出容器）、
+//   frontmatter
 //
 // 装配顺序约定：置于 tableEditing 之后、defaultKeymap（extraExtensions）
 // 之前——表格上下文优先（格内 Enter 仍为 <br> 语义），且先于通用键位
@@ -31,11 +33,15 @@ import { liveDecorationsField } from './liveDecorations'
 import { mathBlocksField } from './liveMath'
 import { chainAt } from '../shared/markdownDoc'
 
-/** 键位不接管的表格/代码上下文节点名（树判定，含独立装配无 tableEditing 的兜底） */
-const NON_LIST_CONTEXT_NODES = new Set([
+/** 键位不接管的表格上下文节点名（树判定，含独立装配无 tableEditing 的兜底） */
+const TABLE_CONTEXT_NODES = new Set([
   'Table', 'TableHeader', 'TableRow', 'TableDelimiter', 'TableCell',
-  'FencedCode', 'CodeText',
 ])
+
+/** 代码上下文节点名：仅顶层（行无引用前缀）不接管——引用内围栏行
+ *  Enter 延续引用前缀（2026-10-31 A86 验收：裸换行会掉出引用容器）；
+ *  顶层围栏维持 #119 字面编辑边界 */
+const CODE_CONTEXT_NODES = new Set(['FencedCode', 'CodeText'])
 
 interface ListKeyContext {
   prefix: LinePrefix
@@ -65,11 +71,14 @@ function listKeyContext(state: EditorState, pos: number): ListKeyContext | null 
     return null
   }
   const chain = chainAt(field.tree, pos)
-  if (chain.some((node) => NON_LIST_CONTEXT_NODES.has(node.name))) {
+  if (chain.some((node) => TABLE_CONTEXT_NODES.has(node.name))) {
     return null
   }
   const prefix = parseLinePrefix(line.text)
   if (!prefix) {
+    return null
+  }
+  if (chain.some((node) => CODE_CONTEXT_NODES.has(node.name)) && prefix.quote.length === 0) {
     return null
   }
   return { prefix, chain, prefixEnd: line.from + prefixLength(prefix), lineFrom: line.from, lineTo: line.to }

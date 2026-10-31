@@ -1057,6 +1057,26 @@ export function selectionEndpointsTouchRange(selection: EditorSelection, from: n
   return false
 }
 
+/** 选区覆盖显形（2026-10-31 A86 验收改判，#296 端点语义在非表格行的
+ *  扩展）：空选区（折叠光标）维持端点语义——端点进入标记区才显形，
+ *  层级编辑入口不变；非空选区与**所在行**相交即显形该行源文标记
+ *  （Obsidian 式——从行中起拖时起点行同样显形，故按行级相交而非
+ *  标记区相交）。表格上下文不换用（格内拖选跨格把引用符号纳入选区
+ *  是 #296 三轮已修缺陷，表格三处前缀谓词维持端点语义）。 */
+export function selectionRevealsLineMarkers(
+  selection: EditorSelection,
+  markFrom: number, markTo: number, lineFrom: number, lineTo: number,
+): boolean {
+  for (const range of selection.ranges) {
+    if (range.empty) {
+      if (range.head >= markFrom && range.head <= markTo) return true
+    } else if (range.from < lineTo && range.to > lineFrom) {
+      return true
+    }
+  }
+  return false
+}
+
 /** 名为 name 的直接子节点（mark 查找用） */
 function childNamed(node: SyntaxNode, name: string): SyntaxNode | null {
   for (let c = node.firstChild; c; c = c.nextSibling) {
@@ -1270,7 +1290,9 @@ function emitForRange(
             const markerEnd = declEnd < line.to && doc.sliceString(declEnd, declEnd + 1) === ' '
               ? declEnd + 1
               : declEnd
-            if (!endpointTouches(line.from, line.to)) {
+            // 空选区区间传整行（端点在行内任意处即显形源码——旧整行
+            // endpoint 语义保持）；非空选区走行级相交（A86 覆盖显形）
+            if (!selectionRevealsLineMarkers(selection, line.from, line.to, line.from, line.to)) {
               out.push(calloutMarkerDeco(info.decl.type).range(info.markerFrom, markerEnd))
               if (info.decl.title === undefined) {
                 // 无显式标题：零宽默认标题 widget（源文派生，不写回源文）
@@ -1475,10 +1497,21 @@ function emitForRange(
       }
       case 'QuoteMark': {
         const to = markerEnd(node)
-        // 端点语义（#296 三轮）：非空选区跨越引用标记不显形（拖选跨行
-        // 常态）；端点进入才显形可编辑——与表格前缀 mark 同口径
-        if (!endpointTouches(node.from, to)) {
-          out.push(hideDeco.range(node.from, to))
+        // 表格行维持端点语义（#296 三轮）：格内拖选跨格把引用符号纳入
+        // 选区是已修缺陷，不随选区覆盖改判放宽。表格行形态（GFM 树实
+        // 测）：表头行 QuoteMark 的 nextSibling 是 Table，后续 lazy 行
+        // QuoteMark 的 parent 是 Table——QuoteMark 与 Table 是兄弟而非
+        // 祖先，不能走 path 判定
+        const inTable = node.parent?.name === 'Table' || node.nextSibling?.name === 'Table'
+        if (inTable) {
+          if (!endpointTouches(node.from, to)) {
+            out.push(hideDeco.range(node.from, to))
+          }
+        } else {
+          const line = doc.lineAt(node.from)
+          if (!selectionRevealsLineMarkers(selection, node.from, to, line.from, line.to)) {
+            out.push(hideDeco.range(node.from, to))
+          }
         }
         return
       }
@@ -1494,8 +1527,9 @@ function emitForRange(
         }
         const line = doc.lineAt(node.from)
         const to = markerEnd(node)
-        // 端点语义（#296 三轮）：同 QuoteMark——选区跨越不显形
-        if (!endpointTouches(line.from, to)) {
+        // 同 QuoteMark 的 A86 选区覆盖显形：非空选区与所在行相交即显
+        // 形（列表不在表格上下文，无需表格分流）
+        if (!selectionRevealsLineMarkers(selection, line.from, to, line.from, line.to)) {
           out.push(hideDeco.range(line.from, to))
         } else {
           addLineCls(line.number, LIVE_CLASS_NAMES.listMarkerVisible)

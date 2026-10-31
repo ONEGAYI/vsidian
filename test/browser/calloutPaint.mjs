@@ -141,10 +141,14 @@ try {
   await page.mouse.down()
   await page.mouse.move(end.x, end.y, { steps: 10 })
   await page.mouse.up()
-  assert.deepEqual(await page.evaluate(() => {
+  const sel = await page.evaluate(() => {
     const range = window.controller.getView().state.selection.main
     return { from: range.from, to: range.to }
-  }), { from, to }, '拖选必须落在源区间')
+  })
+  // A86 选区覆盖显形（2026-10-31）伴生：拖选路径上 QuoteMark/ListMark
+  // 显形使行内容右移，释放像素（取自显形前 coordsAtPos）映射左偏 ≤1
+  assert.equal(sel.from, from, `拖选起点应精确: ${JSON.stringify(sel)}`)
+  assert.ok(sel.to >= to - 1 && sel.to <= to, `拖选终点覆盖源区间（显形伴生 ≤1）: ${JSON.stringify(sel)} vs ${from}-${to}`)
 
   // ---- 明暗主题绘制层（live）----
 
