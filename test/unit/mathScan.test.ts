@@ -4,7 +4,8 @@
 // 转义、空内容、$$ 优先于 $、行内代码 span 排除），保证同一文本在
 // 实时预览与阅读模式呈现一致语义。
 import { describe, expect, it } from 'vitest'
-import { opensMathBlockLine, scanMathRanges, stripInlineTexTicks } from '../../src/shared/math'
+import { mapContentOffsetToDoc, opensMathBlockLine, scanMathRanges, stripInlineTexTicks } from '../../src/shared/math'
+import { scanFencesDetailed } from '../../src/shared/mermaid'
 
 /** 文本按行拆分后扫描（行首 offset 自动累加，与 CM6 行迭代同构） */
 function scan(text: string) {
@@ -201,6 +202,115 @@ describe('跨行 $$ 块', () => {
   })
 })
 
+describe('引用内块公式：前缀剥离（#674 T06）', () => {
+  it('一层前缀多行块：开启判定输入裸行，from/to 折算全文坐标，tex 剥前缀', () => {
+    const text = ['> [!note] 标题', '> $$', '> x = a^2 + b', '> $$', '> 尾部'].join('\n')
+    const out = scan(text)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.kind).toBe('block')
+    // from 为开定界符位置（> 之后）、to 为闭定界符行尾——全文坐标
+    expect(text.slice(out[0]!.from, out[0]!.to)).toBe('$$\n> x = a^2 + b\n> $$')
+    expect(out[0]!.tex).toBe('\nx = a^2 + b\n')
+  })
+
+  it('lineMap 把 tex 各段锚回原文坐标（开启行 rest、内容行、闭合行前段）', () => {
+    const text = ['> $$', '> x = a^2', '> tail $$'].join('\n')
+    const out = scan(text)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tex).toBe('\nx = a^2\ntail ')
+    const m = out[0]!.lineMap
+    expect(m).toHaveLength(3)
+    expect(m[0]).toEqual({ contentOffset: 0, lineStart: 0, prefixLen: '> $$'.length })
+    expect(m[1]).toEqual({ contentOffset: 1, lineStart: '> $$\n'.length, prefixLen: 2 })
+    expect(m[2]).toEqual({ contentOffset: 1 + 'x = a^2'.length + 1, lineStart: '> $$\n> x = a^2\n'.length, prefixLen: 2 })
+    // 换算契约：tex 任一 offset 折算回原文位置 = lineStart + prefixLen + (offset − contentOffset)
+    for (const e of m) {
+      const nl = out[0]!.tex.indexOf('\n', e.contentOffset)
+      const seg = out[0]!.tex.slice(e.contentOffset, nl < 0 ? undefined : nl)
+      const docStart = e.lineStart + e.prefixLen
+      expect(text.slice(docStart, docStart + seg.length)).toBe(seg)
+    }
+  })
+
+  it('单行闭合形态 > $$x^2$$：命中为块级，区间为裸定界符段', () => {
+    const text = '> 前文 $$x^2$$ 后文不进'
+    const out = scan(text)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.kind).toBe('block')
+    expect(text.slice(out[0]!.from, out[0]!.to)).toBe('$$x^2$$')
+    expect(out[0]!.tex).toBe('x^2')
+  })
+
+  it('段内形态 > a $$b$$ c：行内规则吃裸行，坐标折算前缀', () => {
+    const text = '> a $$b$$ c'
+    const out = scan(text)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.kind).toBe('block')
+    expect(text.slice(out[0]!.from, out[0]!.to)).toBe('$$b$$')
+  })
+
+  it('行内公式路径不动：> a $x$ b 仍按原行扫描命中（坐标含前缀偏移）', () => {
+    const text = '> a $x$ b'
+    const out = scan(text)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.kind).toBe('inline')
+    expect(out[0]!.tex).toBe('x')
+    expect(text.slice(out[0]!.from, out[0]!.to)).toBe('$x$')
+    expect(out[0]!.lineMap).toEqual([]) // 行内命中无跨行映射
+  })
+
+  it('2/3 层前缀与 > 无空格形态同样识别；tex 剥同层数前缀、保留其余缩进', () => {
+    expect(scan('> > $$\n> > x\n> > $$')[0]!.tex).toBe('\nx\n')
+    expect(scan('>>>$$\n>>>x\n>>>$$')[0]!.tex).toBe('\nx\n')
+    // 前缀后的内容缩进保留（与 markdown-it-katex content 口径一致）
+    expect(scan('> $$\n>   indented\n> $$')[0]!.tex).toBe('\n  indented\n')
+  })
+
+  it('内容行层数多于开启行：剥开启层数后的剩余（含 >）原样进 tex（嵌套引用语义）', () => {
+    expect(scan('> $$\n> > x\n> $$')[0]!.tex).toBe('\n> x\n')
+  })
+
+  it('容器断开不终止块：无前缀内容行原样进 tex（与 markdown-it-katex 跨容器贪婪一致）', () => {
+    // 插件实现是 src 级匹配：引用内开块后跨引用边界吃到闭合 $$，断开行不剥前缀
+    const out = scan('> $$\nx\n> $$')
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tex).toBe('\nx\n')
+    expect(out[0]!.lineMap).toEqual([
+      { contentOffset: 0, lineStart: 0, prefixLen: 4 },
+      { contentOffset: 1, lineStart: '> $$\n'.length, prefixLen: 0 },
+      { contentOffset: 3, lineStart: '> $$\nx\n'.length, prefixLen: 2 },
+    ])
+  })
+
+  it('未闭合引用内块不产出（稳定降级为源码）', () => {
+    expect(scan('> $$\n> x')).toEqual([])
+    expect(scan('> $$ x')).toEqual([])
+  })
+
+  it('闭合行前缀层数多于开启行：剥开启层数后行内 $$ 仍闭合（含 > 的段进 tex）', () => {
+    // '> > $$' 剥 1 层剩 '> $$'：行内含 $$ 即闭合候选（与现状「行内任意 $$ 可
+    // 闭合」同构），闭合段是 '> '——与 fence 的纯闭合行判定不同源，各自对齐
+    // 对应 Reading 引擎（math=插件贪婪 / fence=CommonMark 核心）
+    const out = scan('> $$\n> > $$\n> $$')
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tex).toBe('\n> ')
+    // 行3 的裸 $$ 不再开新块配对（已闭合后的普通行，无开启态）
+    expect(scan('> $$\n> > $$\n> $$\n> x\n> $$')).toHaveLength(2)
+  })
+
+  it('空内容单行 > $$ $$ 与 > $$$$ 按原文降级不产出（既有口径随前缀平移）', () => {
+    expect(scan('> $$  $$')).toEqual([])
+    expect(scan('> $$$$')).toEqual([])
+  })
+
+  it('firstLineStart 基值平移引用内块区间（增量窗口直驱）', () => {
+    const out = scanMathRanges(['> $$', '> x', '> $$'], 100)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.from).toBe(100 + 2)
+    expect(out[0]!.to).toBe(100 + '> $$\n> x\n> $$'.length)
+  })
+})
+
 describe('多行输入与 offset 基值', () => {
   it('firstLineStart 基值平移全部区间', () => {
     const out = scanMathRanges(['$$', 'x', '$$'], 100)
@@ -213,11 +323,71 @@ describe('多行输入与 offset 基值', () => {
     // 调用方只传入行窗口：窗口首行已在块内时，扫描以非块态起步，
     // 不得把窗口内的闭合定界符误配为新的块开始
     const out = scanMathRanges(['y $$', '后文 $a$'], 0)
-    expect(out).toEqual([{ kind: 'inline', from: 8, to: 11, tex: 'a' }])
+    expect(out).toEqual([{ kind: 'inline', from: 8, to: 11, tex: 'a', lineMap: [] }])
   })
 
   it('空输入与无 $ 文本零成本返回', () => {
     expect(scanMathRanges([], 0)).toEqual([])
     expect(scanMathRanges(['纯文本', '没有公式'], 0)).toEqual([])
+  })
+})
+
+// #675（T07）：ContentLineMapEntry 折算的纯函数契约——裸内容 offset →
+// 原文全文 offset。期望值按源文手算（段起点/段中/段尾/零长段/空表）。
+describe('mapContentOffsetToDoc：lineMap 逐段折算（#675 T07）', () => {
+  // 原文：`> $$\n> a+b\n> > c\n> $$`（块 depth=1；第三行剩一层 `> ` 属内容）
+  // tex = '\na+b\n> c\n'，lineMap 段（手算）：
+  //   开行余段 ''：contentOffset=0,  lineStart=0,  prefixLen=4（`> $$` 后即段尾）
+  //   a+b 行：     contentOffset=1,  lineStart=5,  prefixLen=2
+  //   > c 行：     contentOffset=5,  lineStart=11, prefixLen=2（剩 `> ` 入内容）
+  //   闭行前段 ''：contentOffset=9,  lineStart=17, prefixLen=2（17 = 第 3 行
+  //   行首 11 + 行长 5 + 换行 1；16 是第 3 行末换行符位置，非行首）
+  const LM = scanMathRanges(['> $$', '> a+b', '> > c', '> $$'], 0)[0]!.lineMap
+
+  it('段内 offset 折算（含保留的嵌套 > 前缀与内容缩进的越过量）', () => {
+    // tex offset 1 = 'a'（a+b 行段首）→ 原文 5+2=7（行首 `> ` 之后）
+    expect(mapContentOffsetToDoc(LM, 1)).toBe(7)
+    // tex offset 3 = '+' → 原文 9
+    expect(mapContentOffsetToDoc(LM, 3)).toBe(9)
+    // 第三行段首 offset 5 = '>'（保留前缀入内容）→ 原文 13
+    expect(mapContentOffsetToDoc(LM, 5)).toBe(13)
+  })
+
+  it('段尾 offset 属本段（不落入下一段——段间由 \n 分隔）', () => {
+    // tex offset 4 = 'b'（a+b 段尾）→ 原文 10；offset 5 已是下一段
+    expect(mapContentOffsetToDoc(LM, 4)).toBe(10)
+    expect(mapContentOffsetToDoc(LM, 5)).not.toBe(10)
+  })
+
+  it('零长段（空内容行）不劫持后续 offset', () => {
+    // `>\n` 行：剥 depth=1 层后 consumed=''，零长段；其后 offset 属下一段
+    const lm = scanMathRanges(['> $$', '>', '> x', '> $$'], 0)[0]!.lineMap
+    // 段序列：''(开行余), ''(空行), 'x'；tex='\n\nx\n'
+    // 'x' 段 contentOffset=2 → 折算到第三行 `> x` 的 x 处 = 行首+2
+    const thirdLineStart = '> $$\n>\n'.length
+    expect(mapContentOffsetToDoc(lm, 2)).toBe(thirdLineStart + 2)
+  })
+
+  it('空 lineMap（行内命中/空内容）返回 -1（调用方按不可折算丢弃）', () => {
+    expect(mapContentOffsetToDoc([], 0)).toBe(-1)
+  })
+
+  it('FenceSpan.lineMap（mermaid 侧同语义）逐行折算一致', () => {
+    // 手算：`> ```js`(7字符) + 换行 + `> const a = 1`(13字符) + 换行 +
+    // `> const bb = 2` + 换行 + `> ```；code='const a = 1' + LF + 'const bb = 2'，
+    // 段1 contentOffset=0/lineStart=8/prefixLen=2，
+    // 段2 contentOffset=12/lineStart=22/prefixLen=2
+    const spans = scanFencesDetailed(['> ```js', '> const a = 1', '> const bb = 2', '> ```'], 0).spans
+    expect(spans).toHaveLength(1)
+    const lm = spans[0]!.lineMap
+    // code offset 0（'c'）→ 第二行行首+2
+    expect(mapContentOffsetToDoc(lm, 0)).toBe(8 + 2)
+    // code offset 12（第二行 'c'）→ 第三行行首+2
+    expect(mapContentOffsetToDoc(lm, 12)).toBe(22 + 2)
+    // code offset 10（第一段尾 '1'）→ 第二行的 '1'
+    expect(mapContentOffsetToDoc(lm, 10)).toBe(8 + 2 + 10)
+    // code offset 11 = 段间换行符本身：归前段（折到该行行尾 8+2+11=21，
+    // 第二行长 13 → 行内 13 即行尾）；段 2 自 contentOffset=12 起
+    expect(mapContentOffsetToDoc(lm, 11)).toBe(21)
   })
 })

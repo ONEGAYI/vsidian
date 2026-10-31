@@ -121,7 +121,7 @@ describe('live 行级形态：替代紫条与双通道底色', () => {
   })
 
   it('普通引用行紫条规则不被改动（callout 接入不回归引用契约）', () => {
-    const quote = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line')
+    const quote = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line)')
     expect(quote).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--vsidian-quote-bar-color\)/)
   })
 
@@ -140,6 +140,31 @@ describe('live 行级形态：替代紫条与双通道底色', () => {
     const icon = cssRule(css, '#app .callout-icon')
     expect(icon).toMatch(/mask:\s*var\(--_vsidian-callout-icon,\s*url\("data:image\/svg\+xml/)
     expect(icon).toMatch(/background-color:\s*var\(--callout-color\)/)
+  })
+
+  // ---- #671/T02 标题按类型着色 ----
+  // 层次对齐 Obsidian 1.14.4 app.css：.callout-title 取 --callout-color，
+  // .callout-title-inner 取 --callout-title-color（后者默认 inherit，是内层
+  // 覆盖点——两个变量职责不同，不得合并成一个）。此前标题行直接读
+  // --callout-title-color=inherit，所有类型同色。
+  it('T02 标题层取类型色（对齐 Obsidian .callout-title / -title-inner 两层）', () => {
+    const title = cssRule(css, '.vsidian-quote-line.callout-title')
+    expect(title, '标题行应取类型色').toMatch(/color:\s*var\(--callout-color\)/)
+  })
+
+  it('T02 标题内层仍由 --callout-title-color 覆盖（该变量保持 inherit 语义）', () => {
+    const inner = cssRule(css, '.vsidian-quote-line.callout-title .callout-title-inner')
+    expect(inner).toMatch(/color:\s*var\(--callout-title-color\)/)
+    // 变量默认值不得被改成类型色——内层是用户片段覆盖点，改默认会破坏语义
+    const app = cssRuleExact(css, '#app')
+    expect(app).toMatch(/--callout-title-color:\s*inherit/)
+  })
+
+  it('T02 阅读侧标题同为两层结构（同一 data-callout 两端计算色一致）', () => {
+    const readingTitle = cssRule(css, '.vsidian-reading-block .callout-title')
+    expect(readingTitle).toMatch(/color:\s*var\(--callout-color\)/)
+    const readingInner = cssRule(css, '.vsidian-reading-block .callout-title .callout-title-inner')
+    expect(readingInner).toMatch(/color:\s*var\(--callout-title-color\)/)
   })
 })
 
@@ -212,5 +237,41 @@ describe('#657/T06：容器变量补全与 --callout-icon 公开接线', () => {
     const svgRule = cssRule(css, '.callout-icon.vsidian-callout-icon-custom svg')
     expect(svgRule).toMatch(/width:\s*1em/)
     expect(svgRule).toMatch(/height:\s*1em/)
+  })
+})
+
+describe('#673/T05：Live wrapper 容器视觉与行级让位', () => {
+  // 评审 T05-S1：契约条目 verification 登记的「T05 wrapper 容器视觉与行级
+  // 让位」单元覆盖在此落为真实断言；行号落位/底色等用户可见形态由浏览器
+  // calloutPaint/calloutWrap 与一次性探针（out/test/callout-codecard-probe）
+  // 兜底，本契约钉规则形态——误删/误改时先在此失败。
+  it('wrapper 容器规则：margin 归零（探针 S1b/S1c 禁令的规则半边）+ padding/radius/border 三件套/双通道底色', () => {
+    const rule = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-callout-wrap.callout')
+    // 垂直 margin 禁令落地：常见片段 .callout{margin:10px 0} (0,1,0) 命中
+    // wrapper 时被本声明归零（margin 不入 posAtCoords 记账——错行证据探针
+    // S1b/S1c；此前禁令只有契约注释半边）
+    expect(rule).toMatch(/(^|[^-])margin:\s*0\s*;/)
+    expect(rule).toMatch(/padding:\s*var\(--callout-padding\)/)
+    expect(rule).toMatch(/border-style:\s*solid/)
+    expect(rule).toMatch(
+      /border-color:\s*color-mix\(in oklch, var\(--callout-color\) calc\(var\(--callout-border-opacity\) \* 100%\), transparent\)/)
+    expect(rule).toMatch(/border-width:\s*var\(--callout-border-width\)/)
+    expect(rule).toMatch(/border-radius:\s*var\(--callout-radius\)/)
+    expect(rule).toMatch(/background-color:\s*rgba\(var\(--callout-color\),\s*0?\.1\)/)
+    expect(rule).toMatch(/background-image:\s*linear-gradient\(\s*color-mix\(in oklch, var\(--callout-color\) 10%, transparent\)/)
+  })
+
+  it('wrapper 内行级让位规则：排除代码卡行（:not 防雷）+ 四项让位声明', () => {
+    // 评审 T05-P1（探针 §4.3 复现）：T06 起引用内围栏成代码卡行，让位规则
+    // (1,5,0) 若命中会清零卡行 padding-left 而 text-indent 负值存活（悬挂
+    // 缩进塌陷、行号甩出 wrapper 盒外、卡底色一并被清）。:not 在场 = 代码
+    // 卡行保住卡形态（padding-left/text-indent 同源对由卡行规则族承载）
+    const rule = cssRule(css, '.vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line)')
+    expect(rule).toMatch(/box-shadow:\s*none/)
+    expect(rule).toMatch(/padding-left:\s*0/)
+    expect(rule).toMatch(/background-color:\s*transparent/)
+    expect(rule).toMatch(/background-image:\s*none/)
+    // 让位仍压过基础 quote 规则：排除后特异性 (1,6,0) > (1,4,0)
+    // （:not 计入其内简单选择器），且排除面只含代码卡行——quiet 语义不变
   })
 })

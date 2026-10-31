@@ -140,6 +140,10 @@ vsidian/
 │   │   ├── 597-plan3-probe.md                     # #597 键入路径形态归一验证报告
 │   │   ├── addon-csp-dynamic-eval-probe.md        # 动态代码 CSP 探针报告
 │   │   ├── addon-fold-capability-probe.md         # 折叠能力载体盘点探针
+│   │   ├── callout-blockwrapper-probe.md          # BlockWrapper路线探针报告
+│   │   ├── callout-live-refinement-probe.md       # Callout Live形态收口方案探查
+│   │   ├── callout-live-refinement-probe2-v01.md  # V01行级承载容器视觉可行性实测
+│   │   ├── callout-live-refinement-probe2-v02.md  # V02引用内围栏装饰接缝实测
 │   │   ├── callout-t01-live-container-probe.md    # T01 Callout 容器探针报告
 │   │   ├── data/                                  # 探针证据数据目录
 │   │   │   ├── addon-v02-probe-results.json                  # V02 探针证据数据

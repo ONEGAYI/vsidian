@@ -99,6 +99,62 @@ describe('渲染器 fence 规则（直接驱动机）', () => {
     expect(html).not.toContain(MERMAID_CLASS_NAMES.diagram)
     expect(html).toContain('<pre><code')
   })
+
+  it('引用内围栏阅读侧渲染容器，与 live scanFenceSpans 同例对拍（#674 T06）', async () => {
+    // markdown-it 核心规则识别引用内 fence（blockquote 内 fence token 走
+    // fence_render 容器输出）；live 侧剥前缀识别同一批围栏——两侧命中集一致
+    const { scanFenceSpans } = await import('../../src/shared/mermaid')
+    const md = createMarkdownRenderer()
+    const samples = [
+      '> ```mermaid\n> graph TD\n> A-->B\n> ```',
+      '> > ```mermaid\n> > graph\n> > ```',
+      '>```mermaid\n>graph\n>```',
+      '>    ```mermaid\n>    graph\n>    ```', // 前缀后 3 列缩进：两侧都识别
+    ]
+    for (const text of samples) {
+      const html = md.render(text)
+      const readingFences = (html.match(new RegExp(`class="${MERMAID_CLASS_NAMES.diagram}"`, 'g')) ?? []).length
+      const liveFences = scanFenceSpans(text.split('\n'), 0).filter((s) => s.rendered).length
+      expect([text, readingFences, liveFences]).toEqual([text, 1, 1])
+    }
+  })
+
+  it('引用内 4 列缩进：阅读侧同为缩进代码块（与 live 对拍，#674 T06）', async () => {
+    const { scanFenceSpans } = await import('../../src/shared/mermaid')
+    const md = createMarkdownRenderer()
+    const samples = ['>     ```mermaid\n>     graph\n>     ```']
+    for (const text of samples) {
+      const html = md.render(text)
+      expect(html, text).not.toContain(MERMAID_CLASS_NAMES.diagram)
+      expect(html, text).toContain('<pre><code')
+      expect(scanFenceSpans(text.split('\n'), 0), text).toHaveLength(0)
+    }
+  })
+
+  it('引用内前缀后 Tab：阅读出 fence、live 按 Tab 折算不识别——已知差异如实钉住（#674 T06）', async () => {
+    // markdown-it 对 blockquote 内容行的 Tab 缩进不做 4 列折算（与顶层
+    // Tab=缩进代码块的 D-4 口径不同），`> \t``` ` 与 `>\t``` ` 都出 fence；
+    // live 的 indentColumns 按列折算（Tab ≥ 4 列）不开启围栏。live 显源码
+    // 降级方向安全，差异如实记录不追赶（引擎行为，非本票引入）
+    const { scanFenceSpans } = await import('../../src/shared/mermaid')
+    const md = createMarkdownRenderer()
+    for (const text of ['> \t```mermaid\n> graph\n> ```', '>\t```mermaid\n> graph\n> ```']) {
+      const html = md.render(text)
+      expect(html, text).toContain(MERMAID_CLASS_NAMES.diagram)
+      expect(scanFenceSpans(text.split('\n'), 0), text).toHaveLength(0)
+    }
+  })
+
+  it('容器断开的引用内围栏：阅读把引用内 fence 自动闭合为空内容（已知差异如实钉住，#674 T06）', async () => {
+    // `> ```mermaid` 后接无前缀行：markdown-it 在容器断开处闭合 blockquote
+    // 内的 fence（空内容，仍输出 mermaid 容器——挂载后空图渲染降级）；live
+    // 侧行扫描终止不产出（显源码）。降级方向安全，差异如实记录不追赶。
+    const { scanFenceSpans } = await import('../../src/shared/mermaid')
+    const text = '> ```mermaid\ngraph TD\n```'
+    const html = createMarkdownRenderer().render(text)
+    expect(html).toContain(MERMAID_CLASS_NAMES.diagram) // 引用内空 fence 仍出容器
+    expect(scanFenceSpans(text.split('\n'), 0)).toHaveLength(0) // live 不产出
+  })
 })
 
 describe('高度估计：mermaid 块初始估计放大', () => {

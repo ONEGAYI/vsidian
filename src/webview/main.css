@@ -2445,25 +2445,31 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-color: transparent;
 }
 
-#app .cm-editor .cm-scroller .vsidian-quote-line {
+#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line) {
   box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color);
   /* #143 验收修复：QuoteMark 呈现态隐藏后内容左移至行首，文字与竖条
      重合——补左内边距对齐阅读 blockquote 的排版（0.9em 内容距 + 3px
      竖条占位；源码显形时前缀从同一缩进起点显示，与列表行 padding 常驻
-     同款取舍） */
+     同款取舍）。:not 排除代码卡行（A86-③ 2026-10-31 处置）：卡行不吃
+     基础引用行视觉——卡片自带边界（底色/边框），紫条属双重强调 */
   padding-left: calc(0.9em + 3px);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
 }
 
-/* ---- #653/T02 Callout 行级形态（T01 路线 A）：容器视觉逐行同规则绘制。
-   quiet 类由最内层引用层判定挂（嵌套普通引用行不挂——紫条照画，自身
-   样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃 RGB 三元组片段、
-   渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效透明、渐变绘制）。
-   左距为 --callout-padding 左分量（24px）的行级近似——上下分量不落行
-   （行级类不改行高的既有纪律），阅读侧整容器按变量原样消费。
+/* ---- #653/T02 Callout 行级形态（T01 路线 A）→ T05（#673）容器视觉迁移：
+   非列表内 callout 由 CM6 BlockWrapper 承载（div.callout[data-callout]
+   [data-callout-depth]，下方 wrapper 规则），行级让位（底色/左距/左缘
+   近似上移容器）；本组行级规则保留给**列表内 callout**（v1 不接 wrapper，
+   维持行级全形态）。quiet 类由最内层引用层判定挂（嵌套普通引用行不挂
+   ——紫条照画，自身样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃
+   RGB 三元组片段、渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效
+   透明、渐变绘制）。左距为 --callout-padding 左分量（24px）的行级近似
+   ——上下分量不落行（行级类不改行高的既有纪律），阅读侧整容器按变量
+   原样消费。
    #657/T06：box-shadow 通道承载 --callout-border-width 左缘近似（同引用
    紫条机制：inset 阴影零布局位移；默认 0 宽零绘制——语义仍是该层紫条被
-   callout 替代；四边完整边框仅阅读侧承诺，行级形态边界见样式参考） ---- */
+   callout 替代；四边完整边框在 wrapper 与阅读侧承诺，行级形态边界见
+   样式参考） ---- */
 #app .cm-editor .cm-scroller .vsidian-quote-line.callout.vsidian-callout-quiet {
   box-shadow: inset var(--callout-border-width) 0 0
     color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
@@ -2472,6 +2478,50 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-image: linear-gradient(
     color-mix(in oklch, var(--callout-color) 10%, transparent),
     color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* T05（#673）Live wrapper 容器视觉：.callout 公开主类迁 wrapper——与阅读
+   容器（.vsidian-view-reading div.callout）同款消费（padding 四向 = 真内
+   边距、四边 border 三件套、圆角、双通道底色）。硬约束：**禁垂直 margin**
+   （BlockWrapper 探针 S1b/S1c：margin 不入 posAtCoords 记账产生确定性
+   错行——间距一律 padding；用户片段对 .callout 设垂直 margin 在 Live
+   会引入落点偏移，契约条目已登记）。规则侧显式 margin: 0 落地该禁令的
+   一半：常见 Obsidian 片段 `.callout { margin: 10px 0 }` (0,1,0) 命中
+   wrapper 时被本声明的垂直分量归零（水平分量一并归零——wrapper 是块级
+   容器、宽度由父级决定，水平 margin 无既有消费语义；探针 S1b/S1c 只
+   钉死垂直分量）。mix-blend-mode 暂不承诺 Live
+   （编辑器行层叠合成未验证，边界见条目）。data-callout 类型变量经
+   :where 表命中 wrapper，行内标题色/图标继承。 */
+#app .cm-editor .cm-scroller .vsidian-callout-wrap.callout {
+  margin: 0;
+  padding: var(--callout-padding);
+  border-style: solid;
+  border-color: color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
+  border-width: var(--callout-border-width);
+  border-radius: var(--callout-radius);
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* T05（#673）wrapper 内行级让位：底色/左距/左缘近似已由 wrapper 承接
+   ——行恢复透明零位移（.vsidian-quote-line 基础规则的紫条/底色/内容
+   缩进在此语境让位；quiet 的紫条静默语义由本规则的 box-shadow:none
+   继续承担）。特异性压过基础 quote 规则（多一层 wrapper 类）。
+   **:not(.vsidian-code-card-line) 防雷（评审 T05-P1，探针 §4.3 复现）**：
+   T06 起引用内围栏被扫描器识别，callout 内代码卡内容行同挂 quiet +
+   code-card-line——本规则若命中会把卡行规则 (1,4,0) 的 padding-left 清零
+   而 text-indent 负值存活（悬挂缩进塌陷：行号甩出 wrapper 盒外、卡底色
+   一并被清）。排除后卡行的 padding-left/text-indent 同源对与卡底色由
+   `.cm-line.vsidian-code-card-line` 规则族完整承接；紫条回归基础 quote
+   规则与「普通引用内代码卡行」同形态（引用标记在卡行可见，T06 统一
+   语义），非本规则的让位对象。 */
+#app .cm-editor .cm-scroller .vsidian-callout-wrap .vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line) {
+  box-shadow: none;
+  padding-left: 0;
+  background-color: transparent;
+  background-image: none;
 }
 
 /* 首末行圆角（分角写：单行容器两类同挂自然合成全圆角） */
@@ -2485,11 +2535,21 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   border-bottom-right-radius: var(--callout-radius);
 }
 
-/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引） */
+/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引）
+   #671/T02：标题色分两层——标题层取类型色 --callout-color，内层
+   .callout-title-inner 取 --callout-title-color（默认 inherit）。对齐
+   Obsidian 1.14.4 app.css 的 `.callout-title{color:var(--callout-color)}`
+   + `.callout-title-inner{color:var(--callout-title-color)}`。此前标题行
+   直接读 --callout-title-color=inherit，导致所有类型标题同色；两层分工
+   不得合并——后者是用户片段覆盖标题文字的入口 */
 #app .cm-editor .cm-scroller .vsidian-quote-line.callout-title {
-  color: var(--callout-title-color);
+  color: var(--callout-color);
   font-size: var(--callout-title-size);
   font-weight: var(--callout-title-weight);
+}
+
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout-title .callout-title-inner {
+  color: var(--callout-title-color);
 }
 
 /* ---- #655（T04）折叠箭头 .callout-fold（T01 固定口径；Live 标题行行尾
@@ -4205,14 +4265,21 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
     color-mix(in oklch, var(--callout-color) 10%, transparent));
 }
 
+/* #671/T02：标题色两层（同 Live 侧口径）——标题取类型色，内层由
+   --callout-title-color 覆盖（默认 inherit）。同一 data-callout 值在两端
+   计算色一致 */
 #app .vsidian-view-reading .vsidian-reading-block .callout-title {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: var(--callout-title-padding);
-  color: var(--callout-title-color);
+  color: var(--callout-color);
   font-size: var(--callout-title-size);
   font-weight: var(--callout-title-weight);
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-title .callout-title-inner {
+  color: var(--callout-title-color);
 }
 
 #app .vsidian-view-reading .vsidian-reading-block .callout-content {

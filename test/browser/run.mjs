@@ -104,6 +104,11 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   // Live↔Reading 折叠往返共享、编辑器资源回基线、片段 --callout-icon
   // 注入真实绘制）。紧随 callout 族。
   'calloutRefEmbed',
+  // #672（T04）合入列：calloutWrap（CM6 原生 BlockWrapper 容器结构——
+  // 嵌套/懒延续行归属/无逃逸、20 次同坐标点击、键入、热样式 padding、
+  // 视口入场、模式往返；生产 rootOwnedViewExtensions 装配路径）。紧随
+  // callout 族。
+  'calloutWrap',
   'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'addonPasteRules', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',

@@ -311,6 +311,9 @@ function rebuildFences(prev: MermaidFenceTable, tr: Transaction): MermaidFenceTa
         rendered: m.span.rendered,
         info: m.span.info,
         code: m.span.code,
+        // 窗口外保留围栏：lineMap 锚点随编辑映射到新坐标（from/to 同源
+        // mapPos，assoc 与 from 一致——锚点处无编辑时为恒等映射）
+        lineMap: m.span.lineMap.map((e) => ({ ...e, lineStart: changes.mapPos(e.lineStart, 1) })),
       })
     }
   }

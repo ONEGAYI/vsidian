@@ -183,7 +183,7 @@ try {
   assert.ok(tip2.html.includes(BUG_PATH), `tip 换为 bug 注入: ${tip2.html.slice(0, 80)}`)
   // §6.2 边界：三元组吃底色通道（bgc rgba(255,0,0,.1)）、currentColor 通道降级继承
   const tipRow = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('.cm-line')].find((l) => l.getAttribute('data-callout') === 'tip')
+    const el = document.querySelector('.vsidian-callout-wrap[data-callout="tip"]')
     const s = getComputedStyle(el)
     return { bgc: s.backgroundColor, img: s.backgroundImage }
   })
@@ -205,13 +205,14 @@ try {
   assert.equal(note.html, '', '注入内容应清除')
   assert.ok(String(note.mask).includes('data:image/svg+xml'), '默认 mask 恢复')
 
-  // ---- 容器变量：border（live 左缘近似 + 阅读四边）与 blend ----
-  const quietShadow = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('.cm-line')].find((l) => l.getAttribute('data-callout') === 'note')
-    return getComputedStyle(el).boxShadow
+  // ---- 容器变量：border（T05 起 live wrapper 四边真 border + 阅读四边）与 blend ----
+  const wrapBorder = await page.evaluate(() => {
+    const el = document.querySelector('.vsidian-callout-wrap[data-callout="note"]')
+    const s = getComputedStyle(el)
+    return { left: s.borderLeftWidth, top: s.borderTopWidth, color: s.borderLeftColor }
   })
-  assert.ok(quietShadow.includes('2px'), `live 左缘 border 近似应消费宽度变量: ${quietShadow}`)
-  assert.ok(quietShadow.includes('inset'), `live border 近似走 inset 阴影通道: ${quietShadow}`)
+  assert.ok(wrapBorder.left.includes('2px'), `live wrapper 左边框应消费宽度变量: ${wrapBorder.left}`)
+  assert.ok(wrapBorder.top.includes('2px'), `live wrapper 四边完整消费（非仅左缘近似）: ${wrapBorder.top}`)
 
   // ---- 模式往返：阅读侧同样注入；blend/border 真实计算值 ----
   await page.evaluate(() => window.setIconMode('reading'))
