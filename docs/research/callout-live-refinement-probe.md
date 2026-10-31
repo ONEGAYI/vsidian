@@ -37,9 +37,15 @@
 
 同一份文档、同一个点击坐标（`y=104.5`），两次独立运行分别命中 `pos 29`（第 4 行）与 `pos 23`（第 3 行）。CM6 的 `measureVisibleLineHeights`（`@codemirror/view` 3325-3329）按真实 DOM `getBoundingClientRect().height` 记账，而 CSS padding 由浏览器异步布局反映——在高度重测完成之前，`posAtCoords` 仍按旧高度表换算，落点偏移整整一行。
 
-这解释了 #552 一族「表格原生选区竞态」的同型形态：静态截图与单次断言都可能通过。
+**因此「把 `--callout-padding` 的上下分量直接落到 `.cm-line` 上」不可行**，必须换承载层，或接受「行高变化 + 强制同步重测」的额外机制。
 
-**因此「把 `--callout-padding` 的上下分量直接落到 `.cm-line` 上」不可行**，必须换承载层，或接受「行高变化 + 强制同步重测」的额外机制。后者成本与风险更高。
+> **2026-10-31 更正（见 [V01 探查](callout-live-refinement-probe2-v01.md) §2）**：上面「浏览器异步布局竞态」的归因**不成立**。实测表明这是**确定性失效**，不是抖动——同一坐标连续 20 次点击在热态下 `20/20` 全部错行，3 秒内模型偏差恒为 24px 不变。
+>
+> 真正根因是 **`.cm-content` 的 `min-height: 100%` 高度门控**（CM6 baseTheme 的 `minHeight: "100%"`）：CM6 的 `measure()` 只在 `contentDOMHeight != domRect.height` 时重测行高；短文档内容被钳在视口高度，给行加 padding 不改变 `.cm-content` 自身高度，于是模型永不重测。长文档（超出视口）不受影响——**这意味着短笔记（callout 的主要场景）必然踩坑，而手工试用时「打字看起来没问题」**（真实键入产生事务会置 `mustMeasureContent`）。
+>
+> 生产现成的 `scheduleSnippetMeasure` 唤醒机制对该问题完全无效。归因差异影响取路：若它是竞态，等待或补一次重测即可；既然不是，就必须换承载层（V01 选定块级间隔 widget）或改 `.cm-content` 基础 CSS（有副作用）。
+>
+> 本文 §2 **不被当作 #552 抖动族的同型证据**。
 
 ## 3. 探针 B：引用容器内的围栏
 
@@ -119,6 +125,8 @@
 `liveDecorations.ts:1123-1125` 的既定语义是「`data-callout` 取最内层 callout 容器」，而类型色变量按 `[data-callout]` 挂在行上（`main.css:155-209`）。于是最后一行「外层正文」虽属外层容器，却拿到 `tip`。
 
 同时所有行 `padding-left` 都是同一个 24px——**没有随嵌套深度递增的缩进**，视觉上内外层完全贴合，无层次。
+
+> **2026-10-31 补充（[V01 探查](callout-live-refinement-probe2-v01.md) §4.1）**：这不只是观感问题，是**既有缺陷**。`data-callout` 一旦被内层覆盖就不再恢复——三层嵌套下外层尾段被染成最内层类型。后果是既有片段 `[data-callout='note']` 只能命中第 1、2 行，**写「给最外层加样式」的片段无法达成**。V01 推荐逐层身份通道 `data-callout-lN`，对既有片段零破坏且能修复该缺陷。
 
 要修，必须动 `data-callout` 的最内层语义，或引入逐层的第二身份通道。前者是**公开样式契约变更**（片段按 `[data-callout]` 书写，语义变化会改变既有片段效果），需走 style-contract 并重锚基线。
 
