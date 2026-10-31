@@ -173,6 +173,7 @@ import {
 // 2026-10 浮层锚点跟随：查找面板/选词选项条右缘对齐正文列右缘的计划纯函数
 import { planOverlayAnchorRight } from './overlayAnchor'
 import { liveDecorationsField, LIVE_CLASS_NAMES, selectionTouchesRange, TaskCheckboxWidget } from './liveDecorations'
+import { liveCalloutWrap } from './liveCalloutWrap'
 import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos, menuLinkHitAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
@@ -1919,6 +1920,9 @@ export class WebviewSyncController {
    *  updateListener，等价搬运；随实例装配，不由卡片设置热重配重建） */
   private rootOwnedViewExtensions(): Extension[] {
     return [
+      // T04（#672）callout 容器 BlockWrapper（结构层）：根正文独有装配
+      //（引用嵌入实例不接——边界登记）；内部类名，视觉迁移归 T05
+      liveCalloutWrap,
       // P2-04（#281）挂卡宿主标记：根正文才发射嵌入卡片装饰（嵌入内部
       // Live 编辑器不挂卡——嵌套结构与命令接线归 P2-10）
       liveEmbedCardsHostMark,

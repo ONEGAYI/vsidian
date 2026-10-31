@@ -283,6 +283,7 @@ vsidian/
         ├── keybindingSettings.ts         # 快捷键设置分页
         ├── listEditing.ts                # Enter 延续与退格清层（#119）
         ├── liveBlockId.ts                # 块 id 标记 live 淡化装饰
+        ├── liveCalloutWrap.ts            # Callout wrapper 容器扩展
         ├── liveCodeCard.ts               # Live 代码块卡片装饰
         ├── liveDecorations.ts            # 语法树驱动 Live 装饰（#8）
         ├── liveEmbed.ts                  # Live 嵌入装饰与源码显隐
