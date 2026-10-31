@@ -21,6 +21,8 @@ import { EditorView } from '@codemirror/view'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { mathBlocksField } from '../../src/webview/liveMath'
 import { tableEditing } from '../../src/webview/tableEditing'
+import { defaultKeymap } from '@codemirror/commands'
+import { keymap } from '@codemirror/view'
 import { listEditing, continueListMarkup, stripListLayer } from '../../src/webview/listEditing'
 
 if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined) {
@@ -48,9 +50,9 @@ const pressEnter = (view: EditorView): void => {
     new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
   )
 }
-const pressBackspace = (view: EditorView): void => {
+const pressBackspace = (view: EditorView, repeat = false): void => {
   view.contentDOM.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }),
+    new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true, repeat }),
   )
 }
 
@@ -301,6 +303,58 @@ describe('引用内代码围栏的 Enter 延续', () => {
     const view = makeEditView(doc, doc.indexOf('const a = 1') + 'const a = 1'.length)
     expect(continueListMarkup(view)).toBe(false)
     view.destroy()
+  })
+})
+
+// ---- 连续删除防护（2026-11-01 验收反馈）：长按 backspace 停在结构边界 ----
+
+/** 防护用例的装配：带 defaultKeymap（真实默认删除路径在场，拦截必须真拦住它） */
+const makeEditView2 = (doc: string, anchor: number): EditorView => makeEditView(doc, anchor, [keymap.of(defaultKeymap)])
+
+/** 长按路径（OS 自动重复，event.repeat=true）按一次后的文档与光标 */
+function held(view: EditorView): { text: string; head: number } {
+  pressBackspace(view, true)
+  const out = { text: view.state.doc.toString(), head: view.state.selection.main.head }
+  view.destroy()
+  return out
+}
+
+describe('连续删除防护（repeat 停，手动单发剥层）', () => {
+  it('长按删空引用正文后停在前缀右端（repeat=true 拦截，无变更）', () => {
+    const doc = '> 正文内容\n'
+    const out = held(makeEditView2(doc, doc.indexOf('正')))
+    expect(out.text).toBe(doc)
+    expect(out.head).toBe(doc.indexOf('正'))
+  })
+
+  it('手动单发（repeat=false）同位置照常剥层（一次一层不变）', () => {
+    const doc = '> 正文内容\n'
+    const out = typed(makeEditView2(doc, doc.indexOf('正')), 'Backspace')
+    expect(out.text).toBe('正文内容\n')
+  })
+
+  it('长按停在 callout 标记右端（] 或标记尾空格处，不吃掉 [!note]）', () => {
+    const doc = '> [!note] 标题\n'
+    const bracketEnd = doc.indexOf(']') + 1
+    expect(held(makeEditView2(doc, bracketEnd)).text).toBe(doc)
+    expect(held(makeEditView2(doc, bracketEnd + 1)).text).toBe(doc)
+  })
+
+  it('纯列表行不在防护范围：repeat 删除贴标记处照常剥层', () => {
+    const doc = '- 项目\n'
+    const out = held(makeEditView2(doc, doc.indexOf('项')))
+    expect(out.text).toBe('项目\n')
+  })
+
+  it('引用内列表行（quote 结构）在防护范围：repeat 拦截', () => {
+    const doc = '> - 引用内项\n'
+    expect(held(makeEditView2(doc, doc.indexOf('引'))).text).toBe(doc)
+  })
+
+  it('repeat 删除正文中间不误伤（真正内容照常逐字符删）', () => {
+    const doc = '> 正文内容\n'
+    const out = held(makeEditView2(doc, doc.indexOf('内') + 1))
+    expect(out.text).toBe('> 正文容\n')
   })
 })
 

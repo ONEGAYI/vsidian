@@ -9,7 +9,10 @@
 // - Backspace：折叠光标紧邻前缀右端（正文起点）时分层剥除——嵌套项
 //   先升一级（缩进对齐父项标记列，父项信息取自语法树）、顶级一次清
 //   整段标记（保留引用前缀）、纯引用行逐层剥除；任务标记与列表标记
-//   是一个单元。其余位置（前缀中间、选区、多光标、IME 组合中）不接管
+//   是一个单元。连续删除防护（2026-11-01）：长按（OS 自动重复）删空
+//   引用/callout 正文后停在前缀右端或 callout 标记右端，手动单发才
+//   剥除——防长按连拆整段引用结构。其余位置（前缀中间、选区、多光
+//   标、IME 组合中）不接管
 // - 不接管：块级公式内（源码字面编辑）、表格、代码围栏（顶层；引用内
 //   围栏行 Enter 延续引用前缀——2026-10-31 A86 验收，裸行会掉出容器）、
 //   frontmatter
@@ -20,6 +23,7 @@
 import type { EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import type { Command } from '@codemirror/view'
+import { ViewPlugin } from '@codemirror/view'
 import type { SyntaxNode } from '@lezer/common'
 import {
   blankExitCut,
@@ -29,7 +33,7 @@ import {
   stripLayer,
   type LinePrefix,
 } from '../shared/listPrefix'
-import { liveDecorationsField } from './liveDecorations'
+import { calloutOfBlockquote, liveDecorationsField } from './liveDecorations'
 import { mathBlocksField } from './liveMath'
 import { chainAt } from '../shared/markdownDoc'
 
@@ -170,14 +174,46 @@ export const continueListMarkup: Command = (view) => {
   return true
 }
 
+/** 最近一次 Backspace keydown 是否为 OS 自动重复（长按；手动单发 false） */
+let backspaceAutoRepeat = false
+
+/** 光标是否贴 callout 标记右端（标题行 `[!note]` 的 `]` 或吞并的尾空格处） */
+function atCalloutMarkerEdge(state: EditorState, ctx: ListKeyContext, head: number): boolean {
+  const bq = [...ctx.chain].reverse().find((n) => n.name === 'Blockquote')
+  if (!bq) {
+    return false
+  }
+  const info = calloutOfBlockquote(state.doc, bq)
+  if (!info || state.doc.line(info.titleLineNo).from !== ctx.lineFrom) {
+    return false
+  }
+  const declEnd = info.markerFrom + info.decl.markerTo
+  if (head === declEnd) {
+    return true
+  }
+  return declEnd < ctx.lineTo && state.doc.sliceString(declEnd, declEnd + 1) === ' ' &&
+    head === declEnd + 1
+}
+
 /** Backspace：折叠光标紧邻前缀右端时分层剥除结构 */
 export const stripListLayer: Command = (view) => {
   if (view.compositionStarted || view.state.selection.ranges.length !== 1) return false
   const range = view.state.selection.main
   if (!range.empty) return false
   const ctx = listKeyContext(view.state, range.head)
-  if (!ctx || range.head !== ctx.prefixEnd) return false
-  // 结构合法性：列表项行须在 ListItem 内，纯引用行须在 Blockquote 内
+  if (!ctx) return false
+  // 连续删除防护（2026-11-01 验收反馈）：长按 backspace（OS 自动重复）
+  // 删空引用/callout 正文后停在结构边界——前缀右端（将剥层）或 callout
+  // 标记右端（默认路径将逐字符吃标记）拦截不动，手动单发（repeat=false）
+  // 才执行剥除/继续。防护范围限引用结构（quote 前缀在场）：纯列表行不
+  // 拦（引用块/callout 之外的既有剥层节奏不变）。标记右端不在 prefixEnd，
+  // 判定须在 prefixEnd 收口之前
+  if (backspaceAutoRepeat && ctx.prefix.quote.length > 0 &&
+      (range.head === ctx.prefixEnd || atCalloutMarkerEdge(view.state, ctx, range.head))) {
+    return true
+  }
+  if (range.head !== ctx.prefixEnd) return false
+  // 结构合法性：列表项行须在列表项内，纯引用行须在 Blockquote 内
   const hasStruct = ctx.prefix.mark
     ? ctx.chain.some((node) => node.name === 'ListItem')
     : ctx.chain.some((node) => node.name === 'Blockquote')
@@ -208,8 +244,25 @@ export const stripListLayer: Command = (view) => {
   return true
 }
 
-/** 装配入口：置于 tableEditing 之后、defaultKeymap 之前（顺序约束见头注释） */
+/** 装配入口：置于 tableEditing 之后、defaultKeymap 之前（顺序约束见头注释）。
+ *  repeat 标记经 capture 阶段原生监听记录——无条件先于 keymap 的冒泡
+ *  keydown，同一按键事件内 stripListLayer 可读 */
+const trackBackspaceRepeat = ViewPlugin.define((view) => {
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Backspace') {
+      backspaceAutoRepeat = event.repeat
+    }
+  }
+  view.contentDOM.addEventListener('keydown', onKey, true)
+  return {
+    destroy() {
+      view.contentDOM.removeEventListener('keydown', onKey, true)
+    },
+  }
+})
+
 export const listEditing = [
+  trackBackspaceRepeat,
   keymap.of([
     { key: 'Enter', run: continueListMarkup, shift: continueListMarkup },
     { key: 'Backspace', run: stripListLayer },

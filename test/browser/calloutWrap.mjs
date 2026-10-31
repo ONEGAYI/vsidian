@@ -409,8 +409,65 @@ try {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   await page.screenshot({ path: path.join(root, 'out/test/t07-callout-combo-source.png') })
 
+  // ---- 连续删除防护（2026-11-01 验收反馈）：真长按（CDP autoRepeat）删空后停在前缀 ----
+  {
+    // 选一行纯引用正文（非标题/围栏/公式行），光标置行尾
+    const target = await page.evaluate(() => {
+      const view = window.controller.getView()
+      const { doc } = view.state
+      for (let no = 1; no <= doc.lines; no++) {
+        const line = doc.line(no)
+        if (/^> \S/.test(line.text) && !line.text.includes('[!') &&
+            !line.text.includes('```') && !line.text.includes('$')) {
+          window.locateCallout(line.to)
+          return { text: line.text }
+        }
+      }
+      return null
+    })
+    assert.ok(target, 'fixture 应有纯引用正文行')
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    // OS 自动重复形态连发（type:keyDown + autoRepeat；Playwright keyboard
+    // 不产生 repeat 事件，真实长按语义只能经 CDP 直发）
+    const cdp = await page.context().newCDPSession(page)
+    for (let i = 0; i < target.text.length + 6; i++) {
+      await cdp.send('Input.dispatchKeyEvent', {
+        type: 'keyDown', key: 'Backspace', code: 'Backspace',
+        windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8, autoRepeat: true,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    const stopped = await page.evaluate(() => {
+      const view = window.controller.getView()
+      const { doc, selection } = view.state
+      const line = doc.lineAt(selection.main.head)
+      return { text: line.text, headInLine: selection.main.head - line.from, multi: selection.ranges.length }
+    })
+    assert.equal(stopped.multi, 1, '长按期间不得产生多光标')
+    assert.ok(/^> ?$/.test(stopped.text), `长按删空后应只剩引用前缀: ${JSON.stringify(stopped.text)}`)
+    assert.ok(stopped.headInLine === 2 || stopped.headInLine === 1,
+      `光标停在前缀右端: ${JSON.stringify(stopped)}`)
+    // 手动单发（autoRepeat 缺省 false）照常剥层：`> ` → 普通段落
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown', key: 'Backspace', code: 'Backspace',
+      windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8,
+    })
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8,
+    })
+    const peeled = await page.evaluate(() => {
+      const view = window.controller.getView()
+      const { doc, selection } = view.state
+      const line = doc.lineAt(selection.main.head)
+      return { text: line.text, headInLine: selection.main.head - line.from }
+    })
+    assert.equal(peeled.text, '', `手动单发剥层后前缀清空: ${JSON.stringify(peeled.text)}`)
+    assert.equal(peeled.headInLine, 0, '剥层后光标落行首')
+    await cdp.detach()
+  }
+
   assert.deepEqual(errors, [], '页面不得有脚本错误')
-  console.log('calloutWrap: 全部断言通过（结构/嵌套/懒延续归属 × 20 点击 × 键入 × 热样式 × 视口 × 模式往返 × T07 组合：卡 chrome/token 对位/公式无泄漏/折叠往返/复制/增量编辑）')
+  console.log('calloutWrap: 全部断言通过（结构/嵌套/懒延续归属 × 20 点击 × 键入 × 热样式 × 视口 × 模式往返 × T07 组合：卡 chrome/token 对位/公式无泄漏/折叠往返/复制/增量编辑 × 长按删除防护）')
 } finally {
   await browser.close()
 }
