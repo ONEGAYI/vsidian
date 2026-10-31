@@ -2516,8 +2516,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
    一并被清）。排除后卡行的 padding-left/text-indent 同源对与卡底色由
    `.cm-line.vsidian-code-card-line` 规则族完整承接；紫条回归基础 quote
    规则与「普通引用内代码卡行」同形态（引用标记在卡行可见，T06 统一
-   语义），非本规则的让位对象。 */
-#app .cm-editor .cm-scroller .vsidian-callout-wrap .vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line) {
+   语义），非本规则的让位对象。
+   **:not(.callout) 列表内保留形态（PR678-001）**：列表内 callout 不接
+   wrapper（v1 边界），行级 .callout 全形态是其唯一容器视觉——这些行
+   仍是外层 wrapper 的后代，不加排除会被本规则清成透明/零缩进/无条，
+   内层容器视觉消失（styleContract 承诺「列表内 callout 维持行级全形
+   态」）。wrapper 接管的行不挂行级 .callout（wrapped 分支让位时摘除），
+   排除面精准。 */
+#app .cm-editor .cm-scroller .vsidian-callout-wrap .vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line):not(.callout) {
   box-shadow: none;
   padding-left: 0;
   background-color: transparent;

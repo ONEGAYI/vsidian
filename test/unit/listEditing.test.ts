@@ -306,6 +306,66 @@ describe('引用内代码围栏的 Enter 延续', () => {
   })
 })
 
+// ---- 引用内围栏的代码字面标记不做 Markdown 续写（PR678-003） ----
+
+describe('围栏内代码字面列表标记（PR678-003）', () => {
+  it('引用围栏内 `- literal` 行尾 Enter 只延续引用前缀（不新增列表项）', () => {
+    const doc = '> ```yaml\n> - literal\n> ```\n'
+    const lineEnd = doc.indexOf('literal') + 'literal'.length
+    const out = typed(makeEditView(doc, lineEnd))
+    expect(out.text).toBe('> ```yaml\n> - literal\n> \n> ```\n')
+  })
+
+  it('有序与任务形态同样不续写（1. item / - [x] item）', () => {
+    const doc = '> ```md\n> 1. item\n> ```\n'
+    const out = typed(makeEditView(doc, doc.indexOf('item') + 4))
+    expect(out.text).toBe('> ```md\n> 1. item\n> \n> ```\n')
+    const doc2 = '> ```md\n> - [x] item\n> ```\n'
+    const out2 = typed(makeEditView(doc2, doc2.indexOf('item') + 4))
+    expect(out2.text).toBe('> ```md\n> - [x] item\n> \n> ```\n')
+  })
+
+  it('嵌套引用围栏行延续完整 quote 层级（不带字面 mark）', () => {
+    const doc = '> [!note] t\n> > ```js\n> > - lit\n> > ```\n'
+    const out = typed(makeEditView(doc, doc.indexOf('lit') + 3))
+    expect(out.text).toContain('- lit\n> > ')
+    expect(out.text).not.toContain('lit\n> > -')
+  })
+
+  it('围栏内空代码行（裸 > 行）Enter 延续 > 前缀', () => {
+    const doc = '> ```js\n> const a = 1\n>\n> ```\n'
+    const bare = doc.indexOf('\n>\n') + 2
+    const out = typed(makeEditView(doc, bare))
+    expect(out.text).toContain('\n>\n> \n> ```')
+  })
+
+  it('普通引用列表（围栏外）Enter 续写列表标记不受影响（回归）', () => {
+    const doc = '> - 引用内列表项\n'
+    const out = typed(makeEditView(doc, doc.indexOf('列表项') + 3))
+    expect(out.text).toBe('> - 引用内列表项\n> - \n')
+  })
+
+  it('围栏内 Backspace 贴字面标记右端不接管（纯字面删除，不走 Markdown 剥层）', () => {
+    const doc = '> ```yaml\n> - literal\n> ```\n'
+    const view = makeEditView(doc, doc.indexOf('literal'))
+    expect(stripListLayer(view)).toBe(false)
+    view.destroy()
+  })
+
+  it('围栏内长按删空后停在 quote 右端（字面 mark 由长按逐字删尽，结构防护点在 quote 端）', () => {
+    const doc = '> ```yaml\n> - literal\n> ```\n'
+    const view = makeEditView2(doc, doc.indexOf('literal') + 7)
+    // 连发 9 击（literal 7 字符 + 尾随空格 + 字面 `-`）后应停在 `> ` 右端
+    for (let i = 0; i < 9; i++) {
+      pressBackspace(view, true)
+    }
+    const out = { text: view.state.doc.toString(), head: view.state.selection.main.head }
+    view.destroy()
+    expect(out.text).toBe('> ```yaml\n> \n> ```\n')
+    expect(out.head).toBe(doc.indexOf('literal') - 2)
+  })
+})
+
 // ---- 连续删除防护（2026-11-01 验收反馈）：长按 backspace 停在结构边界 ----
 
 /** 防护用例的装配：带 defaultKeymap（真实默认删除路径在场，拦截必须真拦住它） */

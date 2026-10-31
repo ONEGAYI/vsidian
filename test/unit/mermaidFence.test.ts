@@ -178,6 +178,28 @@ describe('scanFencesDetailed：窗口扫描的开放状态回报', () => {
     expect(second.spans[0]!.code).toBe('A-->B')
     expect(second.spans[0]!.rendered).toBe(true)
   })
+
+  it('PR678-002：已累积一个空内容行（code 空串）续扫不丢该空行（引用内围栏）', () => {
+    // 批 1：`> ```js` 开启后单独 `>` 行 = 一个空内容行（code 为空串但
+    // lineMap 已有 1 条）；批 2 续扫应保留空行——code 以 \n 起头
+    const first = scanFencesDetailed(['> ```js', '>'], 0)
+    expect(first.open).not.toBeNull()
+    expect(first.open!.code).toBe('')
+    expect(first.open!.lineMap).toHaveLength(1)
+    const second = scanFencesDetailed(['> const x = 1', '> ```'], '> ```js\n>\n'.length, first.open)
+    expect(second.spans).toHaveLength(1)
+    expect(second.spans[0]!.code).toBe('\nconst x = 1')
+    expect(second.spans[0]!.lineMap).toHaveLength(2)
+    expect(second.spans[0]!.lineMap[1]!.contentOffset).toBe(1)
+  })
+
+  it('PR678-002：多空行组合跨批续扫与全量逐字段一致（引用内围栏）', () => {
+    const full = scanFencesDetailed(['> ```js', '>', '>', '> x', '> ```'], 0)
+    const first = scanFencesDetailed(['> ```js', '>'], 0)
+    const rest = scanFencesDetailed(['>', '> x', '> ```'], '> ```js\n>\n'.length, first.open)
+    expect(rest.spans).toHaveLength(1)
+    expect(rest.spans[0]).toEqual(full.spans[0])
+  })
 })
 
 describe('引用内围栏：前缀剥离（#674 T06）', () => {

@@ -311,6 +311,20 @@ describe('Live callout：T03 全类型/别名/富标题/嵌套组合', () => {
     expect(lines.get(1)!.cls ?? '', '列表条目行不挂 callout').not.toContain('callout')
   })
 
+  it('外层 wrapper 内的列表内 callout 行保留行级 .callout（PR678-001：让位规则的排除面）', () => {
+    // 外层 note 由 wrapper 承载（wrapped 构建）；内层 warning 在外层容器
+    // 的列表内——不接 wrapper，行级 .callout 全形态是其唯一容器视觉，
+    // 让位规则 :not(.callout) 的排除对象正是这些行
+    const doc = ['> [!note] O', '>', '> - > [!warning] I', '>   > t'].join('\n')
+    const lines = lineDecorations(build(doc), doc)
+    const innerTitle = lines.get(3)!
+    expect(innerTitle.cls.split(' ')).toContain('callout')
+    expect(innerTitle.cls.split(' ')).toContain('callout-title')
+    expect(innerTitle.attrs?.['data-callout']).toBe('warning')
+    expect(lines.get(4)!.cls.split(' ')).toContain('callout-content')
+    expect(lines.get(4)!.cls.split(' ')).toContain('callout')
+  })
+
   it('callout 内表格与代码块：行级类叠加不丢（网格行 + 代码行）', () => {
     const doc = [
       '> [!success] 混合',

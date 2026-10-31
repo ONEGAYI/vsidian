@@ -257,10 +257,18 @@ export function scanFencesDetailed(
         run: initialOpen.run,
         rendered: initialOpen.rendered,
         info: initialOpen.info,
-        code: initialOpen.code === '' ? [] : initialOpen.code.split('\n'),
+        // code 空串歧义消解（PR678-002）：零内容行与恰好一个空内容行
+        // 都产空串——以 lineMap 条目数区分（多行全空时 code 为 '\n…'
+        // 非空不歧义）；续批若丢空行，增量产物与全量分叉、复制载荷
+        // 少一个换行
+        code: initialOpen.code === '' && initialOpen.lineMap.length === 0
+          ? []
+          : initialOpen.code.split('\n'),
         depth: initialOpen.depth,
         lineMap: initialOpen.lineMap,
-        contentLen: initialOpen.code === '' ? 0 : initialOpen.code.length + 1,
+        contentLen: initialOpen.code === '' && initialOpen.lineMap.length === 0
+          ? 0
+          : initialOpen.code.split('\n').join('\n').length + 1,
       }
     : null
   let lineStart = firstLineStart

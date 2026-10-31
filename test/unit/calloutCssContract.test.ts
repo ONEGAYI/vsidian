@@ -266,12 +266,15 @@ describe('#673/T05：Live wrapper 容器视觉与行级让位', () => {
     // (1,5,0) 若命中会清零卡行 padding-left 而 text-indent 负值存活（悬挂
     // 缩进塌陷、行号甩出 wrapper 盒外、卡底色一并被清）。:not 在场 = 代码
     // 卡行保住卡形态（padding-left/text-indent 同源对由卡行规则族承载）
-    const rule = cssRule(css, '.vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line)')
+    const rule = cssRule(css, '.vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line):not(.callout)')
     expect(rule).toMatch(/box-shadow:\s*none/)
     expect(rule).toMatch(/padding-left:\s*0/)
     expect(rule).toMatch(/background-color:\s*transparent/)
     expect(rule).toMatch(/background-image:\s*none/)
-    // 让位仍压过基础 quote 规则：排除后特异性 (1,6,0) > (1,4,0)
-    // （:not 计入其内简单选择器），且排除面只含代码卡行——quiet 语义不变
+    // 让位仍压过基础 quote 规则：排除后特异性 (1,7,0) > (1,4,0)
+    // （:not 计入其内简单选择器）。排除面两个（PR678-001 补 :not(.callout)）：
+    // 代码卡行（防雷）与仍带行级 .callout 的行——列表内 callout 不接
+    // wrapper，行级全形态是其唯一容器视觉，不得被外层 wrapper 的让位
+    // 规则清成透明（列表内行的 .callout 类由 wrapped 分支的列表排除保留）
   })
 })
