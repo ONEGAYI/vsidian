@@ -293,6 +293,11 @@ try {
   assert.equal(combo.mathLeak, false, '移除公式 widget 后 wrapper 内不得残留源文（§4.1 泄漏不得回潮）')
   assert.equal(combo.quotePrefixed, 0, `可见行不得以 > 前缀呈现（QuoteMark 隐藏 × replace 并存）: ${combo.quotePrefixed}`)
   assert.ok(combo.tailIntact, '跨行 replace 并存时尾部文字不得被吞（S3 形态）')
+  // 围栏行 replace 清空（实测取证 2026-10-31：文档 13 行无空行，空文本行恰
+  // 为两个围栏行；quotePrefixed 只抓 > 残留，``` 残留不以 > 开头会逃过——
+  // 此断言是围栏行 replace 失效的唯一观测点）
+  assert.equal(combo.emptyFenceRows, 2,
+    `两个围栏行应 replace 清空为空文本行（S3：围栏行 replace 与 QuoteMark/跨行 math replace 并存）: ${combo.emptyFenceRows}`)
 
   // 20 次同坐标点击：先无显隐扰动的行（光标自文档头直击——内层正文/
   // 懒延续尾部），再代码行（首击进编辑态、围栏行由清空恢复显形会改行高

@@ -340,7 +340,8 @@ describe('mapContentOffsetToDoc：lineMap 逐段折算（#675 T07）', () => {
   //   开行余段 ''：contentOffset=0,  lineStart=0,  prefixLen=4（`> $$` 后即段尾）
   //   a+b 行：     contentOffset=1,  lineStart=5,  prefixLen=2
   //   > c 行：     contentOffset=5,  lineStart=11, prefixLen=2（剩 `> ` 入内容）
-  //   闭行前段 ''：contentOffset=9,  lineStart=16, prefixLen=2
+  //   闭行前段 ''：contentOffset=9,  lineStart=17, prefixLen=2（17 = 第 3 行
+  //   行首 11 + 行长 5 + 换行 1；16 是第 3 行末换行符位置，非行首）
   const LM = scanMathRanges(['> $$', '> a+b', '> > c', '> $$'], 0)[0]!.lineMap
 
   it('段内 offset 折算（含保留的嵌套 > 前缀与内容缩进的越过量）', () => {
