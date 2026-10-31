@@ -79,10 +79,16 @@
 这是本次探查最重要的负面结论。围栏表一旦认出引用内的围栏，`liveCodeCard` 会做三件在引用上下文里都有问题的事：
 
 1. **块顶头部是 block widget**，锚在 `fence.from`（行首，即 `>` 之前）。在引用行里这个位置会把整行前缀变成块级 widget 的宿主，与 QuoteMark 的隐藏装饰争夺同一区域。
-2. **围栏行用 `Decoration.replace` 整体覆盖**（`liveCodeCard.ts:600-602`）。引用内每行还有 QuoteMark 的 `hideDeco`（`liveDecorations.ts:223`，`Decoration.replace({})`）。**两个 replace 区间在同一行重叠**，CM6 严格禁止。
+2. **围栏行用 `Decoration.replace` 整体覆盖**（`liveCodeCard.ts:600-602`）。引用内每行还有 QuoteMark 的 `hideDeco`（`liveDecorations.ts:223`，`Decoration.replace({})`）。两个 replace 区间在同一行重叠。
 3. **卡片行类加在含 `>` 的源文行上**，缩进计算（`--vsidian-code-indent`）按 `x=0` 起点算，与引用缩进叠加后列对齐失准。
 
 现有实现从未走这条路径，因为围栏表里没有引用内的围栏。**这三个冲突都没有现成证据表明可解**，必须先做专门探针。
+
+> **2026-10-31 更正（见 [V02 探查](callout-live-refinement-probe2-v02.md)）**：本节对第 2 条的判断**有误**。CM6 的 `Decoration.replace` 区间重叠**不抛错**，而是静默取并集（实测七组重叠形态全部通过；源码 `@codemirror/view` 的 `PointDecoration.range` 仅在 `from > to` 或零宽 replace 时抛 `RangeError`）。独立复核已确认该结论。
+>
+> 第 3 条的根因也不准确：偏移的成因是 **CSS 特异性平局**（callout 规则与卡片 edge 规则同为 `(1,5,0)`，callout 规则靠后胜出抢走 `padding-left`，而 `text-indent` 存活），不是「缩进值算错」——因此调 `--vsidian-code-indent` 修不好（两处引用同一变量，差值恒定）。
+>
+> **结论不变但依据要换**：引用内完整卡片仍不可行，真正的原因是两个——block widget 的宽度由 `.cm-content` 决定（卡头横带必然跨出引用容器左缘）、以及上述特异性平局。完整卡片之外的降级形态（只发语法高亮）**可行且零缺陷**。
 
 ## 4. 探针 C：嵌套 callout 的分层
 
