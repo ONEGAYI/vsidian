@@ -225,6 +225,36 @@ describe('跨行块表：StateField 增量维护', () => {
     expect(incremental).toEqual(full)
   })
 
+  it('引用内块的固定编辑序列：增量重建与全量扫描逐字段一致（#674 T06）', () => {
+    // 覆盖：前缀深度变化、容器断开（删前缀——块跨容器延续不终止）、闭合
+    // 定界符删除降级、行内路径共存；每步与全量对拍（含 tex 剥前缀与 lineMap）
+    let state = EditorState.create({
+      doc: ['> [!note] t', '> $$', '> x = a', '> $$', '尾部'].join('\n'),
+      extensions: [mathBlocksField],
+    })
+    const fullScan = (s: typeof state) =>
+      [...EditorState.create({ doc: s.doc, extensions: [mathBlocksField] }).field(mathBlocksField)]
+    const doc = () => state.doc.toString()
+    const blocks = () => [...state.field(mathBlocksField)]
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()[0]!.tex).toBe('\nx = a\n')
+    // 内容行前缀加深（剥开启层后剩余 > 进 tex）
+    state = state.update({ changes: { from: doc().indexOf('> x = a') + 2, insert: '> ' } }).state
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()[0]!.tex).toBe('\n> x = a\n')
+    // 容器断开：内容行删前缀（块延续，断开行原样进 tex——插件贪婪口径）
+    state = state.update({ changes: { from: doc().indexOf('> > x = a'), to: doc().indexOf('> > x = a') + 4, insert: '' } }).state
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()[0]!.tex).toBe('\nx = a\n')
+    // 闭合定界符删除：块降级（表移除）
+    state = state.update({ changes: { from: doc().lastIndexOf('$$'), to: doc().lastIndexOf('$$') + 2, insert: 'zz' } }).state
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()).toHaveLength(0)
+    // 行内路径共存：引用行行内公式不进块表（行扫描负责）
+    state = state.update({ changes: { from: doc().indexOf('尾部'), insert: '$y$ ' } }).state
+    expect(blocks()).toEqual(fullScan(state))
+  })
+
   it('未闭合 $$ 长尾的延伸熔断：窗口内开块后延伸有界，行为等价于未闭合降级（C3）', () => {
     // 行 1 开块 + 超过熔断上限的普通行长尾；击键在开块行邻近（回溯窗口
     // 覆盖行 1 的开启符）→ 增量延伸按批推进并在 MATH_BLOCK_EXTEND_LIMIT

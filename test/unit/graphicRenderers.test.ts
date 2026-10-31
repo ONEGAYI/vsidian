@@ -57,7 +57,7 @@ describe('登记即继承（假想第二渲染器）', () => {
 
   it('未登记管线的语言不发射（共享标签存在但管线缺失 → 源码+卡片降级）', () => {
     const fences = [
-      { from: 0, to: 10, char: '`' as const, run: 3, rendered: true, info: 'nostack', code: 'X' },
+      { from: 0, to: 10, char: '`' as const, run: 3, rendered: true, info: 'nostack', code: 'X', lineMap: [] },
     ]
     expect(buildMermaidDecorationRanges(EditorSelection.single(100), null, fences)).toHaveLength(0)
   })

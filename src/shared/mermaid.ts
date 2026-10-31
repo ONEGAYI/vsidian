@@ -16,11 +16,26 @@
 //   或非 mermaid 围栏内的 ```mermaid 文本）不产出（状态机天然抑制）。
 // - 未闭合围栏（EOF）不产出：稳定降级为源码显示。
 //
+// 引用前缀剥离（#674 T06）：识别输入与 code 内容都是剥引用前缀后的裸行
+// （每层 `>` + 可选一个空格，层数与剥除长度随行携带），from/to 保持全文
+// LF 坐标（from 为开围栏行行首、含前缀）。开闭同容器：内容/闭合行剥
+// 「开启行的层数」，层数不足的行是容器断开——未闭合终止（不产出，当前行
+// 落回普通重扫），与 CommonMark 核心规则一致（markdown-it 引用内 fence
+// 在容器断开处自动闭合）；公式块扫描器（math.ts）是跨容器延续口径，与
+// 本模块不同源——各自对齐对应 Reading 引擎：fence=CommonMark 核心、
+// math=@vscode/markdown-it-katex 的 src 级贪婪。
+//
+// 引用前缀工具与 ContentLineMapEntry 的单一事实源在 shared/math.ts（math
+// 扫描器同口径消费，两模块不各建一份）。
 // 本模块不依赖 vscode/DOM/CM6（node 单测直驱；宿主与 webview 双产物共用）。
 // 已知差异（记录于 docs/perf/2026-09-mermaid-rendering.md）：阅读侧由
 // markdown-it 解析，列表/引用容器内嵌套围栏会渲染 mermaid；live 侧行扫描
-// 同样识别 0-3 缩进围栏（嵌套列表场景对齐），引用行（> 前缀）不识别——
-// live 显源码、阅读渲染图，降级方向安全。
+// 同样识别 0-3 缩进围栏（嵌套列表场景对齐）。引用内围栏 #674（T06）起
+// 双端都识别（识别输入为剥引用前缀后的裸行）；容器断开（引用内开、顶层
+// 闭）时 live 终止降级显源码、阅读侧引用内 fence 以空内容自动闭合——
+// 降级方向安全。
+
+import { stripQuoteLayers, stripQuotePrefix, type ContentLineMapEntry } from './math'
 
 /** #60 Mermaid 稳定类名（live widget 与阅读 fence 容器共用；Obsidian
  *  对应 `.mermaid`，见选择器映射表） */
@@ -115,8 +130,12 @@ export interface FenceSpan {
   rendered: boolean
   /** 开围栏 info string 原文（#79 代码块卡片消费：语言路由与标签） */
   info: string
-  /** 围栏内容（内容行以 \n 拼接，不含围栏标记行） */
+  /** 围栏内容（内容行以 \n 拼接，不含围栏标记行；#674 T06 起为剥引用
+   *  前缀后的裸行拼接——KaTeX/Mermaid 干净输入，探针 S3 已验证） */
   code: string
+  /** 内容行 → 原文行偏移映射（#674 T06；形状与折算公式见 math.ts 的
+   *  ContentLineMapEntry——两扫描产物共用同一映射语义，不建第二份派生） */
+  lineMap: ContentLineMapEntry[]
 }
 
 /** 窗口末尾仍开放的围栏（增量重建延伸扫描的驱动信息；也作为续扫输入——
@@ -128,8 +147,12 @@ export interface OpenFence {
   rendered: boolean
   /** 开围栏 info string 原文（闭合时随 FenceSpan 产出） */
   info: string
-  /** 已累积的内容行（\n 拼接） */
+  /** 已累积的内容行（\n 拼接；剥引用前缀后的裸行） */
   code: string
+  /** 开启行的引用前缀层数（#674 T06：续扫批对内容/闭合行做同容器判定） */
+  depth: number
+  /** 已累积内容行的原文锚定（闭合时随 FenceSpan 产出；跨批延续不重算） */
+  lineMap: ContentLineMapEntry[]
 }
 
 /** 窗口行扫描结果：已闭合围栏 + 末尾开放状态 */
@@ -205,31 +228,52 @@ export function locateGraphicFenceCode(doc: string, language: string, prevCode: 
   return same.length === 1 ? same[0]!.code : null
 }
 
-/** 同 scanFenceSpans，另回报窗口末尾的开放围栏状态（增量重建延伸用） */
+/** 同 scanFenceSpans，另回报窗口末尾的开放围栏状态（增量重建延伸用）。
+ *  #674（T06）起识别输入为剥引用前缀后的裸行（缩进/围栏判定口径不变），
+ *  from/to 保持全文 LF 坐标、code 与 lineMap 为剥前缀后的产物；开闭同
+ *  容器判定依赖 OpenFence.depth（跨批续扫时随 initialOpen 携带）。 */
 export function scanFencesDetailed(
   lines: readonly string[],
   firstLineStart: number,
   initialOpen: OpenFence | null = null,
 ): FenceScanResult {
   const spans: FenceSpan[] = []
-  let open: { from: number; char: '`' | '~'; run: number; rendered: boolean; info: string; code: string[] } | null =
-    initialOpen
-      ? {
-          from: initialOpen.from,
-          char: initialOpen.char,
-          run: initialOpen.run,
-          rendered: initialOpen.rendered,
-          info: initialOpen.info,
-          code: initialOpen.code === '' ? [] : initialOpen.code.split('\n'),
-        }
-      : null
+  // 工作态：code 为裸内容行数组（join('\n') 即产物 code），contentLen 为
+  // 已累积长度（含分隔符——下一行的 contentOffset），depth 为开启行层数
+  let open: {
+    from: number
+    char: '`' | '~'
+    run: number
+    rendered: boolean
+    info: string
+    code: string[]
+    depth: number
+    lineMap: ContentLineMapEntry[]
+    contentLen: number
+  } | null = initialOpen
+    ? {
+        from: initialOpen.from,
+        char: initialOpen.char,
+        run: initialOpen.run,
+        rendered: initialOpen.rendered,
+        info: initialOpen.info,
+        code: initialOpen.code === '' ? [] : initialOpen.code.split('\n'),
+        depth: initialOpen.depth,
+        lineMap: initialOpen.lineMap,
+        contentLen: initialOpen.code === '' ? 0 : initialOpen.code.length + 1,
+      }
+    : null
   let lineStart = firstLineStart
   for (const line of lines) {
-    const { cols, restStart } = indentColumns(line)
+    const { bare, depth } = stripQuotePrefix(line)
     if (open) {
-      if (cols <= 3) {
-        const rest = line.slice(restStart)
-        if (isFenceClose(rest, open.char, open.run)) {
+      if (depth >= open.depth) {
+        // 剥开启层数后的行做闭合判定与内容累积（层数更多时剩余的 > 前缀
+        // 属嵌套引用内容，原样保留——CommonMark 引用标记逐层消耗语义）
+        const consumed = stripQuoteLayers(line, open.depth)!
+        const segStart = line.length - consumed.length
+        const { cols, restStart } = indentColumns(consumed)
+        if (cols <= 3 && isFenceClose(consumed.slice(restStart), open.char, open.run)) {
           spans.push({
             from: open.from,
             to: lineStart + line.length,
@@ -238,26 +282,55 @@ export function scanFencesDetailed(
             rendered: open.rendered,
             info: open.info,
             code: open.code.join('\n'),
+            lineMap: open.lineMap,
           })
           open = null
           lineStart += line.length + 1
           continue
         }
+        open.code.push(consumed)
+        open.lineMap.push({ contentOffset: open.contentLen, lineStart, prefixLen: segStart })
+        open.contentLen += consumed.length + 1
+        lineStart += line.length + 1
+        continue
       }
-      open.code.push(line)
-      lineStart += line.length + 1
-      continue
+      // 容器断开（层数不足）：未闭合终止不产出，当前行落回普通重扫
+      // （可能与 markdown-it 的「引用内 fence 自动闭合为空内容」分叉：
+      // live 降级显源码，方向安全）
+      open = null
     }
+    const { cols, restStart } = indentColumns(bare)
     if (cols <= 3) {
-      const hit = matchFenceOpen(line.slice(restStart))
+      const hit = matchFenceOpen(bare.slice(restStart))
       if (hit && !(hit.char === '`' && hit.info.includes('`'))) {
-        open = { from: lineStart, char: hit.char, run: hit.run, rendered: isRenderedFenceInfo(hit.info), info: hit.info, code: [] }
+        open = {
+          from: lineStart,
+          char: hit.char,
+          run: hit.run,
+          rendered: isRenderedFenceInfo(hit.info),
+          info: hit.info,
+          code: [],
+          depth,
+          lineMap: [],
+          contentLen: 0,
+        }
       }
     }
     lineStart += line.length + 1
   }
   return {
     spans,
-    open: open ? { from: open.from, char: open.char, run: open.run, rendered: open.rendered, info: open.info, code: open.code.join('\n') } : null,
+    open: open
+      ? {
+          from: open.from,
+          char: open.char,
+          run: open.run,
+          rendered: open.rendered,
+          info: open.info,
+          code: open.code.join('\n'),
+          depth: open.depth,
+          lineMap: open.lineMap,
+        }
+      : null,
   }
 }
