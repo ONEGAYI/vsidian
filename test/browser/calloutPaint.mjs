@@ -58,10 +58,19 @@ try {
     })))
   const titleLine = liveLines.find((l) => l.text.includes('提示标题'))
   assert.ok(titleLine, 'live 标题行应存在')
-  for (const cls of ['callout', 'callout-title', 'vsidian-callout-first', 'vsidian-callout-quiet']) {
+  for (const cls of ['callout-title', 'vsidian-callout-first', 'vsidian-callout-quiet']) {
     assert.ok(titleLine.cls.split(' ').includes(cls), `标题行应含 ${cls}: ${titleLine.cls}`)
   }
-  assert.equal(titleLine.callout, 'note')
+  // T05（#673）：.callout 主类与 data-callout 迁 wrapper 元素（行级不挂）
+  assert.ok(!titleLine.cls.split(' ').includes('callout'), `标题行不应再挂行级主类: ${titleLine.cls}`)
+  const wrapPaint = await page.evaluate(() => {
+    const w = [...document.querySelectorAll('.vsidian-callout-wrap.callout')]
+      .find((el) => (el.textContent ?? '').includes('提示标题'))
+    return w ? { type: w.getAttribute('data-callout'), depth: w.getAttribute('data-callout-depth') } : null
+  })
+  assert.ok(wrapPaint, 'wrapper 容器应在场')
+  assert.equal(wrapPaint.type, 'note')
+  assert.equal(wrapPaint.depth, '1')
   // 标记隐藏：标题行可见文字不含 [!note]（widget 图标替代）；标题文字可见
   assert.ok(!titleLine.text.includes('[!note]'), `标记应隐藏: ${titleLine.text}`)
   assert.ok(titleLine.text.includes('提示标题'), '标题文字应可见')
@@ -109,11 +118,14 @@ try {
     const view = window.controller.getView()
     const doc = view.state.doc.toString()
     const el = [...document.querySelectorAll('.cm-line')].find((e) => (e.textContent ?? '').includes('正文第一行入'))
-    return { doc, cls: el?.className ?? '', callout: el?.getAttribute('data-callout') }
+    return {
+      doc, cls: el?.className ?? '',
+      wrapType: el?.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') ?? null,
+    }
   })
   assert.ok(typed.doc.includes('正文第一行入'), '键入应写入文档')
   assert.ok(typed.cls.split(' ').includes('callout-content'), `键入后外框应保留: ${typed.cls}`)
-  assert.equal(typed.callout, 'note')
+  assert.equal(typed.wrapType, 'note')
 
   // 跨行拖选：标题行 → 正文行，选区坐标逐字节等于源区间
   const selectDoc = await page.evaluate(() => window.controller.getView().state.doc.toString())
@@ -138,8 +150,8 @@ try {
 
   /** 内置标准色通道：渐变绘制、bgc 透明 */
   const liveRowPaint = () => page.evaluate(() => {
-    const el = [...document.querySelectorAll('.cm-line')].find((e) =>
-      e.className.split(' ').includes('callout') && e.className.split(' ').includes('vsidian-callout-quiet'))
+    // T05：容器底色在 wrapper（行级让位为透明）
+    const el = document.querySelector('.vsidian-callout-wrap.callout')
     const s = getComputedStyle(el)
     return { bgc: s.backgroundColor, img: s.backgroundImage, shadow: s.boxShadow }
   })
@@ -154,7 +166,8 @@ try {
   // 紫条被替代：#657/T06 起 quiet 行 box-shadow 通道承载 border 左缘近似
   //（默认 0 宽零绘制）——断言不绘制引用紫条色（与普通引用行的紫条断言
   // 同款口径）
-  assert.ok(!/rgb\(167, 139, 250\)/.test(paint.shadow), `callout 行不应绘制引用紫条: ${paint.shadow}`)
+  // 紫条替代：wrapper 容器无 box-shadow 紫条（行级 quiet 让位后为零阴影）
+  assert.ok(!/rgb\(167, 139, 250\)/.test(paint.shadow), `callout 容器不应绘制引用紫条: ${paint.shadow}`)
   // 亮色主题：底色计算随 --callout-default 变化（#086ddd）
   await page.evaluate(() => { document.body.classList.add('vscode-light'); document.body.classList.remove('vscode-dark') })
   paint = await liveRowPaint()
@@ -163,6 +176,7 @@ try {
   await page.evaluate(() => { document.body.classList.add('vscode-dark'); document.body.classList.remove('vscode-light') })
 
   // ---- 片段三元组通道：--callout-color 覆盖为 RGB 三元组 → bgc 绘制 ----
+  // .callout 在两侧都是容器挂点（Live wrapper / 阅读容器）——单选择器双命中
   await page.addStyleTag({ content: '#app .callout { --callout-color: 255, 0, 0; }' })
   paint = await liveRowPaint()
   assert.equal(paint.bgc, 'rgba(255, 0, 0, 0.1)', `三元组通道应由 bgc 绘制: ${paint.bgc}`)
@@ -182,7 +196,7 @@ try {
   assert.ok(pseudoLine?.includes('[!tip]'), '代码内伪标记应字面可见')
   const pseudoCalloutLine = pseudo.find((t) => t.includes('代码内伪标记'))
   assert.equal(await page.evaluate(() =>
-    [...document.querySelectorAll('.cm-line')].find((e) => (e.textContent ?? '').includes('代码内伪标记'))?.getAttribute('data-callout')), 'note',
+    [...document.querySelectorAll('.vsidian-callout-wrap')].find((e) => (e.textContent ?? '').includes('代码内伪标记'))?.getAttribute('data-callout')), 'note',
   '含代码块的容器 data-callout 仍取首段声明（不误判围栏内标记）')
 
   // ---- reading：真实容器结构与绘制 ----
@@ -231,9 +245,13 @@ try {
 
   // 切回 live：行级形态恢复（模式往返不丢）
   await page.evaluate(() => window.setCalloutMode('live'))
-  const backToLive = await page.evaluate(() =>
-    [...document.querySelectorAll('.cm-line')].find((e) => e.getAttribute('data-callout') === 'custom-x')?.className ?? '')
-  assert.ok(backToLive.split(' ').includes('callout-title'), `模式往返后 live 行级形态应恢复: ${backToLive}`)
+  const backToLive = await page.evaluate(() => {
+    const line = [...document.querySelectorAll('.cm-line.callout-title')]
+      .find((e) => e.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') === 'custom-x')
+    return { cls: line?.className ?? '', wrap: !!line?.closest('.vsidian-callout-wrap.callout') }
+  })
+  assert.ok(backToLive.cls.split(' ').includes('callout-title'), `模式往返后 live 行级形态应恢复: ${backToLive.cls}`)
+  assert.ok(backToLive.wrap, '模式往返后 wrapper 容器恢复')
 
   assert.deepEqual(errors, [], '页面不得有脚本错误')
   console.log('calloutPaint: 全部断言通过（双视图 × 明暗主题 × 双通道底色 × 显隐/输入/拖选）')

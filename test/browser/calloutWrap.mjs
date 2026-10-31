@@ -146,7 +146,8 @@ try {
   // 沉淀：padding 变更后 CM6 异步重测量 heightmap——先触发测量并等待落地，
   // 再取坐标连击（否则连击中途测量落地会使同坐标映射漂移，属测量时序而
   // 非记账缺失）
-  await page.addStyleTag({ content: '.vsidian-callout-wrap { padding: 14px 18px; }' })
+  // 产物 CSS 已有高特异性 padding 消费规则——热样式经变量覆盖（片段惯用形态）
+  await page.addStyleTag({ content: '.vsidian-callout-wrap.callout { --callout-padding: 14px 18px; }' })
   // 热样式发现（2026-10-31 实测，诚实降级）：styles 变更无 DOM mutation，
   // CM6 不自行察觉；短文档下 scroll/空 dispatch/视口 resize/沉降点击/重
   // init 均不恢复 coordsAtPos↔posAtCoords 一致（映射稳定偏移 = 新增
@@ -204,7 +205,7 @@ try {
   assert.equal(roundtrip.count, 3, '模式往返后 wrapper 数量恢复')
   assert.ok(roundtrip.nested, '模式往返后嵌套恢复')
   assert.equal(roundtrip.lazyDepth, '2', '模式往返后懒延续行仍归内层')
-  assert.equal(roundtrip.pad, '14px 18px', `冷重建后 wrapper padding 应生效: ${roundtrip.pad}`)
+  assert.equal(roundtrip.pad, '14px 18px', `冷重建后 wrapper padding 变量覆盖应生效: ${roundtrip.pad}`)
   await clickTwenty(await posOf('兄弟正文'), '往返冷重建后兄弟正文')
 
   // ---- 无 callout 文档零 wrapper（普通形态不受影响）----

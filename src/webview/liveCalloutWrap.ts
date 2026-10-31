@@ -19,7 +19,7 @@ import type { Text } from '@codemirror/state'
 import { BlockWrapper, EditorView } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { docInput, FM_SCAN_LIMIT, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
-import { calloutOfBlockquote, liveDecorationsField } from './liveDecorations'
+import { calloutOfBlockquote, calloutWrapFacet, liveDecorationsField } from './liveDecorations'
 
 /** wrapper 区间派生产物（纯数据——单测与浏览器断言共用口径） */
 export interface CalloutWrapRange {
@@ -85,7 +85,16 @@ function buildWrappers(state: EditorState): RangeSet<BlockWrapper> {
   return BlockWrapper.set(
     wraps.map((w) => BlockWrapper.create({
       tagName: 'div',
-      attributes: { class: 'vsidian-callout-wrap', 'data-callout-depth': String(w.depth) },
+      // T05（#673）公开契约承接：.callout 主类与 data-callout 类型属性迁
+      // wrapper（与阅读容器同款入口）；vsidian-callout-wrap 是 Live 承载层
+      // 内部标记（CSS 作用域）；data-callout-depth 公开分层样式入口
+      // （嵌套 wrapper DOM 天然承载 .callout .callout 后代选择器——
+      // V01 §4.2 data-callout-lN 提案由此免新增属性族）
+      attributes: {
+        class: 'vsidian-callout-wrap callout',
+        'data-callout': w.type,
+        'data-callout-depth': String(w.depth),
+      },
       rank: calloutWrapRank(w.depth),
     }).range(w.from, w.to)),
     true,
@@ -102,6 +111,7 @@ export const liveCalloutWrappersField = StateField.define<RangeSet<BlockWrapper>
   provide: (field) => EditorView.blockWrappers.from(field),
 })
 
-/** T04 装配单元：根正文 Live（syncController.rootOwnedViewExtensions 注入；
- *  引用嵌入实例不装配——边界登记） */
-export const liveCalloutWrap: Extension = [liveCalloutWrappersField]
+/** T04/T05 装配单元：根正文 Live（syncController.rootOwnedViewExtensions
+ *  注入；引用嵌入实例不装配——行级形态保留）。facet 开关同时驱动
+ *  liveDecorations 发射侧行级让位（wrapper 在场才让位，见 calloutWrapFacet） */
+export const liveCalloutWrap: Extension = [calloutWrapFacet.of(true), liveCalloutWrappersField]

@@ -92,12 +92,12 @@ const raf = (page) => page.evaluate(() =>
 /** live 行级观测：type → { row img, icon bgc, icon mask, 行 quiet } */
 const livePaint = (page) => page.evaluate(() => {
   const out = {}
-  for (const line of document.querySelectorAll('.cm-line[data-callout]')) {
-    const type = line.getAttribute('data-callout')
-    const titleCls = line.classList.contains('callout-title')
-    if (!titleCls) continue // 只取标题行（图标所在行；首行即标题行）
+  for (const line of document.querySelectorAll('.cm-line.callout-title')) {
+    // T05：类型标识与容器底色在 wrapper（行级让位）
+    const type = line.closest('.vsidian-callout-wrap')?.getAttribute('data-callout')
+    if (!type) continue
     const icon = line.querySelector('.callout-icon')
-    const s = getComputedStyle(line)
+    const s = getComputedStyle(line.closest('.vsidian-callout-wrap'))
     out[type] = {
       img: s.backgroundImage,
       quiet: line.classList.contains('vsidian-callout-quiet'),
@@ -158,12 +158,12 @@ try {
   await page.evaluate(() => window.locateCallout(window.controller.getView().state.doc.length))
   const nested = await page.evaluate(() =>
     [...document.querySelectorAll('.cm-line')].map((el) => ({
-      callout: el.getAttribute('data-callout'),
+      callout: el.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') ?? null,
       cls: el.className,
       text: el.textContent ?? '',
     })))
   const inner = nested.find((l) => l.text.includes('内层正文'))
-  assert.equal(inner.callout, 'warning', '嵌套正文行 data-callout 取最内层')
+  assert.equal(inner.callout, 'warning', '嵌套正文行归最内层 wrapper（嵌套 DOM 承载最内层语义）')
   assert.ok(inner.cls.includes('callout-content'), '嵌套正文行应挂 callout-content')
   const midTitle = nested.find((l) => l.text.trim() === '中层')
   assert.ok(midTitle.cls.includes('callout-title') && midTitle.cls.includes('callout-content'),
@@ -226,7 +226,7 @@ try {
   await raf(page)
   const mixed = await page.evaluate(() =>
     [...document.querySelectorAll('.cm-line')].map((el) => ({
-      callout: el.getAttribute('data-callout'),
+      callout: el.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') ?? null,
       cls: el.className,
       text: el.textContent ?? '',
     })))
@@ -234,7 +234,7 @@ try {
   assert.ok(!malformed.cls.includes('callout'), '未成型标记不得挂 callout 类')
   assert.ok(mixed.find((l) => l.text.includes('代码内伪标记'))?.text.includes('[!tip]'), '代码内伪标记字面可见')
   const todoBody = mixed.find((l) => l.text.includes('表格与代码'))
-  assert.equal(todoBody.callout, 'todo', '含代码块容器 data-callout 取首段声明')
+  assert.equal(todoBody.callout, 'todo', '含代码块容器 wrapper 取首段声明（不误判围栏内标记）')
   // callout 内表格行网格共存（网格行类在 callout 行上叠加）
   // callout 内表格行网格共存（网格行类在 callout 行上叠加；管道符经
   // 表格网格装饰呈现，字面文本不含 | 1 | 2 |——按行类断言）
@@ -332,7 +332,9 @@ try {
   const liveTitlePaint = await page.evaluate(() => {
     const out = {}
     for (const line of document.querySelectorAll('.cm-line.callout-title')) {
-      const type = line.getAttribute('data-callout')
+      // T05：类型标识在 wrapper（标题行取所属 wrapper 的 data-callout）
+      const type = line.closest('.vsidian-callout-wrap')?.getAttribute('data-callout')
+      if (!type) continue
       const inner = line.querySelector('.callout-title-inner')
       out[type] = {
         lineColor: getComputedStyle(line).color,
@@ -381,9 +383,12 @@ try {
   // ---- 模式往返：live 行级形态恢复 ----
   await page.evaluate(() => window.setCalloutMode('live'))
   await raf(page)
-  const backToLive = await page.evaluate(() =>
-    [...document.querySelectorAll('.cm-line[data-callout="warning"]')].map((e) => e.className))
-  assert.ok(backToLive.some((cls) => cls.includes('callout')), `模式往返后 live 形态应恢复: ${backToLive.join('|')}`)
+  const backToLive = await page.evaluate(() => ({
+    wrapCount: document.querySelectorAll('.vsidian-callout-wrap.callout').length,
+    titleCls: [...document.querySelectorAll('.cm-line.callout-title')].some((e) =>
+      e.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') === 'warning'),
+  }))
+  assert.ok(backToLive.wrapCount > 0 && backToLive.titleCls, `模式往返后 live wrapper 形态应恢复: ${JSON.stringify(backToLive)}`)
 
   assert.deepEqual(errors, [], '页面不得有脚本错误')
   console.log('calloutTypes: 全部断言通过（27 类型 × 明暗 × 图标 × 嵌套/列表编辑 × malformed × 阅读侧）')

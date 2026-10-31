@@ -1,12 +1,16 @@
-// Live Callout 装饰契约（#653/T02，T01 路线 A）：行级类 + data-callout +
-// 标记 widget + 标题 mark，识别骑 liveDecorationsField 增量树、发射骑
-// emitForRange 增量窗口。断言口径与 T01 探针报告 §5.1/§5.4 一致：
-// - 容器每行挂 callout 行级类 + data-callout（嵌套最内层胜出）
-// - 标题行 callout-title、正文行 callout-content、首末行圆角类
+// Live Callout 装饰契约（#653/T02，T01 路线 A）：行级类 + 标记 widget +
+// 标题 mark，识别骑 liveDecorationsField 增量树、发射骑 emitForRange
+// 增量窗口。T05（#673）容器视觉迁移后口径：
+// - 非列表内 callout 由 BlockWrapper 承载：.callout 主类与 data-callout
+//   挂 wrapper 元素（liveCalloutWrap.test 断言区间与类型标识），行级
+//   **不再挂** .callout 与 data-callout；标题行 callout-title、正文行
+//   callout-content、首末行圆角类照挂
+// - 列表内 callout（v1 不接 wrapper）维持行级全形态（.callout +
+//   data-callout 在行上——F40 组合）
 // - 标记以行内 replace widget 隐藏并呈现 .callout-icon；光标/选区端点触及
 //   标题行即显形源码（与生产 QuoteMark 同款端点语义）
 // - 标题文字 mark 包 .callout-title-inner；无显式标题时以零宽 widget 呈现
-//   默认标题（源文派生，不写回）
+//   默认标题（源文派生，不写回源文）
 // - callout 行替代该层引用紫条（内部普通引用仍显示自身样式——最内层
 //   引用为普通引用的行不被静默）
 // - 未成型按普通引用降级；普通引用与代码内伪标记不受影响
@@ -52,9 +56,11 @@ function collect(set: DecorationSet): DecoItem[] {
 
 function build(doc: string, selection?: { anchor: number; head?: number }): DecorationSet {
   // 默认选区放文档尾：文档首行常是标题行，anchor 0 落在其端点区间内会
-  // 触发标记显形（端点语义），干扰「未触及」形态断言
+  // 触发标记显形（端点语义），干扰「未触及」形态断言。
+  // calloutWrapped=true = 主视图生产形态（wrapper 承载，行级让位）
   const anchor = selection ? selection.anchor : doc.length
-  return buildLivePreviewDecorations(Text.of(doc.split('\n')), EditorSelection.single(anchor, selection?.head ?? anchor))
+  return buildLivePreviewDecorations(Text.of(doc.split('\n')), EditorSelection.single(anchor, selection?.head ?? anchor),
+    null, null, false, true, null, true)
 }
 
 /** 行号 → 行装饰（from 为行首的零宽项） */
@@ -73,16 +79,19 @@ const DOC = ['> [!note] 标题文字', '> 正文第一行', '> 正文第二行',
 describe('Live callout：全量构建', () => {
   const set = build(DOC)
 
-  it('容器行挂 callout 家族类与 data-callout（标题行/正文行/首末行圆角）', () => {
+  it('容器行挂 title/content/quiet/圆角行类；主类与 data-callout 迁 wrapper（行级不挂）', () => {
     const lines = lineDecorations(set, DOC)
     const title = lines.get(1)!
     expect(title.cls.split(' ')).toEqual(expect.arrayContaining([
-      'callout', 'callout-title', 'vsidian-callout-first', 'vsidian-quote-line',
+      'callout-title', 'vsidian-callout-first', 'vsidian-quote-line',
     ]))
-    expect(title.attrs?.['data-callout']).toBe('note')
+    // T05（#673）：.callout 主类与类型属性由 BlockWrapper 元素承载
+    expect(title.cls.split(' ')).not.toContain('callout')
+    expect(title.attrs?.['data-callout']).toBeUndefined()
     const body1 = lines.get(2)!
-    expect(body1.cls.split(' ')).toEqual(expect.arrayContaining(['callout', 'callout-content']))
-    expect(body1.attrs?.['data-callout']).toBe('note')
+    expect(body1.cls.split(' ')).toEqual(expect.arrayContaining(['callout-content']))
+    expect(body1.cls.split(' ')).not.toContain('callout')
+    expect(body1.attrs?.['data-callout']).toBeUndefined()
     const body2 = lines.get(3)!
     expect(body2.cls.split(' ')).toContain('vsidian-callout-last')
     expect(lines.get(5)?.cls ?? '').not.toContain('callout')
@@ -129,10 +138,11 @@ describe('Live callout：全量构建', () => {
       .toBe('CalloutDefaultTitleWidget:Custom x')
   })
 
-  it('未知类型保留原标识进 data-callout（回落 note 外观由 CSS 承载）', () => {
+  it('未知类型原标识经 wrapper 承载（行级无 data-callout；回落 note 外观由 CSS 承载）', () => {
     const set2 = build(['> [!Custom-Question] 自定义', '> 正文'].join('\n'))
     const lines = lineDecorations(set2, '> [!Custom-Question] 自定义\n> 正文')
-    expect(lines.get(1)!.attrs?.['data-callout']).toBe('custom-question')
+    expect(lines.get(1)!.attrs?.['data-callout']).toBeUndefined()
+    // 原标识（小写规范化、不改写）断言在 liveCalloutWrap.test 的类型矩阵
   })
 
   it('光标端点触及标题行：标记不隐藏（显形源码），默认标题不重复呈现', () => {
@@ -157,22 +167,26 @@ describe('Live callout：全量构建', () => {
     const nestedLines = lineDecorations(nested, '> [!note] 标题\n> > 内层普通引用\n> 正文')
     expect(nestedLines.get(2)!.cls.split(' ')).not.toContain('vsidian-callout-quiet')
     expect(nestedLines.get(2)!.cls.split(' ')).toContain('vsidian-quote-line')
-    expect(nestedLines.get(2)!.cls.split(' ')).toContain('callout') // 外层 content 身份保留
+    // 外层 content 身份保留（主类 .callout 已迁 wrapper，行级不挂）
+    expect(nestedLines.get(2)!.cls.split(' ')).toContain('callout-content')
+    expect(nestedLines.get(2)!.cls.split(' ')).not.toContain('callout')
   })
 
-  it('嵌套 callout：内外层类同挂，data-callout 最内层胜出', () => {
+  it('嵌套 callout：内外层行类同挂，类型标识经各层 wrapper 承载（行级无 data-callout）', () => {
     const nested = build(['> [!note] 外层', '> > [!tip] 内层', '> > 内层正文', '> 外层正文'].join('\n'))
     const text = '> [!note] 外层\n> > [!tip] 内层\n> > 内层正文\n> 外层正文'
     const lines = lineDecorations(nested, text)
-    expect(lines.get(1)!.attrs?.['data-callout']).toBe('note')
+    expect(lines.get(1)!.attrs?.['data-callout']).toBeUndefined()
     // 行 2 是外层 content + 内层 title；行 3 是外层 content + 内层 content
     expect(lines.get(2)!.cls.split(' ')).toEqual(expect.arrayContaining([
-      'callout', 'callout-title', 'callout-content', 'vsidian-callout-first',
+      'callout-title', 'callout-content', 'vsidian-callout-first',
     ]))
-    expect(lines.get(2)!.attrs?.['data-callout']).toBe('tip')
-    expect(lines.get(3)!.attrs?.['data-callout']).toBe('tip')
+    expect(lines.get(2)!.cls.split(' ')).not.toContain('callout')
+    expect(lines.get(2)!.attrs?.['data-callout']).toBeUndefined()
+    expect(lines.get(3)!.attrs?.['data-callout']).toBeUndefined()
     // 行 4 `> 外层正文` 是内层容器的 lazy 续行（对拍 F17：内层 toLine=4）
-    expect(lines.get(4)!.attrs?.['data-callout']).toBe('tip')
+    // ——区间归属断言在 liveCalloutWrap.test（懒延续行归内层 wrapper）
+    expect(lines.get(4)!.cls.split(' ')).toContain('callout-content')
     // 内层标记同样以 widget 呈现（内层首段在行 2）
     const inner = collect(nested).find((i) => i.widget === 'CalloutMarkerWidget:tip')
     expect(inner).toBeDefined()
@@ -200,7 +214,7 @@ describe('Live callout：全量构建', () => {
     const doc = ['> [!note] 标题', '> ```md', '> [!tip] 代码里的伪标记', '> ```'].join('\n')
     const set2 = build(doc)
     const lines = lineDecorations(set2, doc)
-    expect(lines.get(1)!.attrs?.['data-callout']).toBe('note')
+    expect(lines.get(1)!.cls.split(' ')).toContain('callout-title')
     expect(lines.get(3)!.cls.split(' ')).toContain('vsidian-code-line')
     expect(collect(set2).find((i) => i.widget === 'CalloutMarkerWidget:tip')).toBeUndefined()
   })
@@ -212,10 +226,21 @@ describe('Live callout：全量构建', () => {
     expect(cls).toContain('callout-title')
     expect(cls).not.toContain('callout-content')
   })
+
+  it('未装配 wrapper（嵌入实例形态）：行级全形态保留（.callout + data-callout 在行上）', () => {
+    // calloutWrapFacet 缺省 false = 引用嵌入实例（不装 liveCalloutWrap）——
+    // 行级全形态不得让位（否则嵌入视图既无 wrapper 又无容器视觉）
+    const bare = buildLivePreviewDecorations(Text.of(DOC.split('\n')), EditorSelection.single(DOC.length))
+    const lines = lineDecorations(bare, DOC)
+    expect(lines.get(1)!.cls.split(' ')).toContain('callout')
+    expect(lines.get(1)!.attrs?.['data-callout']).toBe('note')
+    expect(lines.get(2)!.cls.split(' ')).toContain('callout-content')
+    expect(lines.get(2)!.attrs?.['data-callout']).toBe('note')
+  })
 })
 
 describe('Live callout：T03 全类型/别名/富标题/嵌套组合', () => {
-  it('全类型与别名照常发射行级形态，data-callout 保留原标识（别名不改写）', () => {
+  it('全类型与别名照常发射行级形态（类型标识经 wrapper 承载，别名不改写）', () => {
     const cases = [
       '> [!tip] 提示标题\n> 正文',
       '> [!important] 重要标题\n> 正文',
@@ -226,28 +251,21 @@ describe('Live callout：T03 全类型/别名/富标题/嵌套组合', () => {
     ] as const
     for (const doc of cases) {
       const lines = lineDecorations(build(doc), doc)
-      expect(lines.get(1)!.cls.split(' '), doc).toContain('callout')
+      expect(lines.get(1)!.cls.split(' '), doc).toContain('callout-title')
       expect(lines.get(2)!.cls.split(' '), doc).toContain('callout-content')
     }
-    // 原标识逐值锚定（小写规范化，别名原样）
-    for (const [src, id] of [
-      ['> [!tip] t\n> b', 'tip'],
-      ['> [!important] t\n> b', 'important'],
-      ['> [!IMPORTANT] t\n> b', 'important'],
-      ['> [!summary] t\n> b', 'summary'],
-    ] as const) {
-      expect(lineDecorations(build(src), src).get(1)!.attrs?.['data-callout']).toBe(id)
-    }
+    // 原标识逐值锚定（小写规范化，别名原样）迁移 liveCalloutWrap.test
+    // 的 wrapper 类型矩阵（行级不再挂 data-callout）
   })
 
-  it('13 规范类型逐类型发射 data-callout（全量矩阵）', () => {
+  it('13 规范类型逐类型发射标题行类与标记 widget（类型值断言在 wrapper 矩阵）', () => {
     for (const type of [
       'note', 'abstract', 'info', 'todo', 'tip', 'success', 'question',
       'warning', 'failure', 'danger', 'bug', 'example', 'quote',
     ]) {
       const doc = `> [!${type}] 标题\n> 正文`
       const lines = lineDecorations(build(doc), doc)
-      expect(lines.get(1)!.attrs?.['data-callout'], type).toBe(type)
+      expect(lines.get(1)!.cls.split(' '), type).toContain('callout-title')
       expect(collect(build(doc)).find((i) => i.widget === `CalloutMarkerWidget:${type}`), type).toBeDefined()
     }
   })
@@ -263,18 +281,17 @@ describe('Live callout：T03 全类型/别名/富标题/嵌套组合', () => {
     expect(bold).toBeDefined()
   })
 
-  it('三层嵌套：深度逐层叠加，data-callout 最内层胜出，各层标题行类正确', () => {
+  it('三层嵌套：深度逐层叠加，各层标题行类正确（类型经各层 wrapper 承载）', () => {
     const doc = ['> [!note] 外层', '> > [!tip] 中层', '> > > [!warning] 内层', '> > > 内层正文', '> 外层正文'].join('\n')
     const lines = lineDecorations(build(doc), doc)
-    expect(lines.get(1)!.attrs?.['data-callout']).toBe('note')
+    expect(lines.get(1)!.attrs?.['data-callout']).toBeUndefined()
     expect(lines.get(1)!.cls.split(' ')).toContain('callout-title')
-    // 行 2：外层 content + 中层 title；data-callout 取最内层（tip）
+    // 行 2：外层 content + 中层 title
     expect(lines.get(2)!.cls.split(' ')).toEqual(expect.arrayContaining(['callout-title', 'callout-content']))
-    expect(lines.get(2)!.attrs?.['data-callout']).toBe('tip')
-    // 行 3：三层叠加，最内层 warning 胜出
-    expect(lines.get(3)!.attrs?.['data-callout']).toBe('warning')
+    // 行 3：三层叠加（中层 content + 内层 title）
     expect(lines.get(3)!.cls.split(' ')).toContain('callout-title')
-    // 行 4 内层正文，行 5 外层正文（内层容器 toLine=5，lazy 归属）
+    // 行 4 内层正文，行 5 外层正文（内层容器 toLine=5，lazy 归属——wrapper
+    // 区间断言在 liveCalloutWrap.test）
     expect(lines.get(4)!.cls.split(' ')).toContain('callout-content')
     expect(lines.get(5)!.cls.split(' ')).toContain('callout-content')
     // 三个标记 widget 各自在场
@@ -307,7 +324,7 @@ describe('Live callout：T03 全类型/别名/富标题/嵌套组合', () => {
     ].join('\n')
     const lines = lineDecorations(build(doc), doc)
     for (let n = 1; n <= 8; n++) {
-      expect(lines.get(n)!.attrs?.['data-callout'], `行${n}`).toBe('success')
+      expect(lines.get(n)!.cls.split(' '), `行${n}`).toContain('vsidian-callout-quiet')
     }
     expect(lines.get(4)!.cls.split(' ')).toContain('callout-content')
   })

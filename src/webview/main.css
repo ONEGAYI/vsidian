@@ -2455,15 +2455,20 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
 }
 
-/* ---- #653/T02 Callout 行级形态（T01 路线 A）：容器视觉逐行同规则绘制。
-   quiet 类由最内层引用层判定挂（嵌套普通引用行不挂——紫条照画，自身
-   样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃 RGB 三元组片段、
-   渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效透明、渐变绘制）。
-   左距为 --callout-padding 左分量（24px）的行级近似——上下分量不落行
-   （行级类不改行高的既有纪律），阅读侧整容器按变量原样消费。
+/* ---- #653/T02 Callout 行级形态（T01 路线 A）→ T05（#673）容器视觉迁移：
+   非列表内 callout 由 CM6 BlockWrapper 承载（div.callout[data-callout]
+   [data-callout-depth]，下方 wrapper 规则），行级让位（底色/左距/左缘
+   近似上移容器）；本组行级规则保留给**列表内 callout**（v1 不接 wrapper，
+   维持行级全形态）。quiet 类由最内层引用层判定挂（嵌套普通引用行不挂
+   ——紫条照画，自身样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃
+   RGB 三元组片段、渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效
+   透明、渐变绘制）。左距为 --callout-padding 左分量（24px）的行级近似
+   ——上下分量不落行（行级类不改行高的既有纪律），阅读侧整容器按变量
+   原样消费。
    #657/T06：box-shadow 通道承载 --callout-border-width 左缘近似（同引用
    紫条机制：inset 阴影零布局位移；默认 0 宽零绘制——语义仍是该层紫条被
-   callout 替代；四边完整边框仅阅读侧承诺，行级形态边界见样式参考） ---- */
+   callout 替代；四边完整边框在 wrapper 与阅读侧承诺，行级形态边界见
+   样式参考） ---- */
 #app .cm-editor .cm-scroller .vsidian-quote-line.callout.vsidian-callout-quiet {
   box-shadow: inset var(--callout-border-width) 0 0
     color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
@@ -2472,6 +2477,37 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-image: linear-gradient(
     color-mix(in oklch, var(--callout-color) 10%, transparent),
     color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* T05（#673）Live wrapper 容器视觉：.callout 公开主类迁 wrapper——与阅读
+   容器（.vsidian-view-reading div.callout）同款消费（padding 四向 = 真内
+   边距、四边 border 三件套、圆角、双通道底色）。硬约束：**禁垂直 margin**
+   （BlockWrapper 探针 S1b/S1c：margin 不入 posAtCoords 记账产生确定性
+   错行——间距一律 padding；用户片段对 .callout 设垂直 margin 在 Live
+   会引入落点偏移，契约条目已登记）。mix-blend-mode 暂不承诺 Live
+   （编辑器行层叠合成未验证，边界见条目）。data-callout 类型变量经
+   :where 表命中 wrapper，行内标题色/图标继承。 */
+#app .cm-editor .cm-scroller .vsidian-callout-wrap.callout {
+  padding: var(--callout-padding);
+  border-style: solid;
+  border-color: color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
+  border-width: var(--callout-border-width);
+  border-radius: var(--callout-radius);
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* T05（#673）wrapper 内行级让位：底色/左距/左缘近似已由 wrapper 承接
+   ——行恢复透明零位移（.vsidian-quote-line 基础规则的紫条/底色/内容
+   缩进在此语境让位；quiet 的紫条静默语义由本规则的 box-shadow:none
+   继续承担）。特异性压过基础 quote 规则（多一层 wrapper 类）。 */
+#app .cm-editor .cm-scroller .vsidian-callout-wrap .vsidian-quote-line.vsidian-callout-quiet {
+  box-shadow: none;
+  padding-left: 0;
+  background-color: transparent;
+  background-image: none;
 }
 
 /* 首末行圆角（分角写：单行容器两类同挂自然合成全圆角） */

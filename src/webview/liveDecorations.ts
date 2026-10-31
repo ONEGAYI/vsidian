@@ -1100,6 +1100,14 @@ function eachNodeLine(
   }
 }
 
+/** T05（#673）callout wrapper 承载开关（Facet）：主正文 Live 装配
+ *  liveCalloutWrap 时为 true（行级容器视觉让位给 wrapper 元素）；引用嵌入
+ *  实例不装配（false）——行级全形态保留，避免「既无 wrapper 又无行级
+ *  视觉」的裸形态。定义在发射侧（liveCalloutWrap 单向依赖此处） */
+export const calloutWrapFacet = Facet.define<boolean, boolean>({
+  combine: (values) => values.some(Boolean),
+})
+
 function emitForRange(
   tree: Tree,
   doc: Text,
@@ -1116,6 +1124,7 @@ function emitForRange(
   metrics: TableReadabilityInput | null = null,
   overrides: ReadonlyMap<number, TableGridOverride> | null = null,
   compositionSelection: EditorSelection | null = null,
+  calloutWrapped = false,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -1215,13 +1224,26 @@ function emitForRange(
         return
       case 'Blockquote': {
         eachNodeLine(doc, node, fromLine, toLine, (n) => addLineCls(n, LIVE_CLASS_NAMES.quoteLine))
+        // T05（#673）容器视觉迁移：非列表内 callout 由 BlockWrapper 承载
+        // （.callout/data-callout 挂 wrapper 元素，行级让位——底色/左距/
+        // 左缘近似上移容器）；列表内 callout（v1 不接 wrapper）维持行级
+        // 全形态。判定与 liveCalloutWrap.collectCalloutWrappers 同口径
+        //（祖先链含列表容器即行级）
+        const wrapped = calloutWrapped && !path.some((p) =>
+          p.name === 'BulletList' || p.name === 'OrderedList' || p.name === 'ListItem')
         // #653/T02：直属首段首行命中声明 → 容器行级类 + data-callout +
         // 标题行标记 widget/标题 mark（识别骑增量树、发射骑本增量窗口——
         // T01 性能红线：不做独立视口插件从 topNode 下降重扫）
         const info = calloutOfBlockquote(doc, node)
         if (info) {
           eachNodeLine(doc, node, fromLine, toLine, (n) => {
-            addLineCls(n, LIVE_CLASS_NAMES.calloutLine)
+            if (wrapped) {
+              // wrapper 承载：行不挂 .callout 与 data-callout（公开入口迁
+              // wrapper 元素，避免片段双命中/双绘制）
+            } else {
+              addLineCls(n, LIVE_CLASS_NAMES.calloutLine)
+              calloutTypeByLine.set(n, info.decl.type)
+            }
             addLineCls(n, n === info.titleLineNo
               ? LIVE_CLASS_NAMES.calloutTitle
               : LIVE_CLASS_NAMES.calloutContent)
@@ -1237,7 +1259,6 @@ function emitForRange(
               addLineCls(n, LIVE_CLASS_NAMES.calloutLast)
             }
             quietLines.add(n)
-            calloutTypeByLine.set(n, info.decl.type)
           })
           // 标记与标题装饰仅在标题行落入重建窗口时发射（窗口外行保留
           // 旧装饰，增量路径不自愈区不做无谓重建）
@@ -1773,16 +1794,17 @@ function headText(doc: Text): string {
   return doc.sliceString(0, Math.min(doc.length, FM_SCAN_LIMIT))
 }
 
-/** 全量构建（create / 全文替换 / 探针对拍） */
+/** 全量构建（create / 全文替换 / 探针对拍；calloutWrapped 与装配侧
+ *  calloutWrapFacet 同值——对拍两侧必须同口径） */
 export function buildLivePreviewDecorations(doc: Text, selection: EditorSelection,
   region: TableRegion | null = null, hitReveal: HitRevealContext | null = null, fmFolded = false,
-  containerRender = true, metrics: TableReadabilityInput | null = null): DecorationSet {
+  containerRender = true, metrics: TableReadabilityInput | null = null, calloutWrapped = false): DecorationSet {
   const tree = parseTree(doc)
   const fm = frontmatterOf(doc)
   stats.fullBuildLines = doc.lines
   return RangeSet.of(
     emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region, hitReveal, fmFolded,
-      containerRender, metrics),
+      containerRender, metrics, null, null, calloutWrapped),
     true,
   )
 }
@@ -2274,7 +2296,8 @@ function applyHeightPlans(
       filter: () => false,
       add: emitForRange(next.tree, doc, state.selection, next.fm, first, last, gridPlans, next.fmModel,
         state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
-        state.facet(tableContainerRenderFacet), metrics, gridOverrides, state.field(inlineCodeComposition)),
+        state.facet(tableContainerRenderFacet), metrics, gridOverrides, state.field(inlineCodeComposition),
+        state.facet(calloutWrapFacet) === true),
       sort: true,
     })
     next = {
@@ -2308,7 +2331,7 @@ function buildLiveDecoState(
     emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
       state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
       state.facet(tableContainerRenderFacet), state.facet(tableMetricsFacet), prevOverrides,
-      state.field(inlineCodeComposition)), true)
+      state.field(inlineCodeComposition), state.facet(calloutWrapFacet) === true), true)
   return {
     decos,
     tree,
@@ -2374,7 +2397,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, 1, fmLast, value.gridPlans,
             value.fmModel, tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), fmFolded,
             tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-            tr.state.field(inlineCodeComposition)),
+            tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
           sort: true,
         })
         return {
@@ -2441,7 +2464,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, updatedPlans, value.fmModel,
                   tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
                   tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-                  tr.state.field(inlineCodeComposition)),
+                  tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
                 sort: true,
               })
               return {
@@ -2469,7 +2492,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
               tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
               tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-              tr.state.field(inlineCodeComposition)),
+              tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
             sort: true,
           })
           return {
@@ -2499,7 +2522,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
             tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
             tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-            tr.state.field(inlineCodeComposition)),
+            tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -2567,7 +2590,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
           tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
           tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), gridOverrides,
-          tr.state.field(inlineCodeComposition)),
+          tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1

@@ -80,6 +80,23 @@ describe('collectCalloutWrappers：区间派生（解析器区间 + 行对齐）
     expect(wrapRanges(doc)).toEqual([])
   })
 
+  it('类型标识矩阵：13 规范类型 + 别名（小写规范化/原样）+ 未知类型原样（T05 契约承接）', () => {
+    for (const type of [
+      'note', 'abstract', 'info', 'todo', 'tip', 'success', 'question',
+      'warning', 'failure', 'danger', 'bug', 'example', 'quote',
+    ]) {
+      expect(wrapRanges(`> [!${type}] 标题\n> 正文`), type).toEqual([[0, `> [!${type}] 标题\n> 正文`.length, 1, type]])
+    }
+    // 别名归一（important 独立变量族但标识原样）、大小写规范化、未知原样
+    for (const [src, id] of [
+      ['> [!IMPORTANT] t\n> b', 'important'],
+      ['> [!summary] t\n> b', 'summary'],
+      ['> [!Custom-Question] t\n> b', 'custom-question'],
+    ] as const) {
+      expect(wrapRanges(src)[0]![3], src).toBe(id)
+    }
+  })
+
   it('frontmatter 区域不产 wrapper（fmEnd 守卫）', () => {
     const doc = '---\n> [!note] fm 内伪引用\n---\n\n> [!tip] t\n> b'
     const text = Text.of(doc.split('\n'))
