@@ -141,6 +141,31 @@ describe('live 行级形态：替代紫条与双通道底色', () => {
     expect(icon).toMatch(/mask:\s*var\(--_vsidian-callout-icon,\s*url\("data:image\/svg\+xml/)
     expect(icon).toMatch(/background-color:\s*var\(--callout-color\)/)
   })
+
+  // ---- #671/T02 标题按类型着色 ----
+  // 层次对齐 Obsidian 1.14.4 app.css：.callout-title 取 --callout-color，
+  // .callout-title-inner 取 --callout-title-color（后者默认 inherit，是内层
+  // 覆盖点——两个变量职责不同，不得合并成一个）。此前标题行直接读
+  // --callout-title-color=inherit，所有类型同色。
+  it('T02 标题层取类型色（对齐 Obsidian .callout-title / -title-inner 两层）', () => {
+    const title = cssRule(css, '.vsidian-quote-line.callout-title')
+    expect(title, '标题行应取类型色').toMatch(/color:\s*var\(--callout-color\)/)
+  })
+
+  it('T02 标题内层仍由 --callout-title-color 覆盖（该变量保持 inherit 语义）', () => {
+    const inner = cssRule(css, '.vsidian-quote-line.callout-title .callout-title-inner')
+    expect(inner).toMatch(/color:\s*var\(--callout-title-color\)/)
+    // 变量默认值不得被改成类型色——内层是用户片段覆盖点，改默认会破坏语义
+    const app = cssRuleExact(css, '#app')
+    expect(app).toMatch(/--callout-title-color:\s*inherit/)
+  })
+
+  it('T02 阅读侧标题同为两层结构（同一 data-callout 两端计算色一致）', () => {
+    const readingTitle = cssRule(css, '.vsidian-reading-block .callout-title')
+    expect(readingTitle).toMatch(/color:\s*var\(--callout-color\)/)
+    const readingInner = cssRule(css, '.vsidian-reading-block .callout-title .callout-title-inner')
+    expect(readingInner).toMatch(/color:\s*var\(--callout-title-color\)/)
+  })
 })
 
 describe('阅读侧真实容器', () => {

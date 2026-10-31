@@ -2485,11 +2485,21 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   border-bottom-right-radius: var(--callout-radius);
 }
 
-/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引） */
+/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引）
+   #671/T02：标题色分两层——标题层取类型色 --callout-color，内层
+   .callout-title-inner 取 --callout-title-color（默认 inherit）。对齐
+   Obsidian 1.14.4 app.css 的 `.callout-title{color:var(--callout-color)}`
+   + `.callout-title-inner{color:var(--callout-title-color)}`。此前标题行
+   直接读 --callout-title-color=inherit，导致所有类型标题同色；两层分工
+   不得合并——后者是用户片段覆盖标题文字的入口 */
 #app .cm-editor .cm-scroller .vsidian-quote-line.callout-title {
-  color: var(--callout-title-color);
+  color: var(--callout-color);
   font-size: var(--callout-title-size);
   font-weight: var(--callout-title-weight);
+}
+
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout-title .callout-title-inner {
+  color: var(--callout-title-color);
 }
 
 /* ---- #655（T04）折叠箭头 .callout-fold（T01 固定口径；Live 标题行行尾
@@ -4205,14 +4215,21 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
     color-mix(in oklch, var(--callout-color) 10%, transparent));
 }
 
+/* #671/T02：标题色两层（同 Live 侧口径）——标题取类型色，内层由
+   --callout-title-color 覆盖（默认 inherit）。同一 data-callout 值在两端
+   计算色一致 */
 #app .vsidian-view-reading .vsidian-reading-block .callout-title {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: var(--callout-title-padding);
-  color: var(--callout-title-color);
+  color: var(--callout-color);
   font-size: var(--callout-title-size);
   font-weight: var(--callout-title-weight);
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-title .callout-title-inner {
+  color: var(--callout-title-color);
 }
 
 #app .vsidian-view-reading .vsidian-reading-block .callout-content {

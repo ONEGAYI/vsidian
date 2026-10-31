@@ -275,6 +275,85 @@ try {
     assert.ok(p.title.includes(type), `阅读侧 ${type} 标题应可见`)
   }
 
+  // ---- #671/T02：标题按类型着色（绘制层，非规则形态） ----
+  // 观察用户看到的东西：27 类型标题计算色各自等于该类型 --callout-color 的
+  // 解析结果，而不是 DOM 上有没有 color 声明。
+  const rgbOf = (hex) => {
+    const n = parseInt(hex.replace('#', ''), 16)
+    return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+  }
+  const readingTitlePaint = await page.evaluate(() => {
+    const out = {}
+    for (const rootEl of document.querySelectorAll('.vsidian-view-reading .callout')) {
+      const type = rootEl.getAttribute('data-callout')
+      const title = rootEl.querySelector('.callout-title')
+      const inner = rootEl.querySelector('.callout-title-inner')
+      out[type] = {
+        titleColor: title ? getComputedStyle(title).color : null,
+        innerColor: inner ? getComputedStyle(inner).color : null,
+      }
+    }
+    return out
+  })
+  for (const [type, [dark]] of Object.entries(TYPE_COLORS)) {
+    const p = readingTitlePaint[type]
+    assert.equal(p.titleColor, rgbOf(dark),
+      `阅读侧 ${type} 标题计算色应为类型色 ${dark}: ${p.titleColor}`)
+    // 内层保持 --callout-title-color=inherit → 继承标题层类型色
+    assert.equal(p.innerColor, rgbOf(dark),
+      `阅读侧 ${type} 标题内层应继承类型色: ${p.innerColor}`)
+  }
+  const distinctTitleColors = new Set(Object.values(readingTitlePaint).map((p) => p.titleColor))
+  assert.ok(distinctTitleColors.size >= 6,
+    `不同类型标题色应互不相同（至少 6 种），实际 ${distinctTitleColors.size} 种`)
+
+  // 用户片段覆盖 --callout-title-color：只有内层变、标题层不变（证明该变量
+  // 仍是内层覆盖点，语义未被改成类型色）
+  const titleColorOverride = await page.addStyleTag({ content:
+    ".vsidian-view-reading .callout[data-callout='note'] { --callout-title-color: #ff00ff; }" })
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  const overridden = await page.evaluate(() => {
+    const root = document.querySelector(".vsidian-view-reading .callout[data-callout='note']")
+    return {
+      titleColor: getComputedStyle(root.querySelector('.callout-title')).color,
+      innerColor: getComputedStyle(root.querySelector('.callout-title-inner')).color,
+    }
+  })
+  await titleColorOverride.evaluate((el) => el.remove())
+  assert.equal(overridden.innerColor, 'rgb(255, 0, 255)',
+    `--callout-title-color 覆盖应作用于内层: ${overridden.innerColor}`)
+  assert.equal(overridden.titleColor, rgbOf(TYPE_COLORS.note[0]),
+    `标题层仍是类型色（覆盖只作用于内层）: ${overridden.titleColor}`)
+
+  // Live 侧同一 data-callout 计算色与阅读侧一致
+  await page.evaluate((text) => window.initCallout(text), typesDoc)
+  await page.evaluate(() => window.setCalloutMode('live'))
+  await page.waitForSelector('.cm-line.callout-title')
+  const liveTitlePaint = await page.evaluate(() => {
+    const out = {}
+    for (const line of document.querySelectorAll('.cm-line.callout-title')) {
+      const type = line.getAttribute('data-callout')
+      const inner = line.querySelector('.callout-title-inner')
+      out[type] = {
+        lineColor: getComputedStyle(line).color,
+        innerColor: inner ? getComputedStyle(inner).color : null,
+      }
+    }
+    return out
+  })
+  for (const [type, [dark]] of Object.entries(TYPE_COLORS)) {
+    const p = liveTitlePaint[type]
+    assert.ok(p, `live 侧 ${type} 标题行应在场`)
+    assert.equal(p.lineColor, rgbOf(dark), `live 侧 ${type} 标题行计算色应为 ${dark}: ${p.lineColor}`)
+    if (p.innerColor !== null) {
+      assert.equal(p.innerColor, rgbOf(dark), `live 侧 ${type} 标题内层应继承类型色: ${p.innerColor}`)
+    }
+  }
+
+  // 回到阅读模式（下方嵌套用例消费阅读侧 container 结构）
+  await page.evaluate(() => window.setCalloutMode('reading'))
+  await page.waitForSelector('.vsidian-view-reading .callout')
+
   // 嵌套阅读 + 富标题 + 普通引用
   await page.evaluate((text) => window.initCallout(text), [
     NESTED_DOC,
