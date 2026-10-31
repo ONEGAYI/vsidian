@@ -1,6 +1,6 @@
 # Callout 完整块渲染：CM6 原生 BlockWrapper 生产链路探针
 
-- 状态：**探针完成，路线条件可行**（2026-10-31）
+- 状态：**探针完成，路线条件可行**（2026-10-31；同日勘误：§2.4/§5.2 撤回「深度扫描派生」，区间消费解析器节点区间）
 - 代码基线：`509ff58f`（feat/callout-live-refinement，基于 main `3d70cb36`）
 - 探针方式：真实 Chromium + 生产 `WebviewSyncController` 装配 + 产物 CSS，经 `controller.mount(el, [探针扩展])` 注入 `EditorView.blockWrappers`；20 次同坐标真实点击口径（V01 同款）
 - 关联：[#668](https://github.com/ONEGAYI/vsidian/issues/668)（总票）、[V01](callout-live-refinement-probe2-v01.md)、[V02](callout-live-refinement-probe2-v02.md)、交接文档（2026-10-31 17:56 BlockWrapper 路线版）
@@ -24,13 +24,13 @@
 1. **行归属是行粒度、两端含端点**：TileBuilder 的 `updateBlockWrappers` 以 `cur.from <= pos && cur.to >= pos` 收集开启的 wrapper，按 rank 降序入栈，块落入最内层（`index.js` 2449-2483）。**推论（S1 实证）：wrapper 区间必须行对齐**——嵌套 callout 的内层 `from` 若取 Lezer 节点起点（`> > [!tip]` 的第二个 `>`），内层标题行会逃出内层容器；对齐到标题行行首后嵌套成立。
 2. **rank 语义**：数值小者在内层（0-100）。外层 callout 50 / 二层 40 / 三层 30 的方案下三层嵌套 DOM 正确。
 3. **wrapper 边界空间入 heightmap 记账，但 margin 不入**：`measureVisibleLineHeights` 把 wrapper 盒内边界空间（padding+border）计入 `spaceAbove`（`index.js` 3324-3360）；margin 在 wrapper rect 之外，完全不进记账。
-4. **Lezer 嵌套 Blockquote 的 `node.to` 吃掉外层尾行**（既有缺陷根源实证）：`> > [!tip]` 内层节点的 `to` 覆盖到后续 `> 外层尾部` 行（树转储：内层 fromLine 3 / toLine 5）。生产 `data-callout`「内层胜出」缺陷（V01 §4.1）即源于此——不是行类写入逻辑的错，是区间事实源本身偏大。
+4. **嵌套 Blockquote 的 `node.to` 覆盖外层尾行是 CommonMark 懒延续，不是 Lezer 缺陷（2026-10-31 勘误）**：`> > [!tip]` 内层节点的 `to` 覆盖到后续 `> 外层尾部` 行——两端口径一致：`test/unit/calloutParity.test.ts` F17/F38/F44 用 markdown-it token map 对拍钉住同一区间（`> 外层正文` 是中/内层的 lazy 续行，双端一致；T01 的 syntax-parity.json F17 同型）。机制：带较少 `>` 的行剥去外层标记后无任何块标记，可懒延续内层末段（懒延续可穿透嵌套引用），Reading 侧同渲染在内层。**原判撤回**：「Lezer 缺陷」「`data-callout` 内层胜出是缺陷」均不成立；V01 §4.1 的真实遗留诉求是分层样式可达性（`data-callout-lN` 类提案，见 §5.6），归样式契约票，不是区间缺陷。
 
 ## 3. 分阶段证据
 
 ### S1：wrapper 承载真实 callout 行（结构 / 嵌套 / 落点）
 
-- **真实嵌套容器达成**：note 盒（x70-696）内含 tip 盒（x87-681），内层标题行就位内层盒、外层尾部回外层盒；兄弟 callout 与「仅标题」callout 各自成盒；空行留在盒外。这是 T01 三条路线（逐行装饰 / 手工重挂 / 整块替换）都未达成的形态。
+- **真实嵌套容器达成**：note 盒（x70-696）内含 tip 盒（x87-681），内层标题行就位内层盒、外层尾部回外层盒（勘误：S1 夹具区间用深度扫描收尾才把外层尾部截回外层；生产按解析器区间该行属内层懒延续，见 §2.4/§5.2 勘误）；兄弟 callout 与「仅标题」callout 各自成盒；空行留在盒外。这是 T01 三条路线（逐行装饰 / 手工重挂 / 整块替换）都未达成的形态。
 - **短文档点击**：外层标题行 20/20 精确；末行下方空白点击（min-height 区）5/5 落文档尾行。
 - **热样式**：wrapper padding 10→26px 后 20 次点击仍全准（样式热更新后重测链路成立）。
 - **键入**：内层正文行真实键入后文字仍在内层 wrapper、行数不变。
@@ -76,7 +76,7 @@
 ## 5. 实施前置条件清单
 
 1. **wrapper 禁垂直 margin**（S1b/S1c 责任钉死的直接后果）；间距用 padding 表达。
-2. **wrapper 区间行对齐派生，且不能直接用 Lezer `node.to`**：需按「标题行引用深度向下扫描」或等价口径收尾（S1 修正后嵌套正确；同时修复 `data-callout` 内层胜出的既有缺陷——V01 的 `data-callout-lN` 提案与本修正互补）。引用深度扫描的已知边界：懒延续行（无 `>` 的引用续行）深度为 0，会提前截断——生产树区间不受此影响，两者需组合裁定。
+2. **wrapper 区间直接消费解析器节点区间，两端行对齐（2026-10-31 勘误：撤销原「引用深度向下扫描」方案）**：from 对齐标题行行首（S1 实证——内层 `node.from` 落在第二个 `>` 上，直接使用会使内层标题行逃出内层盒）、to 取节点尾行行尾；懒延续行（含带较少 `>` 前缀的外层行与无前缀行）留在内层容器，与 Reading 双端一致（calloutParity F17/F38/F44）。深度扫描方案否决：它把懒延续行截到外层，与 Reading 分叉。列表内 callout（Blockquote 位于 ListItem 容器内）v1 不接 wrapper、维持行级形态，边界在实施票登记。
 3. **扫描器前缀剥离**（本轮补丁形态可作蓝本）：识别用剥前缀行，from/to 保持全文坐标；`code`/`tex` 内容同步剥前缀（KaTeX 干净输入已验证）；增量重建跨窗口一致性需按 P1 矩阵验证。
 4. **liveMath `$$` 标记隐藏锚点适配前缀**（源文泄漏修复）。
 5. **代码卡 token 映射改逐行前缀感知**。
@@ -98,4 +98,4 @@
 - 截图：`s1-live.png`（嵌套容器）、`s2-fence-wrap.png`（边缘分裂 + 缓解）、`s3-baseline.png`（现状）/ `s3-patched-raw.png` / `s3-patched-seam.png`（完整链路）、`debug-s3.png`
 - 源码锚点：`@codemirror/view` 6.43.13 `index.js` 1903-1929（blockTiles）、1974-1979（BlockWrapperTile）、2449-2483（updateBlockWrappers/getBlockPos）、3324-3360（measureVisibleLineHeights 记账）、3451（facet 消费）；`index.d.ts` 358-395（BlockWrapperSpec）、1323-1329（facet）
 - API 版本事实：锁定版 `Range` 无静态 `of`，工厂为 `RangeValue.range(from, to)`；`coordsAtPos` 返回 `{left,right,top,bottom}` 纯对象（无 `width`）
-- Lezer 树转储：嵌套 Blockquote `toLine:5` 吃外层尾行（S1 文档，全量解析）
+- Lezer 树转储：嵌套 Blockquote `toLine:5` 覆盖外层尾行（S1 文档，全量解析；勘误后定性为懒延续，双端一致证据 = `test/unit/calloutParity.test.ts` F17/F38/F44 对拍夹具）
