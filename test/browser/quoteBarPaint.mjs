@@ -143,10 +143,18 @@ try {
     await selectionPage.mouse.down()
     await selectionPage.mouse.move(end.x, end.y, { steps: 10 })
     await selectionPage.mouse.up()
-    assert.deepEqual(await selectionPage.evaluate(() => {
+    // A86 选区覆盖显形（2026-10-31）伴生：quote-list 的 from 在前缀之后，
+    // 拖选中 QuoteMark 显形把正文右移一个前缀宽（探针实测 14px = 2 字符
+    // 位），终点像素取自显形前布局故落在 to-2；quote 场景 from 贴
+    // QuoteMark 右端、拖选起始即显形，布局不变无偏移。终点改覆盖语义
+    // （同 calloutPaint/calloutTypes 先例），起点维持精确命中。
+    const sel = await selectionPage.evaluate(() => {
       const range = window.controller.getView().state.selection.main
       return { from: range.from, to: range.to }
-    }), { from, to }, `${name} 拖选必须真正形成正文选区`)
+    })
+    assert.equal(sel.from, from, `${name} 拖选起点应精确命中`)
+    assert.ok(sel.to >= to - 2 && sel.to <= to,
+      `${name} 拖选终点应覆盖源区间（显形伴生 ≤2）: ${JSON.stringify(sel)} vs ${from}-${to}`)
     await selectionPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     const snapshot = artifactPath(root, `screenshots/selection-${name}-${theme}.png`)
     await mkdir(path.dirname(snapshot), { recursive: true })
