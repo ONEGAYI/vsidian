@@ -34,6 +34,8 @@ const DOC = [
   '> [!tip] 伪标记字面',
   '> ```',
   '',
+  '    缩进代码块行',
+  '',
   '结尾段落。',
 ].join('\n')
 
@@ -176,7 +178,16 @@ try {
     return { shadow: s.boxShadow, bg: s.backgroundColor }
   })
   assert.ok(inlineCode, 'callout 内行内代码 span 应存在')
-  assert.match(inlineCode.shadow, /rgba?\([^)]+\)\s+0px\s+0px\s+0px\s+1px/, `行内代码 1px inset 边线在场: ${inlineCode.shadow}`)
+  // 边线可见度（A87 二轮）：0.4 透明灰叠 14% 灰底形同虚设——默认链改
+  // 主题边框色（--vscode-editorWidget-border 实色；测试环境无主题变量
+  // 落 fallback 0.6）。钉住 alpha ≥ 0.6（rgb() 无 alpha 段按 1）
+  const inlineEdge = /rgba?\(([^)]+)\)\s+0px\s+0px\s+0px\s+1px/.exec(inlineCode.shadow)?.[1] ?? ''
+  const inlineAlpha = inlineEdge.startsWith('#') || inlineEdge.startsWith('rgb(')
+    ? 1
+    : Number.parseFloat(inlineEdge.split(',')[3] ?? '1')
+  assert.ok(inlineEdge !== '', `行内代码 1px inset 边线在场: ${inlineCode.shadow}`)
+  assert.ok(Number.isFinite(inlineAlpha) && inlineAlpha >= 0.6,
+    `行内代码边线须为可见实色（alpha ≥ 0.6，主题边框色）: ${inlineCode.shadow}`)
   assert.notEqual(inlineCode.bg, 'rgba(0, 0, 0, 0)', `行内代码底色维持: ${inlineCode.bg}`)
 
   // ---- 明暗主题绘制层（live）----
@@ -242,7 +253,23 @@ try {
     return el ? { shadow: getComputedStyle(el).boxShadow, inPre: !!el.closest('pre') } : null
   })
   assert.ok(readingCode, '阅读侧行内代码 code 应渲染')
-  assert.match(readingCode.shadow, /rgba?\([^)]+\)\s+0px\s+0px\s+0px\s+1px/, `阅读侧行内代码 1px 边线在场: ${readingCode.shadow}`)
+  const readingEdge = /rgba?\(([^)]+)\)\s+0px\s+0px\s+0px\s+1px/.exec(readingCode.shadow)?.[1] ?? ''
+  assert.ok(readingEdge !== '', `阅读侧行内代码 1px 边线在场: ${readingCode.shadow}`)
+  const readingAlpha = readingEdge.startsWith('#') || readingEdge.startsWith('rgb(')
+    ? 1
+    : Number.parseFloat(readingEdge.split(',')[3] ?? '1')
+  assert.ok(Number.isFinite(readingAlpha) && readingAlpha >= 0.6,
+    `阅读侧行内代码边线须为可见实色（alpha ≥ 0.6）: ${readingCode.shadow}`)
+  // PR678-004 负向：块级代码（fenced 与缩进的 pre>code）不吃行内边线
+  const blockCodeEdges = await page.evaluate(() =>
+    [...document.querySelectorAll('.vsidian-view-reading .vsidian-reading-block pre code')].map((el) => ({
+      shadow: getComputedStyle(el).boxShadow,
+      text: (el.textContent ?? '').slice(0, 10),
+    })))
+  assert.ok(blockCodeEdges.length >= 2, `阅读态应有 fenced 与缩进两类块级 code: ${JSON.stringify(blockCodeEdges)}`)
+  for (const b of blockCodeEdges) {
+    assert.equal(b.shadow, 'none', `块级代码不吃行内边线（004）: ${JSON.stringify(b)}`)
+  }
   const reading = await page.evaluate(() => {
     const root = document.querySelector('.vsidian-view-reading .callout')
     if (!root) return null
