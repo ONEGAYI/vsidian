@@ -879,7 +879,17 @@ try {
   const ctrlClickRendered = async (p, locator) => {
     const box = await locator.boundingBox()
     assert.ok(box, '渲染链接应有布局盒')
-    await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { modifiers: ['Control'] })
+    const selection = await p.evaluate(() => window.readMenu().selection)
+    const gesture = p.evaluate(() => new Promise(resolve =>
+      document.addEventListener('mousedown', event => resolve({ button: event.button, ctrlKey: event.ctrlKey }),
+        { once: true, capture: true })))
+    await p.keyboard.down('Control')
+    try {
+      await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    } finally { await p.keyboard.up('Control') }
+    assert.deepEqual(await gesture, { button: 0, ctrlKey: true }, 'Ctrl+单击必须由浏览器真实修饰键驱动')
+    assert.deepEqual(await p.evaluate(() => window.readMenu().selection), selection,
+      'Ctrl+单击激活不得按普通单击改变正文选区')
   }
   const LINK_LINES = LINK_DOC_LINES
   const LINK_CASES = [

@@ -114,6 +114,16 @@ const failures = []
     const backIn = await read()
     assert.equal(backIn.head, source.indexOf('丁') + 1,
       `下方空行行首 Left 应直达末格内容尾「丁」后: ${JSON.stringify(backIn)}`)
+    // #552/#666：Home 的浏览器默认动作与 keyup 之间发生度量重配时，
+    // 仍须保留原生落点；否则下一次 Left 只退到格首，边界类不会出现。
+    await cell0.click()
+    await page.keyboard.down('Home')
+    await page.evaluate(() => window.refreshTableLayout())
+    await page.keyboard.up('Home')
+    await page.keyboard.press('ArrowLeft')
+    assert.ok(await page.locator('.cm-editor').evaluate(el => el.classList.contains('vsidian-table-boundary-active')),
+      'Home 期间度量重配后，Left 仍须进入引用表格前边沿')
+    assert.equal((await read()).text, source, '引用表格导航及度量重配不得写回源文')
     assert.deepEqual(errors, [], `导航场景页面异常: ${JSON.stringify(errors)}`)
     passed++
     console.log('[引用表格绘制][PASS] 边界导航与拖选蒙版（二轮）')

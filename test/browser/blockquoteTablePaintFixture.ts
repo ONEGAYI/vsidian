@@ -7,7 +7,7 @@ import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { getTableOptimizeStats } from '../../src/webview/tableHeightPlan'
-import { tableMetricsFacet } from '../../src/webview/tableMetrics'
+import { metricsCompartment, tableMetricsFacet } from '../../src/webview/tableMetrics'
 import '../../src/webview/main.css'
 
 const controller = new WebviewSyncController({
@@ -52,6 +52,13 @@ tableMetricsReady() {
   const view = controller.getView()
   const metrics = view?.state.facet(tableMetricsFacet)
   return { availablePx: metrics?.availablePx ?? 0, contentPx: metrics?.contentPx ?? 0 }
+},
+refreshTableLayout() {
+  const view = controller.getView()!
+  const metrics = view.state.facet(tableMetricsFacet)!
+  view.dispatch({ effects: metricsCompartment.reconfigure(tableMetricsFacet.of({
+    ...metrics, contentPx: metrics.contentPx + 1,
+  })) })
 },
 moveCaret(pos: number) {
   const view = controller.getView()
