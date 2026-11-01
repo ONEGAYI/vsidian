@@ -164,4 +164,39 @@ describe('双视图语义一致性：阅读渲染与 shared/math.ts 对拍', () 
     // 剥离后的 tex 进入渲染输入：annotation 为 1+1（不含反引号）
     expect(para.querySelector('annotation')?.textContent).toBe('1+1')
   })
+
+  it('引用内块公式：两侧同例命中集一致（#674 T06 对拍）', async () => {
+    // 引用内 $$ 行（markdown-it-katex 在 blockquote 内命中 math_block；
+    // live 侧剥前缀识别）与容器断开形态（插件 src 级贪婪跨容器吃到闭合——
+    // live 同口径延续）两侧数量一致；行内路径两侧本就同扫描
+    const { scanMathRanges } = await import('../../src/shared/math')
+    const samples = [
+      '> $$\n> x = a^2\n> $$\n',
+      '> > $$\n> > x\n> > $$\n',
+      '> $$x^2$$\n',
+      '> $$\nx\n> $$\n', // 容器断开：两侧都延续到闭合
+      '> a $x$ b\n',
+    ]
+    for (const text of samples) {
+      const occurrences = scanMathRanges(text.split('\n'), 0)
+      const els = renderBlocks(text)
+      const katexCount = els.reduce(
+        (n, el) => n + el.querySelectorAll('.katex:not(.katex-error)').length,
+        0,
+      )
+      expect(katexCount, JSON.stringify(text)).toBe(occurrences.length)
+    }
+  })
+
+  it('引用内空内容块 $$ $$：阅读渲染空公式、live 降级——既有双端差异随前缀平移（#674 T06 如实钉住）', async () => {
+    // 顶层 $$  $$ / $$$$ 的既有差异（live B-4 决策不产出、插件渲染空内容）
+    // 在引用内同形态重现：live 显源码、阅读渲染空 KaTeX，降级方向安全
+    const { scanMathRanges } = await import('../../src/shared/math')
+    for (const text of ['> $$  $$\n', '> $$$$\n']) {
+      expect(scanMathRanges(text.split('\n'), 0), text).toHaveLength(0)
+      const els = renderBlocks(text)
+      const katexCount = els.reduce((n, el) => n + el.querySelectorAll('.katex').length, 0)
+      expect(katexCount, text).toBe(1)
+    }
+  })
 })

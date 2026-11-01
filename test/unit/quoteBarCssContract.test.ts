@@ -24,14 +24,14 @@ describe('引用块提示竖条变量族（#143）', () => {
   })
 
   it('live 引用行竖条引用变量，且背景底维持 VSCode 灰调（不新增紫色背景）', () => {
-    const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line')
+    const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line)')
     expect(live).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--vsidian-quote-bar-color\)/)
     expect(live).toMatch(/background-color:\s*var\(--vscode-textBlockQuote-background/)
     expect(live).not.toMatch(/--vsidian-quote-bar-color:\s*[^)]*background/)
   })
 
   it('live 引用行有左内边距（QuoteMark 隐藏后文字不与竖条重合，#143 验收修复）', () => {
-    const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line')
+    const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line)')
     expect(live).toMatch(/padding-left:\s*calc\(0\.9em \+ 3px\)/)
   })
 
@@ -47,7 +47,7 @@ describe('引用块提示竖条变量族（#143）', () => {
   })
 
   it('旧灰调竖条消费已退场：两处规则不再引用 --vscode-textBlockQuote-border', () => {
-    const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line')
+    const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line)')
     const reading = cssRule(css, '#app .vsidian-view-reading .vsidian-reading-block blockquote')
     expect(live).not.toMatch(/textBlockQuote-border/)
     expect(reading).not.toMatch(/textBlockQuote-border/)

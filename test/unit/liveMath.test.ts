@@ -149,6 +149,53 @@ describe('live 公式装饰：显形与渲染切换', () => {
     const text = '$$\nx\n```\ncode\n```\ny\n$$'
     expect(buildBlocks(text, 0)).toHaveLength(0)
   })
+
+  // #675（T07）：引用内公式锚定矩阵——「$$ 标记隐藏/替换装饰」的锚点
+  // 是全文坐标（扫描产物 T06 起前缀折算），期望值按源文手算（非实现回算）：
+  // replace/mark 从开行 `$$` 起、到闭行 `$$` 尾止，不吞开行 `>` 前缀
+  //（QuoteMark 隐藏装饰的职责区）；行内路径一行不动（原行原坐标）。
+  it('引用内多行块：replace 区间从开行 $$ 到闭行 $$ 尾（tex 剥前缀），不吞开行 > 前缀', () => {
+    const text = '> $$\n> x^2\n> $$'
+    const rendered = buildBlocks(text, 0)
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0]!.from).toBe(2) // 开行 `$$`（`> ` 之后）
+    expect(rendered[0]!.to).toBe(15) // 闭行 `$$` 尾后（含中间行 `> ` 前缀一并被 replace 覆盖）
+    expect(rendered[0]!.widget).toBeInstanceOf(LiveMathWidget)
+    // tex 含开行余文与闭行前段——开行 `$$` 后余空、闭行 `$$` 前余空，
+    // 即首尾空段以 \n 相接（与 @vscode/markdown-it-katex 的 content 语义
+    // 同源；KaTeX 对首尾空白不敏感，渲染层自理）
+    expect(rendered[0]!.widget!.tex).toBe('\nx^2\n')
+    expect(rendered[0]!.widget!.displayMode).toBe(true)
+  })
+
+  it('引用内多行块：光标进入 → 源码态 mark 同锚定（$$ 到 $$，前缀在外）', () => {
+    const text = '> $$\n> x^2\n> $$'
+    const editing = buildBlocks(text, 5)
+    expect(editing).toHaveLength(1)
+    expect(editing[0]!.cls).toBe(MATH_CLASS_NAMES.mathSource)
+    expect(editing[0]!.from).toBe(2)
+    expect(editing[0]!.to).toBe(15)
+  })
+
+  it('引用行内公式：原行原坐标（前缀是普通字符，$ 折算即行内位置）', () => {
+    const text = '> 价格 $x^2$ 元'
+    const items = collect(build(text, 0))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.from).toBe(5)
+    expect(items[0]!.to).toBe(10)
+    expect(items[0]!.widget!.tex).toBe('x^2')
+    expect(items[0]!.widget!.displayMode).toBe(false)
+  })
+
+  it('引用内单行块（段内 $$…$$）：行内通道折算前缀后锚定', () => {
+    const text = '> $$a+b$$ 尾'
+    const items = collect(build(text, 0))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.from).toBe(2)
+    expect(items[0]!.to).toBe(9)
+    expect(items[0]!.widget!.tex).toBe('a+b')
+    expect(items[0]!.widget!.displayMode).toBe(true)
+  })
 })
 
 describe('跨行块表：StateField 增量维护', () => {
@@ -223,6 +270,36 @@ describe('跨行块表：StateField 增量维护', () => {
     const incremental = [...state.field(mathBlocksField)]
     const full = [...EditorState.create({ doc: state.doc, extensions: [mathBlocksField] }).field(mathBlocksField)]
     expect(incremental).toEqual(full)
+  })
+
+  it('引用内块的固定编辑序列：增量重建与全量扫描逐字段一致（#674 T06）', () => {
+    // 覆盖：前缀深度变化、容器断开（删前缀——块跨容器延续不终止）、闭合
+    // 定界符删除降级、行内路径共存；每步与全量对拍（含 tex 剥前缀与 lineMap）
+    let state = EditorState.create({
+      doc: ['> [!note] t', '> $$', '> x = a', '> $$', '尾部'].join('\n'),
+      extensions: [mathBlocksField],
+    })
+    const fullScan = (s: typeof state) =>
+      [...EditorState.create({ doc: s.doc, extensions: [mathBlocksField] }).field(mathBlocksField)]
+    const doc = () => state.doc.toString()
+    const blocks = () => [...state.field(mathBlocksField)]
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()[0]!.tex).toBe('\nx = a\n')
+    // 内容行前缀加深（剥开启层后剩余 > 进 tex）
+    state = state.update({ changes: { from: doc().indexOf('> x = a') + 2, insert: '> ' } }).state
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()[0]!.tex).toBe('\n> x = a\n')
+    // 容器断开：内容行删前缀（块延续，断开行原样进 tex——插件贪婪口径）
+    state = state.update({ changes: { from: doc().indexOf('> > x = a'), to: doc().indexOf('> > x = a') + 4, insert: '' } }).state
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()[0]!.tex).toBe('\nx = a\n')
+    // 闭合定界符删除：块降级（表移除）
+    state = state.update({ changes: { from: doc().lastIndexOf('$$'), to: doc().lastIndexOf('$$') + 2, insert: 'zz' } }).state
+    expect(blocks()).toEqual(fullScan(state))
+    expect(blocks()).toHaveLength(0)
+    // 行内路径共存：引用行行内公式不进块表（行扫描负责）
+    state = state.update({ changes: { from: doc().indexOf('尾部'), insert: '$y$ ' } }).state
+    expect(blocks()).toEqual(fullScan(state))
   })
 
   it('未闭合 $$ 长尾的延伸熔断：窗口内开块后延伸有界，行为等价于未闭合降级（C3）', () => {

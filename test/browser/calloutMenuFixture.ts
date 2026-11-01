@@ -121,10 +121,10 @@ function rowPaint(command: string) {
 
 /** 正文 live 行绘制（对拍锚点：标题行携带 callout/quiet 行级类） */
 function livePaint(type: string) {
-  const line = [...document.querySelectorAll<HTMLElement>('.cm-line.callout')]
-    .find((el) => el.getAttribute('data-callout') === type)
+  const line = [...document.querySelectorAll<HTMLElement>('.cm-line.callout-title')]
+    .find((el) => el.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') === type)
   if (!line) return null
-  const s = getComputedStyle(line)
+  const s = getComputedStyle(line.closest<HTMLElement>('.vsidian-callout-wrap')!)
   const icon = line.querySelector<HTMLElement>('.callout-icon')
   const is = icon ? getComputedStyle(icon) : null
   return {
@@ -146,8 +146,9 @@ function readingPaint(type: string) {
 
 /** 普通引用行绘制（无 Callout 行的呈现对拍锚点） */
 function quotePaint() {
+  // T05：callout 行不再挂行级 .callout（迁 wrapper）——排除 wrapper 内的 quiet 行
   const line = [...document.querySelectorAll<HTMLElement>('.cm-line.vsidian-quote-line')]
-    .find((el) => !el.classList.contains('callout'))
+    .find((el) => !el.classList.contains('vsidian-callout-quiet'))
   if (!line) return null
   const s = getComputedStyle(line)
   return {

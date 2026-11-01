@@ -27,6 +27,7 @@ import {
 } from '../../src/webview/liveCodeCard'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { mermaidFencesField } from '../../src/webview/liveMermaid'
+import { migrateSelectionForCodeCardFold } from '../../src/webview/codeCardState'
 import { resolveCodeLanguage, codeInfoFirstWord } from '../../src/shared/codeLangs'
 import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
 import { DIALECT_CODE_FIXTURES } from '../fixtures/codeDialects'
@@ -517,6 +518,153 @@ describe('折叠（#82）', () => {
     expect(items.filter((i) => i.hide)).toHaveLength(2) // 回到围栏行清空
   })
 
+  describe('折叠旁落光标（2026-11-01 A87 三轮验收）：光标在卡内点击折叠', () => {
+    const FENCE_TO = DOC.lastIndexOf('```') + 3
+
+    it('纯函数：光标在块内 → 迁块上一行行尾（紧贴卡头、隐藏区间外）', () => {
+      const migrated = migrateSelectionForCodeCardFold(
+        EditorSelection.single(DOC.indexOf('let')), FENCE_FROM, FENCE_TO, DOC.length)
+      expect(migrated).not.toBeNull()
+      expect(migrated!.ranges[0]!.head).toBe(FENCE_FROM - 1)
+    })
+
+    it('纯函数：光标在块外 → null（旁落不越权）', () => {
+      expect(migrateSelectionForCodeCardFold(
+        EditorSelection.single(0), FENCE_FROM, FENCE_TO, DOC.length)).toBeNull()
+    })
+
+    it('纯函数：非空选区跨块该 range 收拢到落点，块外 range 原样保持', () => {
+      const sel = EditorSelection.create([
+        EditorSelection.range(0, 3),
+        EditorSelection.range(DOC.indexOf('let'), DOC.indexOf('const')),
+      ])
+      const migrated = migrateSelectionForCodeCardFold(sel, FENCE_FROM, FENCE_TO, DOC.length)!
+      expect(migrated.ranges[0]!.from).toBe(0)
+      expect(migrated.ranges[0]!.to).toBe(3)
+      expect(migrated.ranges[1]!.empty).toBe(true)
+      expect(migrated.ranges[1]!.head).toBe(FENCE_FROM - 1)
+    })
+
+    it('纯函数：文档首行围栏（from=0）→ 落块后（闭围栏行行尾后）', () => {
+      const migrated = migrateSelectionForCodeCardFold(EditorSelection.single(4), 0, 7, 20)!
+      expect(migrated.ranges[0]!.head).toBe(8)
+    })
+
+    it('事务同携折叠与旁落：收起态真实呈现（不再被编辑态压住），光标停块外', () => {
+      let state = EditorState.create({
+        doc: DOC,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(DOC.indexOf('let a')),
+      })
+      const migrated = migrateSelectionForCodeCardFold(state.selection, FENCE_FROM, FENCE_TO, DOC.length)
+      expect(migrated).not.toBeNull()
+      state = state.update({
+        effects: codeCardFoldToggle.of(FENCE_FROM),
+        selection: migrated!,
+      }).state
+      const items = itemsOf(state.field(codeCardDecorations))
+      expect(items.filter((i) => i.hide)).toHaveLength(1)
+      expect(items.find((i) => i.widget)!.widget!.folded).toBe(true)
+      expect(state.selection.main.head).toBe(FENCE_FROM - 1)
+    })
+
+    it('PR678-005：整篇围栏无尾换行（块外无合法位置）——光标块尾边界点击折叠照常收起', () => {
+      const text = '```js\nx()\n```' // length 13，围栏 [0, 13]，无块外位置
+      let state = EditorState.create({
+        doc: text,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(text.indexOf('x()') + 3), // 光标在 x() 后（块内）
+      })
+      const migrated = migrateSelectionForCodeCardFold(state.selection, 0, 13, text.length)
+      expect(migrated).not.toBeNull() // 旁落到 min(14,13)=13（块尾边界）
+      state = state.update({
+        effects: codeCardFoldToggle.of(0),
+        selection: migrated!,
+      }).state
+      const items = itemsOf(state.field(codeCardDecorations))
+      expect(items.filter((i) => i.hide)).toHaveLength(1)
+      expect(items.find((i) => i.widget)!.widget!.folded).toBe(true)
+    })
+
+    it('PR678-005 对照：同文档补尾换行（块后有位置）——行为不回归', () => {
+      const text = '```js\nx()\n```\n'
+      let state = EditorState.create({
+        doc: text,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(text.indexOf('x()') + 3),
+      })
+      const migrated = migrateSelectionForCodeCardFold(state.selection, 0, 13, text.length)
+      expect(migrated!.ranges[0]!.head).toBe(14) // 块后（换行处）
+      state = state.update({ effects: codeCardFoldToggle.of(0), selection: migrated! }).state
+      expect(itemsOf(state.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(true)
+    })
+
+    it('PR678-005 打字安全：收起态光标在块尾边界键入——新字符落在收起区间外可见，收起保持', () => {
+      const text = '```js\nx()\n```'
+      let state = EditorState.create({
+        doc: text,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(13), // 块尾边界（文档末）
+      })
+      // 光标在块尾边界本身：不算编辑抑制（物理在收起区间右界外）——直接折叠即收起
+      state = state.update({ effects: codeCardFoldToggle.of(0) }).state
+      expect(itemsOf(state.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(true)
+      // 键入发生在边界外（回车起行——直接贴闭围栏行尾打字母会破坏闭合
+      // 围栏语法、卡正确退场，那是源文语义而非隐藏输入）：新行内容在收
+      // 起区间 [0,13) 之外可见，围栏仍闭合、收起保持
+      state = state.update({ changes: { from: 13, insert: '\nnew' }, selection: { anchor: 17 } }).state
+      const items = itemsOf(state.field(codeCardDecorations))
+      expect(items.find((i) => i.widget)!.widget!.folded).toBe(true)
+      // 新行内容从 pos 14 起（hide 收起区间 [0,14) 只含到闭围栏行尾换行）
+      expect(items.filter((i) => i.hide).some((i) => i.from <= 14 && i.to > 14)).toBe(false)
+    })
+
+    it('PR678-005 五轮（复审转移）：折叠后选中最后闭围栏字符（含 EOF Shift+Left 形态）→ 临时展开，源码选区不被收起遮挡', () => {
+      const text = '```js\nx()\n```'
+      const foldThenSelect = (selection: EditorSelection) => {
+        let state = EditorState.create({
+          doc: text,
+          extensions: [
+            liveDecorationsField, mermaidFencesField,
+            codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+            codeCardFoldField, codeCardDecorations,
+          ],
+          selection: EditorSelection.single(8),
+        })
+        state = state.update({ effects: codeCardFoldToggle.of(0) }).state
+        return state.update({ selection }).state
+      }
+      // 正向选区 [12,13]：选中最后一个闭围栏反引号
+      const forward = foldThenSelect(EditorSelection.single(12, 13))
+      expect(itemsOf(forward.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(false)
+      // 反向选区 [13,12]（EOF 处 Shift+Left）
+      const backward = foldThenSelect(EditorSelection.single(13, 12))
+      expect(itemsOf(backward.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(false)
+      // 多光标：块外空光标 + 块内空光标 → 展开（块内光标需源码可见）
+      const multi = foldThenSelect(EditorSelection.create([EditorSelection.cursor(1), EditorSelection.cursor(13)]))
+      expect(itemsOf(multi.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(false)
+      // 空光标恰在块尾边界（EOF）单独在场时：收起保持（005 主例不回归）
+      const eofOnly = foldThenSelect(EditorSelection.single(13))
+      expect(itemsOf(eofOnly.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(true)
+    })
+  })
+
   it('折叠随编辑位置映射：块前插入一行后折叠仍生效', () => {
     let state = EditorState.create({
       doc: DOC,
@@ -700,6 +848,64 @@ describe('语法高亮 mark（#83）', () => {
   it('折叠块不着色（整块不可见）', () => {
     const { items } = decosFolded(DOC, 0, FENCE_FROM)
     expect(items.filter((i) => i.cls?.includes('tok-'))).toHaveLength(0)
+  })
+})
+
+// #675（T07）：引用内代码卡的 token 逐行前缀感知映射。断言口径是行为级
+// 对位——每个 tok mark 覆盖的**原文片段**必须与该 token 的应然文本一致
+// （直加映射 openLine.to + 1 + tokenOffset 的错位形态：token 右移每行
+// 前缀长、且逐行累积——探针报告 §4.2 实证）。期望值来自已知正确的
+// token 文本（keyword='const'、number='1'/'2'），非实现回算。
+describe('引用内代码卡 token 逐行前缀映射（#675 T07）', () => {
+  /** tok mark → { cls, text }（text = mark 区间覆盖的原文片段） */
+  const tokenSlices = (text: string): Array<{ cls: string; text: string }> =>
+    decos(text, 0)
+      .filter((i) => typeof i.cls === 'string' && i.cls.includes('tok-'))
+      .map((i) => ({ cls: i.cls!, text: text.slice(i.from, i.to) }))
+
+  it('一层 `> ` 前缀：两行的 keyword/number 都对准原文（不右移、不累积）', () => {
+    const doc = ['> [!note] t', '> ```js', '> const a = 1', '> const bb = 2', '> ```'].join('\n')
+    const toks = tokenSlices(doc)
+    const keywords = toks.filter((t) => t.cls.includes('tok-keyword'))
+    expect(keywords.map((t) => t.text)).toEqual(['const', 'const'])
+    const numbers = toks.filter((t) => t.cls.includes('tok-number'))
+    expect(numbers.map((t) => t.text).sort()).toEqual(['1', '2'])
+  })
+
+  it('不定长前缀：`> > `（两层）与 `>`（无空格）各自对位', () => {
+    const nested = ['> > ```js', '> > const a = 1', '> > ```'].join('\n')
+    const toksN = tokenSlices(nested)
+    expect(toksN.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const'])
+    expect(toksN.filter((t) => t.cls.includes('tok-number')).map((t) => t.text)).toEqual(['1'])
+
+    const tight = '>```js\n>const a = 1\n>```'
+    const toksT = tokenSlices(tight)
+    expect(toksT.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const'])
+    expect(toksT.filter((t) => t.cls.includes('tok-number')).map((t) => t.text)).toEqual(['1'])
+  })
+
+  it('内容行首缩进折算：剥前缀后仍有缩进时 token 对准缩进后的正文', () => {
+    // 缩进属于 code 内容（FenceSpan.code 保留），lineMap.prefixLen 只含
+    // 引用前缀——token 应越过 `>   ` 落到 const
+    const doc = ['> ```js', '>   const a = 1', '> ```'].join('\n')
+    const toks = tokenSlices(doc)
+    expect(toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const'])
+    expect(toks.filter((t) => t.cls.includes('tok-number')).map((t) => t.text)).toEqual(['1'])
+  })
+
+  it('顶层围栏对照：既有直加语义不回归（每行 token 仍对准原文）', () => {
+    const doc = ['```js', 'const a = 1', 'const bb = 2', '```'].join('\n')
+    const toks = tokenSlices(doc)
+    expect(toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const', 'const'])
+    expect(toks.filter((t) => t.cls.includes('tok-number')).map((t) => t.text).sort()).toEqual(['1', '2'])
+  })
+
+  it('引用内空内容行不产生错位段（空行后的行 token 仍对准）', () => {
+    // code 含空行（''）：lineMap 有零长段，折算不得落到空段或后移
+    const doc = ['> ```js', '> const a = 1', '>', '> const bb = 2', '> ```'].join('\n')
+    const toks = tokenSlices(doc)
+    expect(toks.filter((t) => t.cls.includes('tok-keyword')).map((t) => t.text)).toEqual(['const', 'const'])
+    expect(toks.filter((t) => t.cls.includes('tok-number')).map((t) => t.text).sort()).toEqual(['1', '2'])
   })
 })
 

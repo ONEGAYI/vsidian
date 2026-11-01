@@ -92,12 +92,12 @@ const raf = (page) => page.evaluate(() =>
 /** live 行级观测：type → { row img, icon bgc, icon mask, 行 quiet } */
 const livePaint = (page) => page.evaluate(() => {
   const out = {}
-  for (const line of document.querySelectorAll('.cm-line[data-callout]')) {
-    const type = line.getAttribute('data-callout')
-    const titleCls = line.classList.contains('callout-title')
-    if (!titleCls) continue // 只取标题行（图标所在行；首行即标题行）
+  for (const line of document.querySelectorAll('.cm-line.callout-title')) {
+    // T05：类型标识与容器底色在 wrapper（行级让位）
+    const type = line.closest('.vsidian-callout-wrap')?.getAttribute('data-callout')
+    if (!type) continue
     const icon = line.querySelector('.callout-icon')
-    const s = getComputedStyle(line)
+    const s = getComputedStyle(line.closest('.vsidian-callout-wrap'))
     out[type] = {
       img: s.backgroundImage,
       quiet: line.classList.contains('vsidian-callout-quiet'),
@@ -158,12 +158,12 @@ try {
   await page.evaluate(() => window.locateCallout(window.controller.getView().state.doc.length))
   const nested = await page.evaluate(() =>
     [...document.querySelectorAll('.cm-line')].map((el) => ({
-      callout: el.getAttribute('data-callout'),
+      callout: el.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') ?? null,
       cls: el.className,
       text: el.textContent ?? '',
     })))
   const inner = nested.find((l) => l.text.includes('内层正文'))
-  assert.equal(inner.callout, 'warning', '嵌套正文行 data-callout 取最内层')
+  assert.equal(inner.callout, 'warning', '嵌套正文行归最内层 wrapper（嵌套 DOM 承载最内层语义）')
   assert.ok(inner.cls.includes('callout-content'), '嵌套正文行应挂 callout-content')
   const midTitle = nested.find((l) => l.text.trim() === '中层')
   assert.ok(midTitle.cls.includes('callout-title') && midTitle.cls.includes('callout-content'),
@@ -208,10 +208,14 @@ try {
   await page.mouse.down()
   await page.mouse.move(end.x, end.y, { steps: 10 })
   await page.mouse.up()
-  assert.deepEqual(await page.evaluate(() => {
+  const sel = await page.evaluate(() => {
     const range = window.controller.getView().state.selection.main
     return { from: range.from, to: range.to }
-  }), { from, to }, '列表内 callout 拖选必须落在源区间')
+  })
+  // A86 选区覆盖显形（2026-10-31）伴生：拖选路径标记显形右移，释放
+  // 像素映射左偏 ≤1（详见 calloutPaint.mjs 同款注释）
+  assert.equal(sel.from, from, `拖选起点应精确: ${JSON.stringify(sel)}`)
+  assert.ok(sel.to >= to - 1 && sel.to <= to, `拖选终点覆盖源区间（显形伴生 ≤1）: ${JSON.stringify(sel)} vs ${from}-${to}`)
   // 标题源码可编辑：光标进标题行显形 [!info]
   await page.evaluate(() => window.locateCallout(
     window.controller.getView().state.doc.toString().indexOf('列表内标题') + 1))
@@ -226,7 +230,7 @@ try {
   await raf(page)
   const mixed = await page.evaluate(() =>
     [...document.querySelectorAll('.cm-line')].map((el) => ({
-      callout: el.getAttribute('data-callout'),
+      callout: el.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') ?? null,
       cls: el.className,
       text: el.textContent ?? '',
     })))
@@ -234,7 +238,7 @@ try {
   assert.ok(!malformed.cls.includes('callout'), '未成型标记不得挂 callout 类')
   assert.ok(mixed.find((l) => l.text.includes('代码内伪标记'))?.text.includes('[!tip]'), '代码内伪标记字面可见')
   const todoBody = mixed.find((l) => l.text.includes('表格与代码'))
-  assert.equal(todoBody.callout, 'todo', '含代码块容器 data-callout 取首段声明')
+  assert.equal(todoBody.callout, 'todo', '含代码块容器 wrapper 取首段声明（不误判围栏内标记）')
   // callout 内表格行网格共存（网格行类在 callout 行上叠加）
   // callout 内表格行网格共存（网格行类在 callout 行上叠加；管道符经
   // 表格网格装饰呈现，字面文本不含 | 1 | 2 |——按行类断言）
@@ -275,6 +279,87 @@ try {
     assert.ok(p.title.includes(type), `阅读侧 ${type} 标题应可见`)
   }
 
+  // ---- #671/T02：标题按类型着色（绘制层，非规则形态） ----
+  // 观察用户看到的东西：27 类型标题计算色各自等于该类型 --callout-color 的
+  // 解析结果，而不是 DOM 上有没有 color 声明。
+  const rgbOf = (hex) => {
+    const n = parseInt(hex.replace('#', ''), 16)
+    return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+  }
+  const readingTitlePaint = await page.evaluate(() => {
+    const out = {}
+    for (const rootEl of document.querySelectorAll('.vsidian-view-reading .callout')) {
+      const type = rootEl.getAttribute('data-callout')
+      const title = rootEl.querySelector('.callout-title')
+      const inner = rootEl.querySelector('.callout-title-inner')
+      out[type] = {
+        titleColor: title ? getComputedStyle(title).color : null,
+        innerColor: inner ? getComputedStyle(inner).color : null,
+      }
+    }
+    return out
+  })
+  for (const [type, [dark]] of Object.entries(TYPE_COLORS)) {
+    const p = readingTitlePaint[type]
+    assert.equal(p.titleColor, rgbOf(dark),
+      `阅读侧 ${type} 标题计算色应为类型色 ${dark}: ${p.titleColor}`)
+    // 内层保持 --callout-title-color=inherit → 继承标题层类型色
+    assert.equal(p.innerColor, rgbOf(dark),
+      `阅读侧 ${type} 标题内层应继承类型色: ${p.innerColor}`)
+  }
+  const distinctTitleColors = new Set(Object.values(readingTitlePaint).map((p) => p.titleColor))
+  assert.ok(distinctTitleColors.size >= 6,
+    `不同类型标题色应互不相同（至少 6 种），实际 ${distinctTitleColors.size} 种`)
+
+  // 用户片段覆盖 --callout-title-color：只有内层变、标题层不变（证明该变量
+  // 仍是内层覆盖点，语义未被改成类型色）
+  const titleColorOverride = await page.addStyleTag({ content:
+    ".vsidian-view-reading .callout[data-callout='note'] { --callout-title-color: #ff00ff; }" })
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  const overridden = await page.evaluate(() => {
+    const root = document.querySelector(".vsidian-view-reading .callout[data-callout='note']")
+    return {
+      titleColor: getComputedStyle(root.querySelector('.callout-title')).color,
+      innerColor: getComputedStyle(root.querySelector('.callout-title-inner')).color,
+    }
+  })
+  await titleColorOverride.evaluate((el) => el.remove())
+  assert.equal(overridden.innerColor, 'rgb(255, 0, 255)',
+    `--callout-title-color 覆盖应作用于内层: ${overridden.innerColor}`)
+  assert.equal(overridden.titleColor, rgbOf(TYPE_COLORS.note[0]),
+    `标题层仍是类型色（覆盖只作用于内层）: ${overridden.titleColor}`)
+
+  // Live 侧同一 data-callout 计算色与阅读侧一致
+  await page.evaluate((text) => window.initCallout(text), typesDoc)
+  await page.evaluate(() => window.setCalloutMode('live'))
+  await page.waitForSelector('.cm-line.callout-title')
+  const liveTitlePaint = await page.evaluate(() => {
+    const out = {}
+    for (const line of document.querySelectorAll('.cm-line.callout-title')) {
+      // T05：类型标识在 wrapper（标题行取所属 wrapper 的 data-callout）
+      const type = line.closest('.vsidian-callout-wrap')?.getAttribute('data-callout')
+      if (!type) continue
+      const inner = line.querySelector('.callout-title-inner')
+      out[type] = {
+        lineColor: getComputedStyle(line).color,
+        innerColor: inner ? getComputedStyle(inner).color : null,
+      }
+    }
+    return out
+  })
+  for (const [type, [dark]] of Object.entries(TYPE_COLORS)) {
+    const p = liveTitlePaint[type]
+    assert.ok(p, `live 侧 ${type} 标题行应在场`)
+    assert.equal(p.lineColor, rgbOf(dark), `live 侧 ${type} 标题行计算色应为 ${dark}: ${p.lineColor}`)
+    if (p.innerColor !== null) {
+      assert.equal(p.innerColor, rgbOf(dark), `live 侧 ${type} 标题内层应继承类型色: ${p.innerColor}`)
+    }
+  }
+
+  // 回到阅读模式（下方嵌套用例消费阅读侧 container 结构）
+  await page.evaluate(() => window.setCalloutMode('reading'))
+  await page.waitForSelector('.vsidian-view-reading .callout')
+
   // 嵌套阅读 + 富标题 + 普通引用
   await page.evaluate((text) => window.initCallout(text), [
     NESTED_DOC,
@@ -302,9 +387,12 @@ try {
   // ---- 模式往返：live 行级形态恢复 ----
   await page.evaluate(() => window.setCalloutMode('live'))
   await raf(page)
-  const backToLive = await page.evaluate(() =>
-    [...document.querySelectorAll('.cm-line[data-callout="warning"]')].map((e) => e.className))
-  assert.ok(backToLive.some((cls) => cls.includes('callout')), `模式往返后 live 形态应恢复: ${backToLive.join('|')}`)
+  const backToLive = await page.evaluate(() => ({
+    wrapCount: document.querySelectorAll('.vsidian-callout-wrap.callout').length,
+    titleCls: [...document.querySelectorAll('.cm-line.callout-title')].some((e) =>
+      e.closest('.vsidian-callout-wrap')?.getAttribute('data-callout') === 'warning'),
+  }))
+  assert.ok(backToLive.wrapCount > 0 && backToLive.titleCls, `模式往返后 live wrapper 形态应恢复: ${JSON.stringify(backToLive)}`)
 
   assert.deepEqual(errors, [], '页面不得有脚本错误')
   console.log('calloutTypes: 全部断言通过（27 类型 × 明暗 × 图标 × 嵌套/列表编辑 × malformed × 阅读侧）')

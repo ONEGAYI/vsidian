@@ -20,6 +20,15 @@
 //   `$$` 取行内最后一对，否则取 trim 后首对）。未闭合块不产出（稳定降级
 //   为源码）。
 //
+// 引用前缀剥离（#674 T06，块模式）：行首引用前缀（每层 `>` + 可选一个
+// 空格）剥除后做开启/闭合判定，`tex` 累积剥前缀、from/to 折算回全文 LF
+// 坐标；内容行剥「开启行的层数」（层数不足的断开行剥 0 层原样吃进——
+// 与 @vscode/markdown-it-katex 的 src 级贪婪一致：块跨引用边界吃到闭合
+// `$$`，与围栏扫描器（mermaid.ts）的「容器断开即终止」口径不同源，各自
+// 对齐对应 Reading 引擎：math=插件、fence=CommonMark 核心规则）。行内
+// （$…$ / 段内 $$）路径不做前缀处理——原行原坐标（引用行行内的 `$` 本就
+// 是普通字符，路径无需变更）。
+//
 // 本模块不依赖 vscode/DOM/CM6（node 单测直驱；宿主与 webview 双产物共用）。
 // 已知差异（记录于 docs/perf/2026-09-math-rendering.md）：markdown-it 的
 // 段落内联文本允许跨行 `$…$`（软换行），本扫描以行为单位不识别跨行行内
@@ -38,14 +47,95 @@ export const MATH_CLASS_NAMES = {
   mathSource: 'vsidian-math-source',
 } as const
 
+/** 扫描产物内容行 → 原文行偏移映射条目（#674 T06）。code/tex 是剥引用
+ *  前缀后的裸行拼接，本条目把每个裸内容段锚回原文坐标：裸内容 offset 折算
+ *  回原文位置 = lineStart + prefixLen + (offset − contentOffset)。T07 的
+ *  token 着色与装饰锚定以此为换算输入（不建第二份派生源——映射随扫描
+ *  产物一并产出）；FenceSpan（mermaid.ts）与 MathOccurrence 共用本形状。 */
+export interface ContentLineMapEntry {
+  /** 该内容段在裸内容串（FenceSpan.code / MathOccurrence.tex）中的起始 offset */
+  contentOffset: number
+  /** 该内容段所在原文行的行首全文 LF offset（含引用前缀的原文行首） */
+  lineStart: number
+  /** 该内容段起点相对原文行首的字符偏移（引用前缀层数消耗 + 定界符/缩进等
+   *  前置跳过；裸内容段起点 = lineStart + prefixLen） */
+  prefixLen: number
+}
+
+/** 裸内容串 offset → 原文全文 LF offset 的逐段折算（#675 T07）：
+ *  找 offset 所在内容段（lineMap 按 contentOffset 有序），返回
+ *  lineStart + prefixLen + (offset − contentOffset)。FenceSpan（mermaid）
+ *  与 MathOccurrence（math）的内容段消费共用本折算——装饰锚定/着色
+ *  不得在消费端再建第二份映射。lineMap 为空（无内容段）返回 -1，调用方
+ *  按不可折算丢弃。二分查找（长块 token 总量 O(n log n)，不随行数平方）。 */
+export function mapContentOffsetToDoc(
+  lineMap: readonly ContentLineMapEntry[],
+  offset: number,
+): number {
+  if (lineMap.length === 0) {
+    return -1
+  }
+  let lo = 0
+  let hi = lineMap.length - 1
+  // 最大 contentOffset ≤ offset 的条目（段起点）；offset 落在段内或段尾
+  //（段与段由 \n 分隔，offset == 段尾 < 下一段 contentOffset，仍属本段）
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (lineMap[mid]!.contentOffset <= offset) {
+      lo = mid
+    } else {
+      hi = mid - 1
+    }
+  }
+  const seg = lineMap[lo]!
+  return seg.lineStart + seg.prefixLen + (offset - seg.contentOffset)
+}
+
+/** 剥除行首全部引用前缀（#674 T06）：每层 `>` + 可选一个空格（CommonMark
+ *  blockquote 标记消耗口径；Tab 不属前缀，`>` 后直接 Tab 时该 Tab 保留在
+ *  裸行中）。返回裸行、层数（`>` 个数）与剥除字符数。纯字符扫描无分配。 */
+export function stripQuotePrefix(line: string): { bare: string; depth: number; prefixLen: number } {
+  let at = 0
+  let depth = 0
+  while (line[at] === '>') {
+    at += 1
+    if (line[at] === ' ') {
+      at += 1
+    }
+    depth += 1
+  }
+  return { bare: line.slice(at), depth, prefixLen: at }
+}
+
+/** 剥除行首恰好 layers 层引用前缀；层数不足（行不在同等深度的引用容器内）
+ *  返回 null——容器断开信号。与 stripQuotePrefix 的层计数同构（每层独立
+ *  消耗 `>` 与可选空格，开闭行前缀形态不同但层等价时仍可剥）。 */
+export function stripQuoteLayers(line: string, layers: number): string | null {
+  let at = 0
+  for (let i = 0; i < layers; i++) {
+    if (line[at] !== '>') {
+      return null
+    }
+    at += 1
+    if (line[at] === ' ') {
+      at += 1
+    }
+  }
+  return line.slice(at)
+}
+
 /** 一次公式出现（全文 offset 语义；from 含开定界符，to 含闭定界符） */
 export interface MathOccurrence {
   from: number
   to: number
   /** `inline` = `$…$`；`block` = `$$…$$`（displayMode 渲染） */
   kind: 'inline' | 'block'
-  /** 定界符之间的原文（未 trim——KaTeX 对首尾空白不敏感，渲染层自理） */
+  /** 定界符之间的原文（未 trim——KaTeX 对首尾空白不敏感，渲染层自理）；
+   *  块模式为剥引用前缀后的裸行拼接（#674 T06） */
   tex: string
+  /** tex 各段 → 原文行偏移映射（块模式产出：开启行 rest、内容行、闭合行
+   *  前段各一条）；行内命中为空数组（单行内无跨行映射需求） */
+  lineMap: ContentLineMapEntry[]
 }
 
 /** 公式排除的代码上下文节点名（lezer；照 #11 双链先例）。live 装饰的
@@ -143,7 +233,7 @@ export function scanMathInLine(line: string, base = 0): MathOccurrence[] {
         at += 2
         continue
       }
-      out.push({ from: base + at, to: base + close + 2, kind: 'block', tex: line.slice(at + 2, close) })
+      out.push({ from: base + at, to: base + close + 2, kind: 'block', tex: line.slice(at + 2, close), lineMap: [] })
       at = close + 2
       continue
     }
@@ -157,7 +247,7 @@ export function scanMathInLine(line: string, base = 0): MathOccurrence[] {
       at += 1
       continue
     }
-    out.push({ from: base + at, to: base + close + 1, kind: 'inline', tex: line.slice(at + 1, close) })
+    out.push({ from: base + at, to: base + close + 1, kind: 'inline', tex: line.slice(at + 1, close), lineMap: [] })
     at = close + 1
   }
   return out
@@ -239,11 +329,14 @@ export function stripInlineTexTicks(tex: string): string {
  * 扫描连续行集合中的全部公式出现（跨行 `$$` 块 + 各行行内公式）。
  * firstLineStart 为首行行首的全文 offset（区块区间以全文坐标产出）。
  *
- * 块模式状态机：行首（剥缩进）`$$` 开启块（开启判定 = opensMathBlockLine
- * 单一事实源），首个出现 `$$` 的行闭合；行首 `$$` 后余文的最后一对 `$$`
- * 恰在行尾时是单行闭合形态——内容非空产出单行块，空内容（`$$  $$` /
- * `$$$$`）按原文降级不产出。窗口首行已在某个未闭合块内时，本扫描以非块
- * 态起步，不会把窗口内的闭合定界符误配为新块（闭合判定要求先有开启行）。
+ * 块模式状态机：行首（剥引用前缀与缩进后的裸行）`$$` 开启块（开启判定 =
+ * opensMathBlockLine 单一事实源，输入裸行），首个出现 `$$` 的行闭合；
+ * 内容行剥「开启行的引用层数」、层数不足的断开行原样吃进（跨容器延续，
+ * 对齐 @vscode/markdown-it-katex 的 src 级贪婪，见模块头注释）。行首
+ * `$$` 后余文的最后一对 `$$` 恰在行尾时是单行闭合形态——内容非空产出
+ * 单行块，空内容（`$$  $$` / `$$$$`）按原文降级不产出。窗口首行已在
+ * 某个未闭合块内时，本扫描以非块态起步，不会把窗口内的闭合定界符误配
+ * 为新块（闭合判定要求先有开启行）。
  */
 export function scanMathRanges(lines: readonly string[], firstLineStart: number): MathOccurrence[] {
   if (!lines.some((line) => line.includes('$'))) {
@@ -251,59 +344,90 @@ export function scanMathRanges(lines: readonly string[], firstLineStart: number)
   }
   const out: MathOccurrence[] = []
   let lineStart = firstLineStart
-  let blockOpen: { from: number; tex: string } | null = null
+  // 块模式工作态：parts 为剥前缀后的内容段（\n 拼接即 tex），contentLen
+  // 为已累积长度（含分隔符——下一段的 contentOffset），depth 为开启行
+  // 引用层数（内容/闭合行的剥除层数）
+  let blockOpen: {
+    from: number
+    depth: number
+    parts: string[]
+    lineMap: ContentLineMapEntry[]
+    contentLen: number
+  } | null = null
   for (const line of lines) {
-    const trimmed = line.trim()
+    const { bare, depth, prefixLen } = stripQuotePrefix(line)
+    const trimmed = bare.trim()
     if (blockOpen) {
-      if (!trimmed.includes('$$')) {
-        blockOpen.tex += `\n${line}`
+      // 剥开启层数：层数足够剥至容器内；不足（引用断开）剥 0 层原样吃进
+      const consumed = stripQuoteLayers(line, blockOpen.depth) ?? line
+      const segStart = line.length - consumed.length
+      const consumedTrim = consumed.trim()
+      if (!consumedTrim.includes('$$')) {
+        blockOpen.lineMap.push({ contentOffset: blockOpen.contentLen, lineStart, prefixLen: segStart })
+        blockOpen.parts.push(consumed)
+        blockOpen.contentLen += consumed.length + 1
         lineStart += line.length + 1
         continue
       }
       // 行尾 `$$` 取行内最后一对，否则取（去首空白后的）首对——与插件
-      // blockMath 两个闭合分支的定位一致
-      const closeAt = trimmed.endsWith('$$')
-        ? line.lastIndexOf('$$')
-        : line.indexOf('$$', line.length - trimmed.length)
+      // blockMath 两个闭合分支的定位一致（closeAt 相对剥前缀后的行）
+      const closeAt = consumedTrim.endsWith('$$')
+        ? consumed.lastIndexOf('$$')
+        : consumed.indexOf('$$', consumed.length - consumedTrim.length)
+      blockOpen.lineMap.push({
+        contentOffset: blockOpen.contentLen,
+        lineStart,
+        prefixLen: segStart, // 闭合行前段（head）起点即剥前缀后的行首；closeAt 只用于 to 折算
+      })
       out.push({
         from: blockOpen.from,
-        to: lineStart + closeAt + 2,
+        to: lineStart + segStart + closeAt + 2,
         kind: 'block',
-        tex: blockOpen.tex + '\n' + line.slice(0, closeAt),
+        tex: blockOpen.parts.concat(consumed.slice(0, closeAt)).join('\n'),
+        lineMap: blockOpen.lineMap,
       })
       blockOpen = null
       lineStart += line.length + 1
       continue
     }
-    const indent = line.length - line.trimStart().length
+    const indent = bare.length - bare.trimStart().length
     if (trimmed.startsWith('$$')) {
       const rest = trimmed.slice(2)
       // 开启判定唯一入口 opensMathBlockLine（评审 N-2：不再内联同构条件，
-      // 改谓词时只改一处）；「单行闭合形态」即其否命题
+      // 改谓词时只改一处；#674 起输入为剥引用前缀后的裸行 trim）；「单行
+      // 闭合形态」即其否命题
       if (!opensMathBlockLine(trimmed)) {
         const pairs = [...rest.matchAll(/\$\$/g)]
         // 单行闭合形态（最后对恰在行尾）：pairs 恰一时内容非空产出单行块
         // `$$x$$`，空内容（$$  $$ / $$$$）按原文降级——不产出也不开启
         // 多行块（B-4 角案：开启会吞掉后续首个 $$ 行，与插件单行闭合语义
-        // 分叉）；多对仍按段内形态处理（与旧行为一致）
+        // 分叉）；多对仍按段内形态处理（与旧行为一致，坐标折算前缀）
         if (pairs.length === 1 && rest.slice(0, -2).trim() !== '') {
           out.push({
-            from: lineStart + indent,
+            from: lineStart + prefixLen + indent,
             to: lineStart + line.length,
             kind: 'block',
             tex: rest.slice(0, -2),
+            lineMap: [{ contentOffset: 0, lineStart, prefixLen: prefixLen + indent + 2 }],
           })
         } else if (pairs.length > 1) {
-          out.push(...scanMathInLine(line, lineStart))
+          out.push(...scanMathInLine(bare, lineStart + prefixLen))
         }
         lineStart += line.length + 1
         continue
       }
       // 多行块开始（rest 无对或对不在行尾；rest 非空时为块首行内容）
-      blockOpen = { from: lineStart + indent, tex: rest }
+      blockOpen = {
+        from: lineStart + prefixLen + indent,
+        depth,
+        parts: [rest],
+        lineMap: [{ contentOffset: 0, lineStart, prefixLen: prefixLen + indent + 2 }],
+        contentLen: rest.length + 1,
+      }
       lineStart += line.length + 1
       continue
     }
+    // 行内路径不动：原行原坐标（引用前缀对该路径是普通字符）
     out.push(...scanMathInLine(line, lineStart))
     lineStart += line.length + 1
   }

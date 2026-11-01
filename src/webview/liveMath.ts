@@ -29,7 +29,7 @@ import type { Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
-import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathInLine, scanMathRanges, type MathOccurrence } from '../shared/math'
+import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathInLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
 import { t } from '../shared/i18n'
 
@@ -203,7 +203,15 @@ function rebuildBlocks(
   const out: MathOccurrence[] = []
   for (const b of mapped) {
     if (b.to <= start || b.from >= end) {
-      out.push({ from: b.from, to: b.to, kind: b.hit.kind, tex: b.hit.tex })
+      out.push({
+        from: b.from,
+        to: b.to,
+        kind: b.hit.kind,
+        tex: b.hit.tex,
+        // 窗口外保留块：lineMap 锚点随编辑映射到新坐标（from/to 同源
+        // mapPos，assoc 与 from 一致——锚点处无编辑时为恒等映射）
+        lineMap: b.hit.lineMap.map((e) => ({ ...e, lineStart: changes.mapPos(e.lineStart, 1) })),
+      })
     }
   }
   out.push(...rebuilt)
@@ -215,10 +223,13 @@ function rebuildBlocks(
  *  open 为 [0, fromIndex) 已扫部分的未闭合块开启行号（或 null），只扫
  *  新增行段并返回新的开启行号——scanMathRanges 不产出未闭合块，此处
  *  单独判定以驱动重建范围的延伸。开启判定与 scanMathRanges 共用
- *  opensMathBlockLine（shared/math.ts 单一事实源）。 */
+ *  opensMathBlockLine（shared/math.ts 单一事实源），#674（T06）起输入
+ *  为剥引用前缀后的裸行 trim（引用内 `> $$` 同样开块）；块模式跨容器
+ *  延续（层数不足的断开行不终止——与 @vscode/markdown-it-katex 的贪婪
+ *  口径一致），闭合判定只看剥前缀后的行内是否含 `$$`。 */
 function scanOpenIncrement(lines: readonly string[], fromIndex: number, open: number | null): number | null {
   for (let i = fromIndex; i < lines.length; i++) {
-    const trimmed = lines[i]!.trim()
+    const trimmed = stripQuotePrefix(lines[i]!).bare.trim()
     if (open === null) {
       if (opensMathBlockLine(trimmed)) {
         open = i

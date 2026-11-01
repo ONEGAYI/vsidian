@@ -2445,25 +2445,31 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-color: transparent;
 }
 
-#app .cm-editor .cm-scroller .vsidian-quote-line {
+#app .cm-editor .cm-scroller .vsidian-quote-line:not(.vsidian-code-card-line) {
   box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color);
   /* #143 验收修复：QuoteMark 呈现态隐藏后内容左移至行首，文字与竖条
      重合——补左内边距对齐阅读 blockquote 的排版（0.9em 内容距 + 3px
      竖条占位；源码显形时前缀从同一缩进起点显示，与列表行 padding 常驻
-     同款取舍） */
+     同款取舍）。:not 排除代码卡行（A86-③ 2026-10-31 处置）：卡行不吃
+     基础引用行视觉——卡片自带边界（底色/边框），紫条属双重强调 */
   padding-left: calc(0.9em + 3px);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
 }
 
-/* ---- #653/T02 Callout 行级形态（T01 路线 A）：容器视觉逐行同规则绘制。
-   quiet 类由最内层引用层判定挂（嵌套普通引用行不挂——紫条照画，自身
-   样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃 RGB 三元组片段、
-   渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效透明、渐变绘制）。
-   左距为 --callout-padding 左分量（24px）的行级近似——上下分量不落行
-   （行级类不改行高的既有纪律），阅读侧整容器按变量原样消费。
+/* ---- #653/T02 Callout 行级形态（T01 路线 A）→ T05（#673）容器视觉迁移：
+   非列表内 callout 由 CM6 BlockWrapper 承载（div.callout[data-callout]
+   [data-callout-depth]，下方 wrapper 规则），行级让位（底色/左距/左缘
+   近似上移容器）；本组行级规则保留给**列表内 callout**（v1 不接 wrapper，
+   维持行级全形态）。quiet 类由最内层引用层判定挂（嵌套普通引用行不挂
+   ——紫条照画，自身样式保留）；底色为拆属性双通道（T01 §6.2：bgc 吃
+   RGB 三元组片段、渐变吃标准色——两通道互斥生效，内置标准色时 bgc 失效
+   透明、渐变绘制）。左距为 --callout-padding 左分量（24px）的行级近似
+   ——上下分量不落行（行级类不改行高的既有纪律），阅读侧整容器按变量
+   原样消费。
    #657/T06：box-shadow 通道承载 --callout-border-width 左缘近似（同引用
    紫条机制：inset 阴影零布局位移；默认 0 宽零绘制——语义仍是该层紫条被
-   callout 替代；四边完整边框仅阅读侧承诺，行级形态边界见样式参考） ---- */
+   callout 替代；四边完整边框在 wrapper 与阅读侧承诺，行级形态边界见
+   样式参考） ---- */
 #app .cm-editor .cm-scroller .vsidian-quote-line.callout.vsidian-callout-quiet {
   box-shadow: inset var(--callout-border-width) 0 0
     color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
@@ -2472,6 +2478,56 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-image: linear-gradient(
     color-mix(in oklch, var(--callout-color) 10%, transparent),
     color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* T05（#673）Live wrapper 容器视觉：.callout 公开主类迁 wrapper——与阅读
+   容器（.vsidian-view-reading div.callout）同款消费（padding 四向 = 真内
+   边距、四边 border 三件套、圆角、双通道底色）。硬约束：**禁垂直 margin**
+   （BlockWrapper 探针 S1b/S1c：margin 不入 posAtCoords 记账产生确定性
+   错行——间距一律 padding；用户片段对 .callout 设垂直 margin 在 Live
+   会引入落点偏移，契约条目已登记）。规则侧显式 margin: 0 落地该禁令的
+   一半：常见 Obsidian 片段 `.callout { margin: 10px 0 }` (0,1,0) 命中
+   wrapper 时被本声明的垂直分量归零（水平分量一并归零——wrapper 是块级
+   容器、宽度由父级决定，水平 margin 无既有消费语义；探针 S1b/S1c 只
+   钉死垂直分量）。mix-blend-mode 暂不承诺 Live
+   （编辑器行层叠合成未验证，边界见条目）。data-callout 类型变量经
+   :where 表命中 wrapper，行内标题色/图标继承。 */
+#app .cm-editor .cm-scroller .vsidian-callout-wrap.callout {
+  margin: 0;
+  padding: var(--callout-padding);
+  border-style: solid;
+  border-color: color-mix(in oklch, var(--callout-color) calc(var(--callout-border-opacity) * 100%), transparent);
+  border-width: var(--callout-border-width);
+  border-radius: var(--callout-radius);
+  background-color: rgba(var(--callout-color), 0.1);
+  background-image: linear-gradient(
+    color-mix(in oklch, var(--callout-color) 10%, transparent),
+    color-mix(in oklch, var(--callout-color) 10%, transparent));
+}
+
+/* T05（#673）wrapper 内行级让位：底色/左距/左缘近似已由 wrapper 承接
+   ——行恢复透明零位移（.vsidian-quote-line 基础规则的紫条/底色/内容
+   缩进在此语境让位；quiet 的紫条静默语义由本规则的 box-shadow:none
+   继续承担）。特异性压过基础 quote 规则（多一层 wrapper 类）。
+   **:not(.vsidian-code-card-line) 防雷（评审 T05-P1，探针 §4.3 复现）**：
+   T06 起引用内围栏被扫描器识别，callout 内代码卡内容行同挂 quiet +
+   code-card-line——本规则若命中会把卡行规则 (1,4,0) 的 padding-left 清零
+   而 text-indent 负值存活（悬挂缩进塌陷：行号甩出 wrapper 盒外、卡底色
+   一并被清）。排除后卡行的 padding-left/text-indent 同源对与卡底色由
+   `.cm-line.vsidian-code-card-line` 规则族完整承接；紫条回归基础 quote
+   规则与「普通引用内代码卡行」同形态（引用标记在卡行可见，T06 统一
+   语义），非本规则的让位对象。
+   **:not(.callout) 列表内保留形态（PR678-001）**：列表内 callout 不接
+   wrapper（v1 边界），行级 .callout 全形态是其唯一容器视觉——这些行
+   仍是外层 wrapper 的后代，不加排除会被本规则清成透明/零缩进/无条，
+   内层容器视觉消失（styleContract 承诺「列表内 callout 维持行级全形
+   态」）。wrapper 接管的行不挂行级 .callout（wrapped 分支让位时摘除），
+   排除面精准。 */
+#app .cm-editor .cm-scroller .vsidian-callout-wrap .vsidian-quote-line.vsidian-callout-quiet:not(.vsidian-code-card-line):not(.callout) {
+  box-shadow: none;
+  padding-left: 0;
+  background-color: transparent;
+  background-image: none;
 }
 
 /* 首末行圆角（分角写：单行容器两类同挂自然合成全圆角） */
@@ -2485,11 +2541,21 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   border-bottom-right-radius: var(--callout-radius);
 }
 
-/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引） */
+/* 标题行：类型色标题字重（Obsidian --callout-title-* 族两侧同引）
+   #671/T02：标题色分两层——标题层取类型色 --callout-color，内层
+   .callout-title-inner 取 --callout-title-color（默认 inherit）。对齐
+   Obsidian 1.14.4 app.css 的 `.callout-title{color:var(--callout-color)}`
+   + `.callout-title-inner{color:var(--callout-title-color)}`。此前标题行
+   直接读 --callout-title-color=inherit，导致所有类型标题同色；两层分工
+   不得合并——后者是用户片段覆盖标题文字的入口 */
 #app .cm-editor .cm-scroller .vsidian-quote-line.callout-title {
-  color: var(--callout-title-color);
+  color: var(--callout-color);
   font-size: var(--callout-title-size);
   font-weight: var(--callout-title-weight);
+}
+
+#app .cm-editor .cm-scroller .vsidian-quote-line.callout-title .callout-title-inner {
+  color: var(--callout-title-color);
 }
 
 /* ---- #655（T04）折叠箭头 .callout-fold（T01 固定口径；Live 标题行行尾
@@ -3125,9 +3191,15 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
 /* ---- 代码块卡片（#79–#84，规格 docs/specs/code-block-card.md）----
    呈现态围栏行内容被清空（replace 装饰零宽）但行槽保留；卡片 = 块首行
    上方的头部横带（block widget）+ 连续块行底色 + 尾行底边圆角（顶边
-   圆角由头部承担）。行级类只做背景/圆角着色，不改变行高（#8 约束沿用）。 */
+   圆角由头部承担）。行级类只做背景/圆角着色，不改变行高（#8 约束沿用）。
+   A87（2026-11-01）卡壳外缘 1px 边线：卡底色与 callout 容器底色在部分
+   类型上对比不足——边线参照系是**临近容器底色**，不透明中灰双主题可辨
+   （亮底深线/暗底亮线）；行级用 inset box-shadow 不占行高（同紫条先例），
+   顶部由 header 的 border 承担。变量 --vsidian-code-card-border 可调 */
 #app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line {
   background-color: var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12));
+  box-shadow: inset 1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset -1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127));
   /* #191 悬挂缩进修复折行窜行：续行退到内容盒左缘（x=0）窜入卡内行号区
      ——padding-left 把内容盒推到文本列、text-indent 负值把首行拉回行盒
      左缘。首行完全原位（行号 x=0、文本列不变，#189 决议不被破坏），
@@ -3137,8 +3209,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
 }
 
 #app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top {
-  border-top-left-radius: 6px;
-  border-top-right-radius: 6px;
+  /* A87 六轮（2026-11-01 验收「不是连续线段」根因）：首行顶角必须直角。
+     头部横带紧贴其上且左右缘同 x，此处再圆角会让边线在拼接处向内凹出
+     6px 缺口（探针实测 x=17→8 的十二设备像素弧线，dpr=2）。顶边外圆角
+     唯一承担者是头部横带（border-radius: 6px 6px 0 0） */
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
   /* #189 围栏行左内边距：编辑态围栏符号与代码文本列（行号列宽 + 24px）
      同 x 真实对齐；值按块注入（--vsidian-code-indent），行号关闭时为 0。
      #191 text-indent: 0 覆盖通用悬挂缩进——围栏行无行号 widget，保持
@@ -3150,6 +3226,9 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
 #app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-bottom {
   border-bottom-left-radius: 6px;
   border-bottom-right-radius: 6px;
+  box-shadow: inset 1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset -1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset 0 -1px 0 var(--vsidian-code-card-border, rgb(127, 127, 127));
   padding-left: var(--vsidian-code-indent, 0px);
   text-indent: 0;
 }
@@ -3165,7 +3244,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   padding: 5px 12px 4px;
   background-color: var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12));
   border-radius: 6px 6px 0 0;
-  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+  /* A87 五轮：卡壳顶/左/右外缘与 header 底部分隔线统一用 inset
+     box-shadow——与卡行边线同机制同色（border 与 shadow 拼接在接角
+     差 1px 且渲染抗锯齿不同，是「边线不连续」观感来源）；分隔线原
+     editorGroup-border 主题 token 在部分主题下不可视，一并换同源色 */
+  box-shadow: inset 0 1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset 1px 0 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset -1px 0 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset 0 -1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127));
   color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
   /* #190 整条折叠热区：横带整体可点击切换折叠的视觉暗示（按钮仍各自 cursor:pointer） */
   cursor: pointer;
@@ -3360,6 +3446,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   background-color: var(--vsidian-live-code-background, rgba(128, 128, 128, 0.14));
   border-radius: 3px;
   padding: 0 2px;
+}
+
+/* 语法标记显形态弱化（A87 验收 2026-11-01）：显形的 > 与 [!xx] 以
+   转义符式透明度呈现；opacity 随正文前景自动适配明暗主题。装饰只包
+   纯语法区间（liveDecorations 的 syntaxMarkDeco），标题文字/正文
+   不受影响 */
+#app .cm-editor .cm-scroller .vsidian-syntax-mark {
+  opacity: 0.55;
 }
 
 /* #105 高亮内容 span：常显主题色高亮底（== 定界符显隐由装饰控制，见
@@ -4205,14 +4299,21 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
     color-mix(in oklch, var(--callout-color) 10%, transparent));
 }
 
+/* #671/T02：标题色两层（同 Live 侧口径）——标题取类型色，内层由
+   --callout-title-color 覆盖（默认 inherit）。同一 data-callout 值在两端
+   计算色一致 */
 #app .vsidian-view-reading .vsidian-reading-block .callout-title {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: var(--callout-title-padding);
-  color: var(--callout-title-color);
+  color: var(--callout-color);
   font-size: var(--callout-title-size);
   font-weight: var(--callout-title-weight);
+}
+
+#app .vsidian-view-reading .vsidian-reading-block .callout-title .callout-title-inner {
+  color: var(--callout-title-color);
 }
 
 #app .vsidian-view-reading .vsidian-reading-block .callout-content {
@@ -5303,6 +5404,9 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
    补块级外壳：卡片底色与圆角、pre 融入卡片、行结构与收起态。 */
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card {
   background-color: var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12));
+  /* A87（2026-11-01）卡壳外缘边线（与 Live 侧行级/header 边线同源变量；
+   * callout 容器底色上的可辨性，参照系=临近容器底色） */
+  border: 1px solid var(--vsidian-code-card-border, rgb(127, 127, 127));
   border-radius: 6px;
 }
 

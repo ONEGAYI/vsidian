@@ -24,10 +24,11 @@
 import { RangeSet, StateField, type Extension, type Range, type Text } from '@codemirror/state'
 import type { EditorSelection } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
-import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+import { liveDecorationsField } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { mermaidFencesField } from './liveMermaid'
 import { RENDERED_FENCE_LABELS, type FenceSpan } from '../shared/mermaid'
+import { mapContentOffsetToDoc } from '../shared/math'
 import { effectiveGraphicLabel, hasEffectiveGraphicRenderer } from './graphicRenderers'
 import { resolveCodeLanguage } from '../shared/codeLangs'
 import { hasHighlightEngine, highlightCodeRanges, splitRangeAtLineBreaks } from './codeHighlight'
@@ -37,6 +38,7 @@ import {
   codeCardCopyRequest,
   codeCardFoldField,
   codeCardFoldToggle,
+  migrateSelectionForCodeCardFold,
   type CodeCardConfig,
 } from './codeCardState'
 
@@ -212,12 +214,28 @@ export class CodeCardHeaderWidget extends WidgetType {
         }
       }))
     }
-    // 折叠切换闭包：按钮与整条热区共用同一入口（#190）
+    // 折叠切换闭包：按钮与整条热区共用同一入口（#190）。A87 三轮起事务
+    // 同携旁落选区（光标在卡内点击折叠时迁出隐藏区间——否则 editing 判定
+    // 压住收起形态，块折不上）；effect 值归一为围栏起始位置（fold 集合的
+    // 标识键），posAtDOM 的近似值不再直接入库
     const toggleFold = () => {
       const view = EditorView.findFromDOM(mount)
-      if (view) {
-        view.dispatch({ effects: codeCardFoldToggle.of(view.posAtDOM(mount)) })
+      if (!view) {
+        return
       }
+      const pos = view.posAtDOM(mount)
+      const fence = view.state.field(mermaidFencesField, false)?.spans
+        .find((f) => f.from <= pos && pos <= f.to)
+      if (!fence) {
+        view.dispatch({ effects: codeCardFoldToggle.of(pos) })
+        return
+      }
+      const migrated = migrateSelectionForCodeCardFold(
+        view.state.selection, fence.from, fence.to, view.state.doc.length)
+      view.dispatch({
+        effects: codeCardFoldToggle.of(fence.from),
+        ...(migrated ? { selection: migrated } : {}),
+      })
     }
     actions.appendChild(buildFoldButton(this.folded, toggleFold))
     // #190 整条折叠热区：头部横带整体可点击切换折叠，排除按钮本身；
@@ -501,6 +519,32 @@ export class CodeCardLineNumberWidget extends WidgetType {
  * 不清空、行号保留，外壳保留。
  */
 /**
+ * 块级编辑抑制的选区触及判定（PR678-005）：与 selectionTouchesRange
+ * 同构，唯一差异在右端点放行的精度——只放行「空选区且 head === to 且
+ * to === docLength」（整篇围栏无尾换行、光标恰在块尾边界，物理处于
+ * 收起 replace 区间右界外、源码可见）。空选区其余位置维持闭区间
+ * （编辑便利语义）；非空选区维持真实开区间相交（正反向/多光标语义
+ * 与共享谓词一致——选中最后闭围栏字符仍临时展开）。
+ */
+function blockEditingTouches(
+  selection: EditorSelection, from: number, to: number, docLength: number,
+): boolean {
+  for (const r of selection.ranges) {
+    if (r.empty) {
+      if (r.head === to && to === docLength) {
+        continue
+      }
+      if (r.head >= from && r.head <= to) {
+        return true
+      }
+    } else if (r.from < to && r.to > from) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * 卡片装饰构建（#79–#83 契约入口；纯数据输入，可单测直驱、阅读侧对拍复用）：
  * 语法高亮 mark（config.highlight，独立于卡片开关——朴素围栏仍可着色）；
  * 卡片形态（config.card）：头部 block widget、卡片行类（首/尾圆角修饰）、
@@ -528,8 +572,13 @@ export function buildCodeCardDecorations(
       continue
     }
     // #251 命中显形：替换区间（含被清空的围栏行）与活跃命中相交时按
-    // 编辑态处理——围栏行源码可见，命中 mark 随之可画（块级回源）
-    const editing = selectionTouchesRange(selection, fence.from, fence.to) ||
+    // 编辑态处理——围栏行源码可见，命中 mark 随之可画（块级回源）。
+    // PR678-005（A87 四轮 + 五轮复审收口）：唯一放行点是「空选区且
+    // head === fence.to === doc.length」——整篇围栏无尾换行、光标恰在
+    // 块尾边界，物理处于收起 replace 区间右界外（源码可见），块外又无
+    // 合法位置可旁落。非空选区维持真实开区间相交（正反向/多光标语义
+    // 不变）——选中最后闭围栏字符仍临时展开，不让源码选区被收起遮挡
+    const editing = blockEditingTouches(selection, fence.from, fence.to, doc.length) ||
       hitIntersectsRange(hits, fence.from, fence.to)
     // 折叠收起（#82）：光标在块内时临时展开；收起态无复制按钮（规格）。
     // 折叠只在卡片开启时呈现（朴素围栏无头部可挂 chevron）
@@ -549,13 +598,15 @@ export function buildCodeCardDecorations(
       if (to > from) out.push(Decoration.mark({ class: CODE_CARD_CLASS_NAMES.selection }).range(from, to))
     }
     const lang = resolveCodeLanguage(fence.info)
-    // 语法高亮（#83）：卡片关闭时朴素围栏仍可着色；折叠块不可见跳过
+    // 语法高亮（#83）：卡片关闭时朴素围栏仍可着色；折叠块不可见跳过。
+    // token 区间经 FenceSpan.lineMap 逐段折算回原文坐标（#675 T07）——
+    // 直加映射（openLine.to + 1 + tokenOffset）假设行首即裸内容起点，
+    // 引用内每行有 `> ` 前缀，第二行起错位逐行累积（探针 §4.2）
     if (config.highlight && !isFolded && lang && hasHighlightEngine(lang.id)) {
-      const contentStart = openLine.to + 1
       for (const token of highlightCodeRanges(lang.id, fence.code)) {
         for (const seg of splitRangeAtLineBreaks(fence.code, token.from, token.to)) {
-          const from = contentStart + seg.from
-          const to = contentStart + seg.to
+          const from = mapContentOffsetToDoc(fence.lineMap, seg.from)
+          const to = mapContentOffsetToDoc(fence.lineMap, seg.to)
           if (to > from && to <= closeLine.from) {
             out.push(tokenMarkDeco(token.cls).range(from, to))
           }

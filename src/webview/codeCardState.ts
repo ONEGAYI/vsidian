@@ -10,7 +10,7 @@
 // 天然查不中，无行为影响（避免本模块反向依赖围栏表）。卡片总开关关闭
 // 时清空：mermaid 的让位判定不读卡片配置，只看折叠集，若不清空，关闭
 // 瞬间会出现「SVG 与收起形态同时缺席」的空白。
-import { Facet, StateEffect, StateField } from '@codemirror/state'
+import { EditorSelection, Facet, StateEffect, StateField } from '@codemirror/state'
 
 /** 卡片运行配置（设置驱动；liveCodeCard 消费全部键，card 同时是 mermaid 让位的门控） */
 export interface CodeCardConfig {
@@ -83,3 +83,32 @@ export const codeCardFoldField = StateField.define<ReadonlySet<number>>({
     return changed ? next : value
   },
 })
+
+/**
+ * 折叠旁落选区迁移（A87 三轮验收 2026-11-01，对齐 calloutFold 的
+ * migrateSelectionForCalloutFold 模式）：光标/选区在卡内时点击折叠，
+ * 事务同携旁落——否则 editing 判定（selectionTouchesRange 闭区间）
+ * 会压住收起形态，块「折不上」。落点取隐藏区间 [fenceFrom, fenceTo]
+ * 之外紧贴卡头的位置：块上一行行尾（fenceFrom-1）；文档首行围栏退
+ * 块后（fenceTo+1，docLength 钳制）。触及语义与装饰层一致（空选区
+ * 闭区间、非空选区开区间相交）。触及块外返回 null 不越权。
+ */
+export function migrateSelectionForCodeCardFold(
+  selection: EditorSelection,
+  fenceFrom: number,
+  fenceTo: number,
+  docLength: number,
+): EditorSelection | null {
+  const landing = fenceFrom > 0 ? fenceFrom - 1 : Math.min(fenceTo + 1, docLength)
+  let ranges: ReturnType<typeof EditorSelection.cursor>[] | null = null
+  for (let i = 0; i < selection.ranges.length; i++) {
+    const r = selection.ranges[i]!
+    const touches = r.empty
+      ? r.head >= fenceFrom && r.head <= fenceTo
+      : r.from < fenceTo && r.to > fenceFrom
+    if (touches) {
+      ;(ranges ??= selection.ranges.slice())[i] = EditorSelection.cursor(landing)
+    }
+  }
+  return ranges ? EditorSelection.create(ranges, selection.mainIndex) : null
+}

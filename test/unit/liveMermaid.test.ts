@@ -294,6 +294,53 @@ describe('围栏表 StateField：文档编辑的增量维护', () => {
     expect(incremental).toHaveLength(1)
     expect(incremental).toEqual(full)
   })
+
+  it('引用内围栏的固定编辑序列：增量重建与全量扫描逐字段一致（#674 T06）', () => {
+    // 编辑序列覆盖：前缀深度变化（引用内改层）、容器断开（删前缀）、
+    // 跨容器边界新建围栏、内容行编辑——每步后与全量对拍（含 code 剥前缀
+    // 与 lineMap 锚定）
+    let state = EditorState.create({
+      doc: ['> [!note] t', '> ```mermaid', '> graph TD', '> ```', '尾部'].join('\n'),
+      extensions: [mermaidFencesField],
+    })
+    const fullScan = (s: typeof state) =>
+      [...EditorState.create({ doc: s.doc, extensions: [mermaidFencesField] }).field(mermaidFencesField).spans]
+    const doc = () => state.doc.toString()
+    // 前缀加深：内容行 > graph → > > graph（层数多于开启行，剥开启层后剩余 > 进内容）
+    state = state.update({ changes: { from: doc().indexOf('> graph TD') + 2, insert: '> ' } }).state
+    expect([...state.field(mermaidFencesField).spans]).toEqual(fullScan(state))
+    expect(state.field(mermaidFencesField).spans[0]!.code).toBe('> graph TD')
+    // 内容编辑
+    state = state.update({ changes: { from: doc().indexOf('graph TD'), insert: 'x' } }).state
+    expect([...state.field(mermaidFencesField).spans]).toEqual(fullScan(state))
+    // 容器断开：闭合行前缀整行删除 → 引用内围栏未闭合终止、顶层 ``` 开新围栏
+    state = state.update({
+      changes: { from: doc().lastIndexOf('> ```'), to: doc().lastIndexOf('> ```') + 2, insert: 'zz' },
+    }).state
+    expect([...state.field(mermaidFencesField).spans]).toEqual(fullScan(state))
+    // 断开后的顶层文本追加新围栏
+    state = state.update({ changes: { from: doc().length, insert: '\n```mermaid\nC-->D\n```' } }).state
+    const incremental = [...state.field(mermaidFencesField).spans]
+    const full = fullScan(state)
+    expect(incremental).toEqual(full)
+    expect(incremental).toHaveLength(1)
+    expect(incremental[0]!.code).toBe('C-->D')
+  })
+
+  it('窗口外保留围栏的 lineMap 锚点随编辑映射（#674 T06：mapPos 与 from/to 同源）', () => {
+    // 在围栏前的远处行编辑：围栏窗口外保留（坐标映射路径），lineMap 的
+    // lineStart 若不随 mapPos 映射会残留旧文档坐标（liveMath 侧编辑序列
+    // 对拍暴露过的同型缺陷，此用例钉住 fence 侧）
+    const text = ['头部', '', '> ```mermaid', '> graph TD', '> ```'].join('\n')
+    let state = EditorState.create({ doc: text, extensions: [mermaidFencesField] })
+    const before = state.field(mermaidFencesField).spans[0]!
+    expect(before.lineMap[0]!.lineStart).toBe(text.indexOf('> graph TD'))
+    state = state.update({ changes: { from: 0, insert: '前置'.repeat(50) + '\n\n' } }).state
+    const after = [...state.field(mermaidFencesField).spans]
+    const full = [...EditorState.create({ doc: state.doc, extensions: [mermaidFencesField] }).field(mermaidFencesField).spans]
+    expect(after).toEqual(full)
+    expect(after[0]!.lineMap[0]!.lineStart).toBe(state.doc.toString().indexOf('> graph TD'))
+  })
 })
 
 // ---- 宿主权威链路（视图 → edit.request → TextDocument → undo 回流） ----

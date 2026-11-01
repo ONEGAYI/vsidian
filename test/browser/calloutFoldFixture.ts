@@ -15,6 +15,9 @@ import '../../src/webview/main.css'
 installLocale('zh-cn', zhCn)
 
 const sentKinds: string[] = []
+// init 版本自增：宿主协议同版本 init 会被去重——多段 re-init（P2 错配
+// 形态等）此前一直在旧文档上跑（断言碰巧兼容）；协议对齐后 re-init 生效
+let initVersion = 0
 const controller = new WebviewSyncController({
   postMessage(message) {
     sentKinds.push((message as { kind: string }).kind)
@@ -39,8 +42,11 @@ function readingView(): { collectCalloutFoldPaint(): unknown } | null {
 Object.assign(window, {
   controller,
   initCalloutFold(text: string) {
+    // init 版本自增：宿主协议同版本 init 会被去重——多段 re-init（P2 错配
+    // 形态等）此前一直在旧文档上跑（断言碰巧兼容）；协议对齐后 re-init 生效
+    initVersion += 1
     controller.handleHostMessage({ kind: 'init', sessionId: 'callout-fold',
-      docUri: 'file:///callout-fold.md', version: 1, text })
+      docUri: 'file:///callout-fold.md', version: initVersion, text })
   },
   setCalloutFoldMode(mode: 'live' | 'reading') {
     controller.handleHostMessage({ kind: 'view.mode.set', mode })

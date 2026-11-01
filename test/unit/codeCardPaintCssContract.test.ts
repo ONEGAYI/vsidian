@@ -31,11 +31,16 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     expect(css).toMatch(/--vsidian-code-card-background:\s*var\(--vscode-textCodeBlock-background/)
   })
 
-  it('首尾行圆角修饰存在（头部承担顶边，尾行承担底边）', () => {
+  it('首尾行圆角：尾行圆角承担底边，首行顶角必须是直角（顶边唯一由头部承担）', () => {
     expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-bottom'))
       .toMatch(/border-bottom-left-radius:\s*6px/)
-    expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top'))
-      .toMatch(/border-top-left-radius:\s*6px/)
+    // A87 六轮（2026-11-01 验收「不是连续线段」）：首行紧贴头部横带且左右
+    // 缘同 x，自身再圆角会让边线在接缝向内凹出 6px 缺口。顶边外圆角唯一
+    // 承担者是头部横带的 border-radius: 6px 6px 0 0
+    const edgeTop = rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top')
+    // 值边界锚定到分号：裸 /:\s*0/ 可前缀匹配 0.5px（review-loops F4 加固）
+    expect(edgeTop).toMatch(/border-top-left-radius:\s*0(?:px)?\s*;/)
+    expect(edgeTop).toMatch(/border-top-right-radius:\s*0(?:px)?\s*;/)
   })
 
   it('围栏行（首/尾行）左内边距走对齐公式：行号列宽 + 24px（#189 真实对齐，值按块注入）', () => {
@@ -49,7 +54,13 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     const header = rule('#app .vsidian-code-card-header')
     expect(header).toMatch(/display:\s*flex/)
     expect(header).toMatch(/border-radius:\s*6px 6px 0 0/)
-    expect(header).toMatch(/border-bottom:\s*1px solid var\(--vscode-editorGroup-border/)
+    // A87 五轮（2026-11-01 验收反馈）：分隔线原 border-bottom +
+    // editorGroup-border 主题 token 在部分主题下不可视，且 border 与
+    // 卡行 inset shadow 拼接在接角差 1px——统一迁 box-shadow 四段
+    // （顶/左/右外缘 + 底部分隔），与卡行边线同源同机制拼连续边框
+    expect(header).toMatch(/inset 0 -1px 0 0 var\(--vsidian-code-card-border/)
+    expect(header).toMatch(/inset 0 1px 0 0 var\(--vsidian-code-card-border/)
+    expect(header).not.toMatch(/border-bottom/)
     expect(header).toMatch(/background-color:\s*var\(--vsidian-code-card-background/)
   })
 
