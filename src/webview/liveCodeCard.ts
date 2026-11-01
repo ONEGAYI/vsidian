@@ -24,7 +24,7 @@
 import { RangeSet, StateField, type Extension, type Range, type Text } from '@codemirror/state'
 import type { EditorSelection } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
-import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+import { liveDecorationsField } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { mermaidFencesField } from './liveMermaid'
 import { RENDERED_FENCE_LABELS, type FenceSpan } from '../shared/mermaid'
@@ -519,6 +519,32 @@ export class CodeCardLineNumberWidget extends WidgetType {
  * 不清空、行号保留，外壳保留。
  */
 /**
+ * 块级编辑抑制的选区触及判定（PR678-005）：与 selectionTouchesRange
+ * 同构，唯一差异在右端点放行的精度——只放行「空选区且 head === to 且
+ * to === docLength」（整篇围栏无尾换行、光标恰在块尾边界，物理处于
+ * 收起 replace 区间右界外、源码可见）。空选区其余位置维持闭区间
+ * （编辑便利语义）；非空选区维持真实开区间相交（正反向/多光标语义
+ * 与共享谓词一致——选中最后闭围栏字符仍临时展开）。
+ */
+function blockEditingTouches(
+  selection: EditorSelection, from: number, to: number, docLength: number,
+): boolean {
+  for (const r of selection.ranges) {
+    if (r.empty) {
+      if (r.head === to && to === docLength) {
+        continue
+      }
+      if (r.head >= from && r.head <= to) {
+        return true
+      }
+    } else if (r.from < to && r.to > from) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * 卡片装饰构建（#79–#83 契约入口；纯数据输入，可单测直驱、阅读侧对拍复用）：
  * 语法高亮 mark（config.highlight，独立于卡片开关——朴素围栏仍可着色）；
  * 卡片形态（config.card）：头部 block widget、卡片行类（首/尾圆角修饰）、
@@ -547,14 +573,12 @@ export function buildCodeCardDecorations(
     }
     // #251 命中显形：替换区间（含被清空的围栏行）与活跃命中相交时按
     // 编辑态处理——围栏行源码可见，命中 mark 随之可画（块级回源）。
-    // PR678-005（A87 四轮）：块尾即文档末尾（整篇围栏无尾换行）时触及
-    // 右界收一位——selectionTouchesRange 的闭区间右端点（编辑便利语义）
-    // 会把「光标恰在块尾边界」误算成块内，而该位置物理处于收起 replace
-    // 区间右界外（源码可见），块外又无合法位置可旁落，收起永远被压住。
-    // 收窄后：光标在块尾边界不算编辑抑制；插入发生在边界外，新字符可
-    // 见（无隐藏输入窗口）。有尾换行/块后有内容时 to < docLength，不触发
-    const blockTouchTo = fence.to === doc.length ? fence.to - 1 : fence.to
-    const editing = selectionTouchesRange(selection, fence.from, blockTouchTo) ||
+    // PR678-005（A87 四轮 + 五轮复审收口）：唯一放行点是「空选区且
+    // head === fence.to === doc.length」——整篇围栏无尾换行、光标恰在
+    // 块尾边界，物理处于收起 replace 区间右界外（源码可见），块外又无
+    // 合法位置可旁落。非空选区维持真实开区间相交（正反向/多光标语义
+    // 不变）——选中最后闭围栏字符仍临时展开，不让源码选区被收起遮挡
+    const editing = blockEditingTouches(selection, fence.from, fence.to, doc.length) ||
       hitIntersectsRange(hits, fence.from, fence.to)
     // 折叠收起（#82）：光标在块内时临时展开；收起态无复制按钮（规格）。
     // 折叠只在卡片开启时呈现（朴素围栏无头部可挂 chevron）

@@ -634,6 +634,35 @@ describe('折叠（#82）', () => {
       // 新行内容从 pos 14 起（hide 收起区间 [0,14) 只含到闭围栏行尾换行）
       expect(items.filter((i) => i.hide).some((i) => i.from <= 14 && i.to > 14)).toBe(false)
     })
+
+    it('PR678-005 五轮（复审转移）：折叠后选中最后闭围栏字符（含 EOF Shift+Left 形态）→ 临时展开，源码选区不被收起遮挡', () => {
+      const text = '```js\nx()\n```'
+      const foldThenSelect = (selection: EditorSelection) => {
+        let state = EditorState.create({
+          doc: text,
+          extensions: [
+            liveDecorationsField, mermaidFencesField,
+            codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+            codeCardFoldField, codeCardDecorations,
+          ],
+          selection: EditorSelection.single(8),
+        })
+        state = state.update({ effects: codeCardFoldToggle.of(0) }).state
+        return state.update({ selection }).state
+      }
+      // 正向选区 [12,13]：选中最后一个闭围栏反引号
+      const forward = foldThenSelect(EditorSelection.single(12, 13))
+      expect(itemsOf(forward.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(false)
+      // 反向选区 [13,12]（EOF 处 Shift+Left）
+      const backward = foldThenSelect(EditorSelection.single(13, 12))
+      expect(itemsOf(backward.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(false)
+      // 多光标：块外空光标 + 块内空光标 → 展开（块内光标需源码可见）
+      const multi = foldThenSelect(EditorSelection.create([EditorSelection.cursor(1), EditorSelection.cursor(13)]))
+      expect(itemsOf(multi.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(false)
+      // 空光标恰在块尾边界（EOF）单独在场时：收起保持（005 主例不回归）
+      const eofOnly = foldThenSelect(EditorSelection.single(13))
+      expect(itemsOf(eofOnly.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(true)
+    })
   })
 
   it('折叠随编辑位置映射：块前插入一行后折叠仍生效', () => {

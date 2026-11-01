@@ -3240,11 +3240,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   padding: 5px 12px 4px;
   background-color: var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12));
   border-radius: 6px 6px 0 0;
-  /* A87：卡壳顶/左/右外缘边线（border-box 已设，加边不扩尺寸） */
-  border-top: 1px solid var(--vsidian-code-card-border, rgb(127, 127, 127));
-  border-left: 1px solid var(--vsidian-code-card-border, rgb(127, 127, 127));
-  border-right: 1px solid var(--vsidian-code-card-border, rgb(127, 127, 127));
-  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+  /* A87 五轮：卡壳顶/左/右外缘与 header 底部分隔线统一用 inset
+     box-shadow——与卡行边线同机制同色（border 与 shadow 拼接在接角
+     差 1px 且渲染抗锯齿不同，是「边线不连续」观感来源）；分隔线原
+     editorGroup-border 主题 token 在部分主题下不可视，一并换同源色 */
+  box-shadow: inset 0 1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset 1px 0 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset -1px 0 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127)),
+    inset 0 -1px 0 0 var(--vsidian-code-card-border, rgb(127, 127, 127));
   color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
   /* #190 整条折叠热区：横带整体可点击切换折叠的视觉暗示（按钮仍各自 cursor:pointer） */
   cursor: pointer;

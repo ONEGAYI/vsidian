@@ -49,7 +49,13 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     const header = rule('#app .vsidian-code-card-header')
     expect(header).toMatch(/display:\s*flex/)
     expect(header).toMatch(/border-radius:\s*6px 6px 0 0/)
-    expect(header).toMatch(/border-bottom:\s*1px solid var\(--vscode-editorGroup-border/)
+    // A87 五轮（2026-11-01 验收反馈）：分隔线原 border-bottom +
+    // editorGroup-border 主题 token 在部分主题下不可视，且 border 与
+    // 卡行 inset shadow 拼接在接角差 1px——统一迁 box-shadow 四段
+    // （顶/左/右外缘 + 底部分隔），与卡行边线同源同机制拼连续边框
+    expect(header).toMatch(/inset 0 -1px 0 0 var\(--vsidian-code-card-border/)
+    expect(header).toMatch(/inset 0 1px 0 0 var\(--vsidian-code-card-border/)
+    expect(header).not.toMatch(/border-bottom/)
     expect(header).toMatch(/background-color:\s*var\(--vsidian-code-card-background/)
   })
 

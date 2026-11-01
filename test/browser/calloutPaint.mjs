@@ -171,18 +171,25 @@ try {
     const line = document.querySelector('.cm-line.vsidian-code-card-line')
     const header = document.querySelector('.vsidian-code-card-header')
     if (!line || !header) { return null }
+    const s = getComputedStyle(header)
     return {
       lineShadow: getComputedStyle(line).boxShadow,
-      headerBorderTop: getComputedStyle(header).borderTopWidth,
-      headerBorderTopColor: getComputedStyle(header).borderTopColor,
+      headerShadow: s.boxShadow,
+      headerBorderBottom: s.borderBottomWidth, // 分隔线已迁 box-shadow，border 应为空
     }
   })
   assert.ok(cardEdge, 'callout 内代码卡行级/header 应在场')
   assert.match(cardEdge.lineShadow, /rgba?\([^)]+\)\s+1px\s+0px\s+0px\s+0px\s+inset/, `卡行左侧 1px 边线在场: ${cardEdge.lineShadow}`)
   assert.match(cardEdge.lineShadow, /rgba?\([^)]+\)\s+-1px\s+0px\s+0px\s+0px\s+inset/, `卡行右侧 1px 边线在场: ${cardEdge.lineShadow}`)
   assert.ok(cardEdge.lineShadow.includes('rgb(127, 127, 127)'), `卡行边线为不透明中灰（可辨）: ${cardEdge.lineShadow}`)
-  assert.equal(cardEdge.headerBorderTop, '1px', `卡头顶部 1px 边线在场: ${cardEdge.headerBorderTop}`)
-  assert.ok(cardEdge.headerBorderTopColor.includes('rgb(127, 127, 127)'), `卡头边线同源色: ${cardEdge.headerBorderTopColor}`)
+  // A87 五轮：header 与卡行同机制（inset shadow）拼连续边框——顶/左/右/
+  // 分隔四段同源色；原 editorGroup-border 分隔线（部分主题不可视）已撤
+  assert.match(cardEdge.headerShadow, /rgba?\([^)]+\)\s+0px\s+1px\s+0px\s+0px\s+inset/, `卡头顶部 1px 边线在场: ${cardEdge.headerShadow}`)
+  assert.match(cardEdge.headerShadow, /rgba?\([^)]+\)\s+0px\s+-1px\s+0px\s+0px\s+inset/, `header 分隔线在场: ${cardEdge.headerShadow}`)
+  assert.match(cardEdge.headerShadow, /rgba?\([^)]+\)\s+1px\s+0px\s+0px\s+0px\s+inset/, `卡头左侧边线在场: ${cardEdge.headerShadow}`)
+  assert.match(cardEdge.headerShadow, /rgba?\([^)]+\)\s+-1px\s+0px\s+0px\s+0px\s+inset/, `卡头右侧边线在场: ${cardEdge.headerShadow}`)
+  assert.ok((cardEdge.headerShadow.match(/rgb\(127, 127, 127\)/g) ?? []).length >= 4, `header 四段边线同源不透明中灰: ${cardEdge.headerShadow}`)
+  assert.equal(cardEdge.headerBorderBottom, '0px', `分隔线不再走 border（迁 shadow）: ${cardEdge.headerBorderBottom}`)
 
   // ---- 明暗主题绘制层（live）----
 
