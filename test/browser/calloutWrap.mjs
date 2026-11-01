@@ -109,6 +109,13 @@ try {
   await setTheme('light')
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   await page.screenshot({ path: path.join(root, 'out/test/t677-callout-wrap-light.png'), fullPage: true })
+  // 复位主题（截图前的默认态：无主题 class、无行内变量）——light 态不
+  // 得泄漏进后续段落（段间隐式耦合）
+  await page.evaluate(() => {
+    document.body.classList.remove('vscode-dark', 'vscode-light')
+    document.body.style.removeProperty('--vscode-editor-foreground')
+    document.body.style.removeProperty('--vscode-editor-background')
+  })
 
   // ---- 20 次同坐标点击（S1 口径）----
   // 靶点选几何稳定行：正文行/懒延续行（无标记显隐）。标题行首击精确即可
