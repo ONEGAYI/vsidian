@@ -571,6 +571,69 @@ describe('折叠（#82）', () => {
       expect(items.find((i) => i.widget)!.widget!.folded).toBe(true)
       expect(state.selection.main.head).toBe(FENCE_FROM - 1)
     })
+
+    it('PR678-005：整篇围栏无尾换行（块外无合法位置）——光标块尾边界点击折叠照常收起', () => {
+      const text = '```js\nx()\n```' // length 13，围栏 [0, 13]，无块外位置
+      let state = EditorState.create({
+        doc: text,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(text.indexOf('x()') + 3), // 光标在 x() 后（块内）
+      })
+      const migrated = migrateSelectionForCodeCardFold(state.selection, 0, 13, text.length)
+      expect(migrated).not.toBeNull() // 旁落到 min(14,13)=13（块尾边界）
+      state = state.update({
+        effects: codeCardFoldToggle.of(0),
+        selection: migrated!,
+      }).state
+      const items = itemsOf(state.field(codeCardDecorations))
+      expect(items.filter((i) => i.hide)).toHaveLength(1)
+      expect(items.find((i) => i.widget)!.widget!.folded).toBe(true)
+    })
+
+    it('PR678-005 对照：同文档补尾换行（块后有位置）——行为不回归', () => {
+      const text = '```js\nx()\n```\n'
+      let state = EditorState.create({
+        doc: text,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(text.indexOf('x()') + 3),
+      })
+      const migrated = migrateSelectionForCodeCardFold(state.selection, 0, 13, text.length)
+      expect(migrated!.ranges[0]!.head).toBe(14) // 块后（换行处）
+      state = state.update({ effects: codeCardFoldToggle.of(0), selection: migrated! }).state
+      expect(itemsOf(state.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(true)
+    })
+
+    it('PR678-005 打字安全：收起态光标在块尾边界键入——新字符落在收起区间外可见，收起保持', () => {
+      const text = '```js\nx()\n```'
+      let state = EditorState.create({
+        doc: text,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(13), // 块尾边界（文档末）
+      })
+      // 光标在块尾边界本身：不算编辑抑制（物理在收起区间右界外）——直接折叠即收起
+      state = state.update({ effects: codeCardFoldToggle.of(0) }).state
+      expect(itemsOf(state.field(codeCardDecorations)).find((i) => i.widget)!.widget!.folded).toBe(true)
+      // 键入发生在边界外（回车起行——直接贴闭围栏行尾打字母会破坏闭合
+      // 围栏语法、卡正确退场，那是源文语义而非隐藏输入）：新行内容在收
+      // 起区间 [0,13) 之外可见，围栏仍闭合、收起保持
+      state = state.update({ changes: { from: 13, insert: '\nnew' }, selection: { anchor: 17 } }).state
+      const items = itemsOf(state.field(codeCardDecorations))
+      expect(items.find((i) => i.widget)!.widget!.folded).toBe(true)
+      // 新行内容从 pos 14 起（hide 收起区间 [0,14) 只含到闭围栏行尾换行）
+      expect(items.filter((i) => i.hide).some((i) => i.from <= 14 && i.to > 14)).toBe(false)
+    })
   })
 
   it('折叠随编辑位置映射：块前插入一行后折叠仍生效', () => {

@@ -221,6 +221,14 @@ try {
   await page.evaluate(() => window.setCodeMode('reading'))
   await page.waitForSelector('.vsidian-reading-block.vsidian-reading-code-card')
   const readCard = page.locator('.vsidian-reading-block.vsidian-reading-code-card').first()
+  // A87 四轮：阅读卡壳 1px 边线（callout 容器底色上的可辨性，与 Live
+  // 行级/header 边线同源变量 --vsidian-code-card-border）
+  const readCardEdge = await readCard.evaluate((el) => ({
+    width: getComputedStyle(el).borderTopWidth,
+    color: getComputedStyle(el).borderTopColor,
+  }))
+  assert.equal(readCardEdge.width, '1px', `阅读卡壳 1px 边线在场: ${JSON.stringify(readCardEdge)}`)
+  assert.ok(readCardEdge.color.includes('rgb(127, 127, 127)'), `阅读卡壳边线为不透明中灰: ${JSON.stringify(readCardEdge)}`)
   const readHeader = readCard.locator('.vsidian-code-card-header')
   const readFold = readHeader.locator('button.vsidian-code-card-fold')
   // 折叠钮 x 恒定（收起态复制钮不渲染，同口径）

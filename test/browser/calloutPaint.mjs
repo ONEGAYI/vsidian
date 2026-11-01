@@ -25,7 +25,6 @@ const DOC = [
   '> [!note] 提示标题',
   '> 正文第一行',
   '> 正文第二行',
-  '> 正文有 `行内代码` 在内',
   '',
   '> 普通引用行',
   '',
@@ -33,8 +32,6 @@ const DOC = [
   '> ```md',
   '> [!tip] 伪标记字面',
   '> ```',
-  '',
-  '    缩进代码块行',
   '',
   '结尾段落。',
 ].join('\n')
@@ -79,8 +76,7 @@ try {
   assert.ok(titleLine.text.includes('提示标题'), '标题文字应可见')
   const bodyLine = liveLines.find((l) => l.text.includes('正文第一行'))
   assert.ok(bodyLine?.cls.split(' ').includes('callout-content'), '正文行应有 callout-content')
-  // 末行 = callout 最末正文行（A87 起为行内代码行）
-  const lastBody = liveLines.find((l) => l.text.includes('行内代码'))
+  const lastBody = liveLines.find((l) => l.text.includes('正文第二行'))
   assert.ok(lastBody?.cls.split(' ').includes('vsidian-callout-last'), '末行应有圆角类')
   const iconCount = await page.locator('.cm-line .callout-icon').count()
   assert.equal(iconCount, 2, '两个 note 的标题行各应有一个图标 widget')
@@ -154,7 +150,7 @@ try {
   assert.equal(sel.from, from, `拖选起点应精确: ${JSON.stringify(sel)}`)
   assert.ok(sel.to >= to - 1 && sel.to <= to, `拖选终点覆盖源区间（显形伴生 ≤1）: ${JSON.stringify(sel)} vs ${from}-${to}`)
 
-  // ---- A87（2026-11-01）：显形标记灰化 + 行内代码边线 ----
+  // ---- A87（2026-11-01）：显形标记灰化 + 代码卡壳边线 ----
   // 拖选态（非空选区覆盖行）语法标记在场：> 与 [!note] 挂灰化 span，
   // 转义符式透明度（随主题前景适配，规则层 0.55）；标题文字不进灰化
   const revealedMarks = await page.evaluate(() =>
@@ -168,27 +164,25 @@ try {
     assert.equal(m.opacity, '0.55', `灰化透明度 0.55（转义符式弱化）: ${JSON.stringify(m)}`)
   }
   assert.ok(!revealTexts.some((t) => t.includes('提示标题') || t.includes('正文')), `标题/正文不得进灰化区间: ${JSON.stringify(revealTexts)}`)
-  // 行内代码边线（callout 容器内的可辨性——A87 方案 A）：1px inset
-  // 细边线在场（不占布局），底色维持
-  const inlineCode = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('.cm-line .vsidian-inline-code')]
-      .find((e) => (e.textContent ?? '').includes('行内代码'))
-    if (!el) { return null }
-    const s = getComputedStyle(el)
-    return { shadow: s.boxShadow, bg: s.backgroundColor }
+  // 代码卡壳边线（A87 四轮，用户拍板方向）：callout 容器底色上的可辨
+  // 性——行级左右 1px inset 线（不占行高，同紫条先例）+ header 顶/左/
+  // 右实色 border，不透明中灰（参照系=临近容器底色，亮暗双主题可辨）
+  const cardEdge = await page.evaluate(() => {
+    const line = document.querySelector('.cm-line.vsidian-code-card-line')
+    const header = document.querySelector('.vsidian-code-card-header')
+    if (!line || !header) { return null }
+    return {
+      lineShadow: getComputedStyle(line).boxShadow,
+      headerBorderTop: getComputedStyle(header).borderTopWidth,
+      headerBorderTopColor: getComputedStyle(header).borderTopColor,
+    }
   })
-  assert.ok(inlineCode, 'callout 内行内代码 span 应存在')
-  // 边线可见度（A87 二轮）：0.4 透明灰叠 14% 灰底形同虚设——默认链改
-  // 主题边框色（--vscode-editorWidget-border 实色；测试环境无主题变量
-  // 落 fallback 0.6）。钉住 alpha ≥ 0.6（rgb() 无 alpha 段按 1）
-  const inlineEdge = /rgba?\(([^)]+)\)\s+0px\s+0px\s+0px\s+1px/.exec(inlineCode.shadow)?.[1] ?? ''
-  const inlineAlpha = inlineEdge.startsWith('#') || inlineEdge.startsWith('rgb(')
-    ? 1
-    : Number.parseFloat(inlineEdge.split(',')[3] ?? '1')
-  assert.ok(inlineEdge !== '', `行内代码 1px inset 边线在场: ${inlineCode.shadow}`)
-  assert.ok(Number.isFinite(inlineAlpha) && inlineAlpha >= 0.6,
-    `行内代码边线须为可见实色（alpha ≥ 0.6，主题边框色）: ${inlineCode.shadow}`)
-  assert.notEqual(inlineCode.bg, 'rgba(0, 0, 0, 0)', `行内代码底色维持: ${inlineCode.bg}`)
+  assert.ok(cardEdge, 'callout 内代码卡行级/header 应在场')
+  assert.match(cardEdge.lineShadow, /rgba?\([^)]+\)\s+1px\s+0px\s+0px\s+0px\s+inset/, `卡行左侧 1px 边线在场: ${cardEdge.lineShadow}`)
+  assert.match(cardEdge.lineShadow, /rgba?\([^)]+\)\s+-1px\s+0px\s+0px\s+0px\s+inset/, `卡行右侧 1px 边线在场: ${cardEdge.lineShadow}`)
+  assert.ok(cardEdge.lineShadow.includes('rgb(127, 127, 127)'), `卡行边线为不透明中灰（可辨）: ${cardEdge.lineShadow}`)
+  assert.equal(cardEdge.headerBorderTop, '1px', `卡头顶部 1px 边线在场: ${cardEdge.headerBorderTop}`)
+  assert.ok(cardEdge.headerBorderTopColor.includes('rgb(127, 127, 127)'), `卡头边线同源色: ${cardEdge.headerBorderTopColor}`)
 
   // ---- 明暗主题绘制层（live）----
 
@@ -246,30 +240,6 @@ try {
   // ---- reading：真实容器结构与绘制 ----
   await page.evaluate(() => window.setCalloutMode('reading'))
   await page.waitForSelector('.vsidian-view-reading .callout')
-  // A87：阅读侧行内代码同款 1px 边线（双模式观感一致）
-  const readingCode = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('.vsidian-view-reading .vsidian-reading-block code')]
-      .find((e) => (e.textContent ?? '').includes('行内代码'))
-    return el ? { shadow: getComputedStyle(el).boxShadow, inPre: !!el.closest('pre') } : null
-  })
-  assert.ok(readingCode, '阅读侧行内代码 code 应渲染')
-  const readingEdge = /rgba?\(([^)]+)\)\s+0px\s+0px\s+0px\s+1px/.exec(readingCode.shadow)?.[1] ?? ''
-  assert.ok(readingEdge !== '', `阅读侧行内代码 1px 边线在场: ${readingCode.shadow}`)
-  const readingAlpha = readingEdge.startsWith('#') || readingEdge.startsWith('rgb(')
-    ? 1
-    : Number.parseFloat(readingEdge.split(',')[3] ?? '1')
-  assert.ok(Number.isFinite(readingAlpha) && readingAlpha >= 0.6,
-    `阅读侧行内代码边线须为可见实色（alpha ≥ 0.6）: ${readingCode.shadow}`)
-  // PR678-004 负向：块级代码（fenced 与缩进的 pre>code）不吃行内边线
-  const blockCodeEdges = await page.evaluate(() =>
-    [...document.querySelectorAll('.vsidian-view-reading .vsidian-reading-block pre code')].map((el) => ({
-      shadow: getComputedStyle(el).boxShadow,
-      text: (el.textContent ?? '').slice(0, 10),
-    })))
-  assert.ok(blockCodeEdges.length >= 2, `阅读态应有 fenced 与缩进两类块级 code: ${JSON.stringify(blockCodeEdges)}`)
-  for (const b of blockCodeEdges) {
-    assert.equal(b.shadow, 'none', `块级代码不吃行内边线（004）: ${JSON.stringify(b)}`)
-  }
   const reading = await page.evaluate(() => {
     const root = document.querySelector('.vsidian-view-reading .callout')
     if (!root) return null

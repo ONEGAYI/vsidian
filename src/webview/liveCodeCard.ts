@@ -546,8 +546,15 @@ export function buildCodeCardDecorations(
       continue
     }
     // #251 命中显形：替换区间（含被清空的围栏行）与活跃命中相交时按
-    // 编辑态处理——围栏行源码可见，命中 mark 随之可画（块级回源）
-    const editing = selectionTouchesRange(selection, fence.from, fence.to) ||
+    // 编辑态处理——围栏行源码可见，命中 mark 随之可画（块级回源）。
+    // PR678-005（A87 四轮）：块尾即文档末尾（整篇围栏无尾换行）时触及
+    // 右界收一位——selectionTouchesRange 的闭区间右端点（编辑便利语义）
+    // 会把「光标恰在块尾边界」误算成块内，而该位置物理处于收起 replace
+    // 区间右界外（源码可见），块外又无合法位置可旁落，收起永远被压住。
+    // 收窄后：光标在块尾边界不算编辑抑制；插入发生在边界外，新字符可
+    // 见（无隐藏输入窗口）。有尾换行/块后有内容时 to < docLength，不触发
+    const blockTouchTo = fence.to === doc.length ? fence.to - 1 : fence.to
+    const editing = selectionTouchesRange(selection, fence.from, blockTouchTo) ||
       hitIntersectsRange(hits, fence.from, fence.to)
     // 折叠收起（#82）：光标在块内时临时展开；收起态无复制按钮（规格）。
     // 折叠只在卡片开启时呈现（朴素围栏无头部可挂 chevron）
