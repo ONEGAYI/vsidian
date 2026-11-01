@@ -4253,8 +4253,10 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   font-family: var(--vscode-editor-font-family, monospace);
   background-color: var(--vsidian-reading-code-background);
   /* A87（2026-11-01）与 live 侧 .vsidian-inline-code 同步的 1px 边线
-     （callout 容器底色上的可辨性；pre 内块级 code 已重置不承边线） */
-  box-shadow: inset 0 0 0 1px var(--vsidian-reading-code-border, rgba(128, 128, 128, 0.4));
+     （callout 容器底色上的可辨性；pre 内块级 code 已重置不承边线）。
+     使用点 fallback 与定义处同值（三轮不透明中灰）——定义在场时它是
+     死码，但防未来定义链变化时旧透明值诈尸 */
+  box-shadow: inset 0 0 0 1px var(--vsidian-reading-code-border, rgb(127, 127, 127));
   border-radius: 3px;
   padding: 0 3px;
 }
