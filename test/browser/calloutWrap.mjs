@@ -93,6 +93,30 @@ try {
   assert.equal(lineOf('列表内正文')?.wrapDepth, null, '列表内 callout 正文行 v1 不入 wrapper')
   assert.equal(lineOf('结尾段落')?.wrapDepth, null, '容器外正文不入 wrapper')
 
+  // ---- 双主题截图留档（#677/T05 收尾）：嵌套 wrapper + 列表内行级边界 ----
+  // 同屏含外层/内层嵌套、兄弟与列表内行级形态（v1 边界）；明暗各一张
+  // fullPage 留证（out/test/ 为 gitignored 观感复核留档，不参与 CI 对拍
+  // ——套件断言仍以结构/computed/绘制层为准）
+  const setTheme = (theme) => page.evaluate((t) => {
+    document.body.classList.toggle('vscode-dark', t === 'dark')
+    document.body.classList.toggle('vscode-light', t === 'light')
+    document.body.style.setProperty('--vscode-editor-foreground', t === 'dark' ? '#d4d4d4' : '#1f2328')
+    document.body.style.setProperty('--vscode-editor-background', t === 'dark' ? '#1e1e1e' : '#ffffff')
+  }, theme)
+  await setTheme('dark')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await page.screenshot({ path: path.join(root, 'out/test/t677-callout-wrap-dark.png'), fullPage: true })
+  await setTheme('light')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await page.screenshot({ path: path.join(root, 'out/test/t677-callout-wrap-light.png'), fullPage: true })
+  // 复位主题（截图前的默认态：无主题 class、无行内变量）——light 态不
+  // 得泄漏进后续段落（段间隐式耦合）
+  await page.evaluate(() => {
+    document.body.classList.remove('vscode-dark', 'vscode-light')
+    document.body.style.removeProperty('--vscode-editor-foreground')
+    document.body.style.removeProperty('--vscode-editor-background')
+  })
+
   // ---- 20 次同坐标点击（S1 口径）----
   // 靶点选几何稳定行：正文行/懒延续行（无标记显隐）。标题行首击精确即可
   // ——光标进入后标记 widget 按端点语义显形源码、行几何变化，同坐标连击
@@ -145,18 +169,17 @@ try {
   assert.equal(typed.wrapDepth, '2', `键入后行应仍在内层 wrapper: ${JSON.stringify(typed)}`)
   assert.equal(typed.wrapCount, 3, '键入后 wrapper 数量不变')
 
-  // ---- 热样式：wrapper padding 变更后 20 点击仍准（padding 入记账）----
-  // 沉淀：padding 变更后 CM6 异步重测量 heightmap——先触发测量并等待落地，
-  // 再取坐标连击（否则连击中途测量落地会使同坐标映射漂移，属测量时序而
-  // 非记账缺失）
-  // 产物 CSS 已有高特异性 padding 消费规则——热样式经变量覆盖（片段惯用形态）
+  // ---- 热样式：wrapper padding 变更后 20 点击仍准 ----
+  // #677 实测修订（2026-11-01）：T04/T05 生产装配（rootOwnedViewExtensions）
+  // 下热样式「自愈」成立——rAF 落地后 coordsAtPos↔posAtCoords 一致（显式
+  // requestMeasure 前后坐标无变差，自愈已先行发生），20 点击全准。探针 S1
+  // 「短文档不自愈、稳定偏移 28px」属探针注入形态（手工 wrapper 装配），
+  // 生产不复发，无需工程接线；本断言把自愈行为钉住——未来装配变化若破坏
+  // 自愈即红。CSS 变更无 DOM mutation，rAF 等待保留（布局落地沉淀）
   await page.addStyleTag({ content: '.vsidian-callout-wrap.callout { --callout-padding: 14px 18px; }' })
-  // 热样式发现（2026-10-31 实测，诚实降级）：styles 变更无 DOM mutation，
-  // CM6 不自行察觉；短文档下 scroll/空 dispatch/视口 resize/沉降点击/重
-  // init 均不恢复 coordsAtPos↔posAtCoords 一致（映射稳定偏移 = 新增
-  // wrapper 边界空间 28px）。「片段热更新后的测量刷新」为 T05（#673）
-  // 测量设计项。本套对热样式只断言结构保持；padding 记账与坐标精度在
-  // 模式往返（docView 冷重建，全新测量）后验证
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() =>
+    requestAnimationFrame(resolve))))
+  await clickTwenty(await posOf('兄弟正文'), '热样式后兄弟正文（测量自愈）')
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() =>
     requestAnimationFrame(resolve))))
   const styledStructure = await page.evaluate(() => ({
