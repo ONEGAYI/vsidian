@@ -661,3 +661,23 @@ Linux 环境为隔离 Docker、Ubuntu24.04、Node22.23.4、VS Code1.82.3、Xvfb�
 本期在这项修复后结束排查，连同 #664 的几何采样和 #665 的正文初始化等待一并交付 PR。#12、#25、#27、#43及其他未定因项继续留在 #552，未扩大修复或调整其归组。0.5CPU下CSS/IME八文件八worker另有222/222负样本（CSS子进程902ms，原5秒预算），不勾销条目25。
 
 原始事件与失败日志为 `linux-ime-probes/parallel-tableInput552.log`、`home-metrics-red.log`、`table-input-permanent-red.log`；最终记录为 `final-browser-local.log`、`final-unit.log`、`browser-runner-final.log`、`final-compile.log`、`linux-ime-final-control.log`，均位于本轮 `out/test/552/`。中间方案在边沿返格和几何取样处的失败另留原日志，不据最终通过抹去，也不作为额外问题已修复的证据。
+
+## #552：真实 Ctrl 手势、引用表格回归与台账复核（2026-11-01）
+
+**新增修订是测试驱动缺口**。[#679](https://github.com/ONEGAYI/vsidian/issues/679) 的 `ctrlClickRendered` 原先把 `modifiers` 传给 `page.mouse.click`，真实浏览器收到的 `mousedown.ctrlKey` 仍为 false。普通单击在 mouseup 也能激活链接，原消息同构断言因此没有验证声称的 Ctrl 路径。先只新增真实事件断言，原驱动在首个链接失败；改为真实按下 Control、原中心点点击、finally 释放后通过，并断言正文选区不变。四类链接的原载荷与复制断言保留，生产代码、预算及归组不变。
+
+**引用表格的已知窗口由 PR #667 覆盖**。保留原拖选与边界导航步骤，仅在 Home 按下和 keyup 之间用既有 metricsCompartment 触发度量重配。构建时只替换为 `964c358c` 的生产 tableCellInput 模块，原边界类断言在约2.6秒失败；当前主线通过。新增永久回归放在引用表格自己的套件内，再次换旧模块时该新增断言失败，其余10项通过；当前三套件并发全过。原 CI 没有原生事件流，不宣称所有历史边界失败唯一同因。
+
+**#43 已有主线修订，补齐台账**。`8c96ede03a77f0465592b8f8c09fe357c3fcce66` 已等待三行抓手和可见网格后才发送一次选择，并有执行实际用例准备链的永久回归。本轮只核对落地与验证，不把该既有修订计为新代码。立即初始化后发送选择的浏览器对照本次亦通过，不能当作新的机制红态。
+
+| 验证 | 结果 |
+| --- | --- |
+| Ctrl 真实事件红绿 | 原驱动 ctrlKey=false，run-ffhzer，EXIT=1、TIMEOUT=false；修订后 run-Msoe7i 通过 |
+| 最终浏览器三并发 | contextMenu、blockquoteTablePaint、tableInput，3/3通过，18.86s，run-XYawdl |
+| 相关单测 | 4文件107/107；CSS后台错误子进程目标94.50ms，保留原5秒预算 |
+| 编译与类型检查 | compile / tsc通过，生成物无变化 |
+| 真宿主定向 | VS Code1.82.3、Windows独立桌面，#43和#246共2/2通过，1827/1381ms，宿主EXIT=0 |
+
+**继续未定因**：条目25本轮未出现超时；条目27在真实宿主通过，生产浏览器三种窗口高度/子响应延迟组合（640px/0ms、120px/0ms、240px/200ms）各做3次深度3→1→3，9/9恢复。它们均为负样本，不勾销。条目12继续按既定要求等新证据；PR #606未取得新的runner现场，不追加同因结论。contextMenu历史30秒超时也未复现，驱动修订与历史样本唯一归因分别记录。新本地修订在PR建立前不勾选。
+
+完整日志与报告保留在本轮工作树 `out/test/552-nov1/`：`context-gesture-red.log`、`context-gesture-green.log`、`quote-boundary-old-valid.log`、`quote-boundary-current.log`、`quote-permanent-red.log`、`browser-changes-green.log`、`unit-report.json`、`compile.log`、`integration-targets.log`及`depth-replay.log`。首次旧模块替换误命中shared同名文件而构建失败，保留为`quote-boundary-old.log`，0用例执行，不计产品红态。随后按用户要求补登记codeCardClickOffset.mjs、codeCardClickOffsetFixture.ts、calloutCommands.test.ts三项文件树遗漏，文件内容不变；strict校验通过，日志为`file-tree-complete.log`。
