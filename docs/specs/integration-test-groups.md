@@ -680,4 +680,4 @@ Linux 环境为隔离 Docker、Ubuntu24.04、Node22.23.4、VS Code1.82.3、Xvfb�
 
 **继续未定因**：条目25本轮未出现超时；条目27在真实宿主通过，生产浏览器三种窗口高度/子响应延迟组合（640px/0ms、120px/0ms、240px/200ms）各做3次深度3→1→3，9/9恢复。它们均为负样本，不勾销。条目12继续按既定要求等新证据；PR #606未取得新的runner现场，不追加同因结论。contextMenu历史30秒超时也未复现，驱动修订与历史样本唯一归因分别记录。新本地修订在PR建立前不勾选。
 
-完整日志与报告保留在本轮工作树 `out/test/552-nov1/`：`context-gesture-red.log`、`context-gesture-green.log`、`quote-boundary-old-valid.log`、`quote-boundary-current.log`、`quote-permanent-red.log`、`browser-changes-green.log`、`unit-report.json`、`compile.log`、`integration-targets.log`及`depth-replay.log`。首次旧模块替换误命中shared同名文件而构建失败，保留为`quote-boundary-old.log`，0用例执行，不计产品红态。文件树strict仍仅报基线既有三项漏登记，本轮未扩修。
+完整日志与报告保留在本轮工作树 `out/test/552-nov1/`：`context-gesture-red.log`、`context-gesture-green.log`、`quote-boundary-old-valid.log`、`quote-boundary-current.log`、`quote-permanent-red.log`、`browser-changes-green.log`、`unit-report.json`、`compile.log`、`integration-targets.log`及`depth-replay.log`。首次旧模块替换误命中shared同名文件而构建失败，保留为`quote-boundary-old.log`，0用例执行，不计产品红态。随后按用户要求补登记codeCardClickOffset.mjs、codeCardClickOffsetFixture.ts、calloutCommands.test.ts三项文件树遗漏，文件内容不变；strict校验通过，日志为`file-tree-complete.log`。
