@@ -38,8 +38,9 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     // 缘同 x，自身再圆角会让边线在接缝向内凹出 6px 缺口。顶边外圆角唯一
     // 承担者是头部横带的 border-radius: 6px 6px 0 0
     const edgeTop = rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top')
-    expect(edgeTop).toMatch(/border-top-left-radius:\s*0/)
-    expect(edgeTop).toMatch(/border-top-right-radius:\s*0/)
+    // 值边界锚定到分号：裸 /:\s*0/ 可前缀匹配 0.5px（review-loops F4 加固）
+    expect(edgeTop).toMatch(/border-top-left-radius:\s*0(?:px)?\s*;/)
+    expect(edgeTop).toMatch(/border-top-right-radius:\s*0(?:px)?\s*;/)
   })
 
   it('围栏行（首/尾行）左内边距走对齐公式：行号列宽 + 24px（#189 真实对齐，值按块注入）', () => {

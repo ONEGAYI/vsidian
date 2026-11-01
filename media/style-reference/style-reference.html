@@ -1614,14 +1614,14 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="live-code-card-edge">
       <h3><code>.vsidian-code-card-edge-top / -bottom</code><span class="eid">live-code-card-edge</span></h3>
-      <p class="purpose">卡片首/末行圆角修饰（无头部覆盖的底边圆角；顶边圆角由头部横带承担）。仅 live 侧发射；阅读卡片圆角由 .vsidian-reading-code-card 承担。</p>
+      <p class="purpose">卡片首/末行圆角修饰（无头部覆盖的底边圆角；顶边圆角由头部横带承担，首行顶角为直角）。仅 live 侧发射；阅读卡片圆角由 .vsidian-reading-code-card 承担。</p>
       <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
 
       <p class="obsidian">Obsidian 对应：无对应（圆角由 Obsidian 原生 code 块样式承担）</p>
 
       <p class="dom">DOM 关系：卡片首/末行元素。</p>
       <pre><code>.vsidian-code-card-edge-bottom {
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 6px 6px;
 }</code></pre>
       <p class="verify">验证：codeCardPaintCssContract</p>
       <p class="life">引入：#79（2026-09-26）</p>
