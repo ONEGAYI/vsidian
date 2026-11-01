@@ -548,6 +548,40 @@ describe('选区覆盖显形（2026-10-31 A86 验收改判）', () => {
   })
 })
 
+describe('语法标记显形灰化（2026-11-01 A87 验收）', () => {
+  it('引用行标记显形：> 前缀挂灰化 mark（含吞并的尾空格）', () => {
+    const doc = '> 甲行\n> 乙行\n'
+    const body = build(doc, { anchor: doc.indexOf('甲'), head: doc.indexOf('乙') + 1 })
+    expect(coveredTexts(body, 'vsidian-syntax-mark', doc)).toEqual(['> ', '> '])
+  })
+
+  it('callout 标记显形：[!note]+尾空格挂灰化，标题文字不挂（不伤非语法部分）', () => {
+    const doc = '> [!note] 标题\n> 正文\n'
+    const body = build(doc, { anchor: doc.indexOf('标'), head: doc.indexOf('正文') + 2 })
+    // 选区覆盖两行：标题行 > 与 [!note] 、正文行 > 都灰化（纯语法区间）；
+    // 标题文字「标题」与正文不进灰化列表
+    expect(coveredTexts(body, 'vsidian-syntax-mark', doc)).toEqual(['> ', '[!note] ', '> '])
+  })
+
+  it('隐藏态（光标远离）不发射灰化：渲染态 widget 照旧', () => {
+    const doc = '> [!note] 标题\n> 正文\n'
+    const body = build(doc, { anchor: doc.length })
+    expect(byClass(body).has('vsidian-syntax-mark')).toBe(false)
+  })
+
+  it('表格行端点显形同样灰化（> 格前缀在端点触及态）', () => {
+    const doc = '> | a | b |\n'
+    const body = build(doc, { anchor: 0 })
+    expect(coveredTexts(body, 'vsidian-syntax-mark', doc)).toEqual(['> '])
+  })
+
+  it('普通正文行不发射灰化（类不落在非语法文本上）', () => {
+    const doc = '普通正文行\n> 引用行\n'
+    const body = build(doc, { anchor: doc.indexOf('普'), head: doc.indexOf('引') })
+    expect(coveredTexts(body, 'vsidian-syntax-mark', doc)).toEqual(['> '])
+  })
+})
+
 describe('高亮 ==text==（#105）：#29 行内标记组语义', () => {
   it('光标离开：内容 span 常显高亮底色类、两端 == 定界符隐藏', () => {
     const doc = '正文 ==高亮== 文本'

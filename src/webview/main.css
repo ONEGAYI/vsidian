@@ -3424,8 +3424,21 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
 #app .cm-editor .cm-scroller .vsidian-inline-code {
   font-family: var(--vscode-editor-font-family, monospace);
   background-color: var(--vsidian-live-code-background, rgba(128, 128, 128, 0.14));
+  /* A87 验收（2026-11-01）：固定灰底在部分 callout 容器底色上对比不足
+     ——补 1px inset 边线（不占布局，与容器底色解耦，任意容器可辨；
+     VSCode 官方 Markdown 预览的 code 同为底色+边线组合）。阅读侧
+     .vsidian-reading-block code 同步（变量分开：live/reading 各可调） */
+  box-shadow: inset 0 0 0 1px var(--vsidian-live-code-border, rgba(128, 128, 128, 0.4));
   border-radius: 3px;
   padding: 0 2px;
+}
+
+/* 语法标记显形态弱化（A87 验收 2026-11-01）：显形的 > 与 [!xx] 以
+   转义符式透明度呈现；opacity 随正文前景自动适配明暗主题。装饰只包
+   纯语法区间（liveDecorations 的 syntaxMarkDeco），标题文字/正文
+   不受影响 */
+#app .cm-editor .cm-scroller .vsidian-syntax-mark {
+  opacity: 0.55;
 }
 
 /* #105 高亮内容 span：常显主题色高亮底（== 定界符显隐由装饰控制，见
@@ -4039,6 +4052,9 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   --vsidian-reading-font-size: var(--font-text-size, var(--vsidian-content-font-size));
   --vsidian-reading-line-height: var(--line-height-normal, var(--vsidian-content-line-height));
   --vsidian-reading-code-background: var(--code-background, var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12)));
+  /* A87（2026-11-01）行内代码边线：链结构与上面对称（片段惯例名 →
+     固定 fallback），与 live 侧 --vsidian-live-code-border 分开可调 */
+  --vsidian-reading-code-border: var(--code-border, rgba(128, 128, 128, 0.4));
   /* #53 起为 vsidian-main 的 flex 成员（顶栏高度扣减由 flex 分配，
      取代旧的固定 30px 减法高度） */
   flex: 1 1 auto;
@@ -4228,6 +4244,9 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 #app .vsidian-view-reading .vsidian-reading-block code {
   font-family: var(--vscode-editor-font-family, monospace);
   background-color: var(--vsidian-reading-code-background);
+  /* A87（2026-11-01）与 live 侧 .vsidian-inline-code 同步的 1px 边线
+     （callout 容器底色上的可辨性；pre 内块级 code 已重置不承边线） */
+  box-shadow: inset 0 0 0 1px var(--vsidian-reading-code-border, rgba(128, 128, 128, 0.4));
   border-radius: 3px;
   padding: 0 3px;
 }

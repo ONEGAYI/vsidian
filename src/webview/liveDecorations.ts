@@ -122,6 +122,11 @@ export const LIVE_CLASS_NAMES = {
   htmlComment: 'vsidian-html-comment',
   /** 引用行（`.HyperMD-quote` / `.cm-quote`） */
   quoteLine: 'vsidian-quote-line',
+  /** 语法标记显形弱化 span（A87 验收 2026-11-01）：显形态的 > 与
+   *  [!xx] 以转义符式透明度呈现——只包纯语法区间（QuoteMark/callout
+   *  声明含吞并的尾空格），标题文字与正文不进区间；透明度规则由
+   *  main.css 钉住 */
+  syntaxMark: 'vsidian-syntax-mark',
   /** ---- callout（#653/T02，T01 路线 A）：公开契约主类名直接用 Obsidian
    *  原名（.callout 家族即用户片段书写入口——主名即别名，别名桥不适用，
    *  条目见 styleContract callout）---- */
@@ -221,6 +226,11 @@ export const LIVE_CLASS_NAMES = {
 // ---- 装饰实例缓存：增量与全量构建产出相同实例，使 RangeSet.eq 成立 ----
 
 const hideDeco = Decoration.replace({})
+
+/** 语法标记显形弱化（A87 验收 2026-11-01）：显形态的 > 与 [!xx] 以
+ *  转义符式透明度呈现（opacity 规则在 main.css）；只包纯语法区间，
+ *  标题文字与正文不进区间——「不伤非语法部分」由区间来源保证 */
+const syntaxMarkDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.syntaxMark })
 
 const lineDecoCache = new Map<string, ReturnType<typeof Decoration.line>>()
 function lineDeco(cls: string): ReturnType<typeof Decoration.line> {
@@ -1298,6 +1308,9 @@ function emitForRange(
                 // 无显式标题：零宽默认标题 widget（源文派生，不写回源文）
                 out.push(calloutDefaultTitleDeco(calloutDefaultTitle(info.decl.type)).range(markerEnd))
               }
+            } else {
+              // 显形态：语法声明灰化（标题区间在下面单独发射，不进灰化）
+              out.push(syntaxMarkDeco.range(info.markerFrom, markerEnd))
             }
             if (info.decl.title !== undefined) {
               // 显式标题区间：标记后跳过前导空白到行尾（尾空白不进标题）
@@ -1506,11 +1519,15 @@ function emitForRange(
         if (inTable) {
           if (!endpointTouches(node.from, to)) {
             out.push(hideDeco.range(node.from, to))
+          } else {
+            out.push(syntaxMarkDeco.range(node.from, to))
           }
         } else {
           const line = doc.lineAt(node.from)
           if (!selectionRevealsLineMarkers(selection, node.from, to, line.from, line.to)) {
             out.push(hideDeco.range(node.from, to))
+          } else {
+            out.push(syntaxMarkDeco.range(node.from, to))
           }
         }
         return

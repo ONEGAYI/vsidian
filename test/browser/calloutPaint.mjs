@@ -25,6 +25,7 @@ const DOC = [
   '> [!note] 提示标题',
   '> 正文第一行',
   '> 正文第二行',
+  '> 正文有 `行内代码` 在内',
   '',
   '> 普通引用行',
   '',
@@ -76,7 +77,8 @@ try {
   assert.ok(titleLine.text.includes('提示标题'), '标题文字应可见')
   const bodyLine = liveLines.find((l) => l.text.includes('正文第一行'))
   assert.ok(bodyLine?.cls.split(' ').includes('callout-content'), '正文行应有 callout-content')
-  const lastBody = liveLines.find((l) => l.text.includes('正文第二行'))
+  // 末行 = callout 最末正文行（A87 起为行内代码行）
+  const lastBody = liveLines.find((l) => l.text.includes('行内代码'))
   assert.ok(lastBody?.cls.split(' ').includes('vsidian-callout-last'), '末行应有圆角类')
   const iconCount = await page.locator('.cm-line .callout-icon').count()
   assert.equal(iconCount, 2, '两个 note 的标题行各应有一个图标 widget')
@@ -150,6 +152,33 @@ try {
   assert.equal(sel.from, from, `拖选起点应精确: ${JSON.stringify(sel)}`)
   assert.ok(sel.to >= to - 1 && sel.to <= to, `拖选终点覆盖源区间（显形伴生 ≤1）: ${JSON.stringify(sel)} vs ${from}-${to}`)
 
+  // ---- A87（2026-11-01）：显形标记灰化 + 行内代码边线 ----
+  // 拖选态（非空选区覆盖行）语法标记在场：> 与 [!note] 挂灰化 span，
+  // 转义符式透明度（随主题前景适配，规则层 0.55）；标题文字不进灰化
+  const revealedMarks = await page.evaluate(() =>
+    [...document.querySelectorAll('.cm-line .vsidian-syntax-mark')].map((el) => ({
+      text: el.textContent ?? '', opacity: getComputedStyle(el).opacity,
+    })))
+  const revealTexts = revealedMarks.map((m) => m.text)
+  assert.ok(revealTexts.includes('[!note] '), `callout 声明显形且灰化: ${JSON.stringify(revealTexts)}`)
+  assert.ok(revealTexts.filter((t) => t.trim() === '>').length >= 2, `覆盖行 > 前缀显形且灰化: ${JSON.stringify(revealTexts)}`)
+  for (const m of revealedMarks) {
+    assert.equal(m.opacity, '0.55', `灰化透明度 0.55（转义符式弱化）: ${JSON.stringify(m)}`)
+  }
+  assert.ok(!revealTexts.some((t) => t.includes('提示标题') || t.includes('正文')), `标题/正文不得进灰化区间: ${JSON.stringify(revealTexts)}`)
+  // 行内代码边线（callout 容器内的可辨性——A87 方案 A）：1px inset
+  // 细边线在场（不占布局），底色维持
+  const inlineCode = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.cm-line .vsidian-inline-code')]
+      .find((e) => (e.textContent ?? '').includes('行内代码'))
+    if (!el) { return null }
+    const s = getComputedStyle(el)
+    return { shadow: s.boxShadow, bg: s.backgroundColor }
+  })
+  assert.ok(inlineCode, 'callout 内行内代码 span 应存在')
+  assert.match(inlineCode.shadow, /rgba?\([^)]+\)\s+0px\s+0px\s+0px\s+1px/, `行内代码 1px inset 边线在场: ${inlineCode.shadow}`)
+  assert.notEqual(inlineCode.bg, 'rgba(0, 0, 0, 0)', `行内代码底色维持: ${inlineCode.bg}`)
+
   // ---- 明暗主题绘制层（live）----
 
   /** 内置标准色通道：渐变绘制、bgc 透明 */
@@ -206,6 +235,14 @@ try {
   // ---- reading：真实容器结构与绘制 ----
   await page.evaluate(() => window.setCalloutMode('reading'))
   await page.waitForSelector('.vsidian-view-reading .callout')
+  // A87：阅读侧行内代码同款 1px 边线（双模式观感一致）
+  const readingCode = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.vsidian-view-reading .vsidian-reading-block code')]
+      .find((e) => (e.textContent ?? '').includes('行内代码'))
+    return el ? { shadow: getComputedStyle(el).boxShadow, inPre: !!el.closest('pre') } : null
+  })
+  assert.ok(readingCode, '阅读侧行内代码 code 应渲染')
+  assert.match(readingCode.shadow, /rgba?\([^)]+\)\s+0px\s+0px\s+0px\s+1px/, `阅读侧行内代码 1px 边线在场: ${readingCode.shadow}`)
   const reading = await page.evaluate(() => {
     const root = document.querySelector('.vsidian-view-reading .callout')
     if (!root) return null
