@@ -191,6 +191,53 @@ try {
   assert.ok((cardEdge.headerShadow.match(/rgb\(127, 127, 127\)/g) ?? []).length >= 4, `header 四段边线同源不透明中灰: ${cardEdge.headerShadow}`)
   assert.equal(cardEdge.headerBorderBottom, '0px', `分隔线不再走 border（迁 shadow）: ${cardEdge.headerBorderBottom}`)
 
+  // A87 六轮（2026-11-01 验收「不是连续线段」）：卡壳外缘在 header↔首围栏
+  // 行接缝处必须连续。此前首围栏行自带 6px 顶角圆角，边线在拼接处向内凹
+  // 出一道弧（探针：dpr=2 下 x=17→8 的十二设备像素台阶）。此处取像素证据：
+  // 沿整卡左缘逐扫描线取边线外缘 x，中段必须是单值（一条竖直直线）。
+  const seamProfile = await page.evaluate(async () => {
+    const header = document.querySelector('.vsidian-code-card-header')
+    const lines = [...document.querySelectorAll('.cm-line.vsidian-code-card-line')]
+    if (!header || !lines.length) { return null }
+    const hb = header.getBoundingClientRect()
+    const lb = lines[lines.length - 1].getBoundingClientRect()
+    return { left: hb.left, top: hb.top, bottom: lb.bottom, radius: getComputedStyle(lines[0]).borderTopLeftRadius }
+  })
+  assert.ok(seamProfile, '接缝连续性探针需要 header 与卡行在场')
+  assert.equal(seamProfile.radius, '0px', `首围栏行顶角应为直角（顶边圆角只由 header 承担）: ${seamProfile.radius}`)
+  const seamShot = await page.screenshot({
+    clip: { x: Math.round(seamProfile.left - 6), y: Math.round(seamProfile.top),
+      width: 12, height: Math.round(seamProfile.bottom - seamProfile.top) },
+  })
+  const edgeXs = await page.evaluate(async (b64) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob())
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const context = canvas.getContext('2d')
+    context.drawImage(bitmap, 0, 0)
+    const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data
+    const out = []
+    for (let y = 0; y < bitmap.height; y++) {
+      let first = null
+      for (let x = 0; x < bitmap.width; x++) {
+        // 边线像素是暗于两侧底色的中灰（127 一档，抗锯齿过渡更亮）
+        if (data[(y * bitmap.width + x) * 4] < 180) { first = x; break }
+      }
+      out.push(first)
+    }
+    return out
+  }, seamShot.toString('base64'))
+  // 跳过首尾各 16 设备像素：顶边/底边圆角过渡带（header 外圆角与尾行底圆角
+  // 本就该有弧），中段是 header 竖线 + 接缝 + 围栏行竖线
+  const middle = edgeXs.slice(16, -18).filter((x) => x !== null)
+  assert.ok(middle.length >= 40, `接缝扫描应覆盖足够扫描线（实际 ${middle.length}）`)
+  const distinct = [...new Set(middle)]
+  assert.equal(distinct.length, 1,
+    `卡壳左缘中段必须是单值竖线（接缝不得内凹）——实测 x 去重 ${JSON.stringify(distinct)}`)
+  const nullRows = edgeXs.slice(16, -18).filter((x) => x === null).length
+  assert.equal(nullRows, 0, `左缘中段不得出现边线缺行（断线）：缺 ${nullRows} 行`)
+
   // ---- 明暗主题绘制层（live）----
 
   /** 内置标准色通道：渐变绘制、bgc 透明 */

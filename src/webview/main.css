@@ -3209,8 +3209,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
 }
 
 #app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top {
-  border-top-left-radius: 6px;
-  border-top-right-radius: 6px;
+  /* A87 六轮（2026-11-01 验收「不是连续线段」根因）：首行顶角必须直角。
+     头部横带紧贴其上且左右缘同 x，此处再圆角会让边线在拼接处向内凹出
+     6px 缺口（探针实测 x=17→8 的十二设备像素弧线，dpr=2）。顶边外圆角
+     唯一承担者是头部横带（border-radius: 6px 6px 0 0） */
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
   /* #189 围栏行左内边距：编辑态围栏符号与代码文本列（行号列宽 + 24px）
      同 x 真实对齐；值按块注入（--vsidian-code-indent），行号关闭时为 0。
      #191 text-indent: 0 覆盖通用悬挂缩进——围栏行无行号 widget，保持

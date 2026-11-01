@@ -31,11 +31,15 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     expect(css).toMatch(/--vsidian-code-card-background:\s*var\(--vscode-textCodeBlock-background/)
   })
 
-  it('首尾行圆角修饰存在（头部承担顶边，尾行承担底边）', () => {
+  it('首尾行圆角：尾行圆角承担底边，首行顶角必须是直角（顶边唯一由头部承担）', () => {
     expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-bottom'))
       .toMatch(/border-bottom-left-radius:\s*6px/)
-    expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top'))
-      .toMatch(/border-top-left-radius:\s*6px/)
+    // A87 六轮（2026-11-01 验收「不是连续线段」）：首行紧贴头部横带且左右
+    // 缘同 x，自身再圆角会让边线在接缝向内凹出 6px 缺口。顶边外圆角唯一
+    // 承担者是头部横带的 border-radius: 6px 6px 0 0
+    const edgeTop = rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top')
+    expect(edgeTop).toMatch(/border-top-left-radius:\s*0/)
+    expect(edgeTop).toMatch(/border-top-right-radius:\s*0/)
   })
 
   it('围栏行（首/尾行）左内边距走对齐公式：行号列宽 + 24px（#189 真实对齐，值按块注入）', () => {
