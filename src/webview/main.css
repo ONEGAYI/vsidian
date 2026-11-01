@@ -3425,12 +3425,13 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   font-family: var(--vscode-editor-font-family, monospace);
   background-color: var(--vsidian-live-code-background, rgba(128, 128, 128, 0.14));
   /* A87 验收（2026-11-01）：固定灰底在部分 callout 容器底色上对比不足
-     ——补 1px inset 边线（不占布局，与容器底色解耦，任意容器可辨；
-     VSCode 官方 Markdown 预览的 code 同为底色+边线组合）。二轮（同日
-     验收反馈）：0.4 透明灰叠 14% 灰底同色系形同虚设——默认链改主题
-     边框色（--vscode-editorWidget-border 实色，亮暗自适应）。阅读侧
+     ——补 1px inset 边线（不占布局）。三轮（同日验收反馈）定参照系：
+     边线对比的是**紧贴的底色**（14% 灰叠容器底），不是全局背景——主题
+     widget token（editorWidget-border）不感知容器且部分主题下值不可用
+     （实际无边框），弃用；默认改不透明中灰：亮底上是深线、暗底上是
+     亮线，与任何叠加底色都拉开至少一档，双主题通用。阅读侧
      .vsidian-reading-block code 同步（变量分开：live/reading 各可调） */
-  box-shadow: inset 0 0 0 1px var(--vsidian-live-code-border, var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.6)));
+  box-shadow: inset 0 0 0 1px var(--vsidian-live-code-border, rgb(127, 127, 127));
   border-radius: 3px;
   padding: 0 2px;
 }
@@ -4055,9 +4056,9 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   --vsidian-reading-line-height: var(--line-height-normal, var(--vsidian-content-line-height));
   --vsidian-reading-code-background: var(--code-background, var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12)));
   /* A87（2026-11-01）行内代码边线：链结构与上面对称（片段惯例名 →
-     主题边框色 → 固定 fallback，二轮起实色可见），与 live 侧
+     不透明中灰 fallback，参照系=紧贴底色，见 live 侧注释），与 live 侧
      --vsidian-live-code-border 分开可调 */
-  --vsidian-reading-code-border: var(--code-border, var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.6)));
+  --vsidian-reading-code-border: var(--code-border, rgb(127, 127, 127));
   /* #53 起为 vsidian-main 的 flex 成员（顶栏高度扣减由 flex 分配，
      取代旧的固定 30px 减法高度） */
   flex: 1 1 auto;

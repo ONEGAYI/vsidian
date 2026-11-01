@@ -38,6 +38,7 @@ import {
   codeCardCopyRequest,
   codeCardFoldField,
   codeCardFoldToggle,
+  migrateSelectionForCodeCardFold,
   type CodeCardConfig,
 } from './codeCardState'
 
@@ -213,12 +214,28 @@ export class CodeCardHeaderWidget extends WidgetType {
         }
       }))
     }
-    // 折叠切换闭包：按钮与整条热区共用同一入口（#190）
+    // 折叠切换闭包：按钮与整条热区共用同一入口（#190）。A87 三轮起事务
+    // 同携旁落选区（光标在卡内点击折叠时迁出隐藏区间——否则 editing 判定
+    // 压住收起形态，块折不上）；effect 值归一为围栏起始位置（fold 集合的
+    // 标识键），posAtDOM 的近似值不再直接入库
     const toggleFold = () => {
       const view = EditorView.findFromDOM(mount)
-      if (view) {
-        view.dispatch({ effects: codeCardFoldToggle.of(view.posAtDOM(mount)) })
+      if (!view) {
+        return
       }
+      const pos = view.posAtDOM(mount)
+      const fence = view.state.field(mermaidFencesField, false)?.spans
+        .find((f) => f.from <= pos && pos <= f.to)
+      if (!fence) {
+        view.dispatch({ effects: codeCardFoldToggle.of(pos) })
+        return
+      }
+      const migrated = migrateSelectionForCodeCardFold(
+        view.state.selection, fence.from, fence.to, view.state.doc.length)
+      view.dispatch({
+        effects: codeCardFoldToggle.of(fence.from),
+        ...(migrated ? { selection: migrated } : {}),
+      })
     }
     actions.appendChild(buildFoldButton(this.folded, toggleFold))
     // #190 整条折叠热区：头部横带整体可点击切换折叠，排除按钮本身；

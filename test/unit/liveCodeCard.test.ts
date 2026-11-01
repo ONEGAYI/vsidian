@@ -27,6 +27,7 @@ import {
 } from '../../src/webview/liveCodeCard'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { mermaidFencesField } from '../../src/webview/liveMermaid'
+import { migrateSelectionForCodeCardFold } from '../../src/webview/codeCardState'
 import { resolveCodeLanguage, codeInfoFirstWord } from '../../src/shared/codeLangs'
 import { READY_CODE_LANGUAGE_FIXTURES } from '../fixtures/readyCodeLanguages'
 import { DIALECT_CODE_FIXTURES } from '../fixtures/codeDialects'
@@ -515,6 +516,61 @@ describe('折叠（#82）', () => {
     const items = itemsOf(state.field(codeCardDecorations))
     expect(items.filter((i) => i.cls?.includes(CODE_CARD_CLASS_NAMES.line))).toHaveLength(5)
     expect(items.filter((i) => i.hide)).toHaveLength(2) // 回到围栏行清空
+  })
+
+  describe('折叠旁落光标（2026-11-01 A87 三轮验收）：光标在卡内点击折叠', () => {
+    const FENCE_TO = DOC.lastIndexOf('```') + 3
+
+    it('纯函数：光标在块内 → 迁块上一行行尾（紧贴卡头、隐藏区间外）', () => {
+      const migrated = migrateSelectionForCodeCardFold(
+        EditorSelection.single(DOC.indexOf('let')), FENCE_FROM, FENCE_TO, DOC.length)
+      expect(migrated).not.toBeNull()
+      expect(migrated!.ranges[0]!.head).toBe(FENCE_FROM - 1)
+    })
+
+    it('纯函数：光标在块外 → null（旁落不越权）', () => {
+      expect(migrateSelectionForCodeCardFold(
+        EditorSelection.single(0), FENCE_FROM, FENCE_TO, DOC.length)).toBeNull()
+    })
+
+    it('纯函数：非空选区跨块该 range 收拢到落点，块外 range 原样保持', () => {
+      const sel = EditorSelection.create([
+        EditorSelection.range(0, 3),
+        EditorSelection.range(DOC.indexOf('let'), DOC.indexOf('const')),
+      ])
+      const migrated = migrateSelectionForCodeCardFold(sel, FENCE_FROM, FENCE_TO, DOC.length)!
+      expect(migrated.ranges[0]!.from).toBe(0)
+      expect(migrated.ranges[0]!.to).toBe(3)
+      expect(migrated.ranges[1]!.empty).toBe(true)
+      expect(migrated.ranges[1]!.head).toBe(FENCE_FROM - 1)
+    })
+
+    it('纯函数：文档首行围栏（from=0）→ 落块后（闭围栏行行尾后）', () => {
+      const migrated = migrateSelectionForCodeCardFold(EditorSelection.single(4), 0, 7, 20)!
+      expect(migrated.ranges[0]!.head).toBe(8)
+    })
+
+    it('事务同携折叠与旁落：收起态真实呈现（不再被编辑态压住），光标停块外', () => {
+      let state = EditorState.create({
+        doc: DOC,
+        extensions: [
+          liveDecorationsField, mermaidFencesField,
+          codeCardConfigFacet.of({ card: true, lineNumbers: true, copyButton: true, highlight: true }),
+          codeCardFoldField, codeCardDecorations,
+        ],
+        selection: EditorSelection.single(DOC.indexOf('let a')),
+      })
+      const migrated = migrateSelectionForCodeCardFold(state.selection, FENCE_FROM, FENCE_TO, DOC.length)
+      expect(migrated).not.toBeNull()
+      state = state.update({
+        effects: codeCardFoldToggle.of(FENCE_FROM),
+        selection: migrated!,
+      }).state
+      const items = itemsOf(state.field(codeCardDecorations))
+      expect(items.filter((i) => i.hide)).toHaveLength(1)
+      expect(items.find((i) => i.widget)!.widget!.folded).toBe(true)
+      expect(state.selection.main.head).toBe(FENCE_FROM - 1)
+    })
   })
 
   it('折叠随编辑位置映射：块前插入一行后折叠仍生效', () => {

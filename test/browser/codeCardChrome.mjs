@@ -194,6 +194,29 @@ try {
   await page.waitForTimeout(150)
   assert.equal(await collapsedCount(), 0, '#190 Live 点击复制钮不得触发折叠')
 
+  // (e-live) A87 三轮（2026-11-01）：光标在卡内点击折叠 → 收起真实呈现
+  // （editing 判定不再压住收起形态）+ 光标旁落块外（与 calloutFold 折叠
+  // 旁落一致）
+  const blockSel = () => page.evaluate(() => {
+    const view = window.controller.getView()
+    const doc = view.state.doc.toString()
+    const open = doc.indexOf('```js')
+    const close = doc.indexOf('\n```', open) + 4
+    const head = view.state.selection.main.head
+    return { open, close, head, inBlock: head >= open && head <= close }
+  })
+  await page.locator('.cm-line.vsidian-code-card-line', { hasText: 'const a = 1;' }).click()
+  const beforeFold = await blockSel()
+  assert.ok(beforeFold.inBlock, `点击代码行后光标应在卡内: ${JSON.stringify(beforeFold)}`)
+  await smallFold.click()
+  await page.waitForFunction(() => document.querySelectorAll('.vsidian-code-card-fold-collapsed').length === 1)
+  const afterFold = await blockSel()
+  assert.equal(afterFold.inBlock, false, `光标应旁落到块外（紧贴卡头）: ${JSON.stringify(afterFold)}`)
+  assert.equal(await collapsedCount(), 1, '光标旁落后收起态应真实保持（不被编辑态压回）')
+  // 复位（后续阅读断言自理前置状态）
+  await smallFold.click()
+  await page.waitForFunction(() => document.querySelectorAll('.vsidian-code-card-fold-collapsed').length === 0)
+
   // (c) 阅读视图同口径：纯 CSS 整卡悬停 + 折叠钮 x 恒定 + 热区
   await page.evaluate(() => window.setCodeMode('reading'))
   await page.waitForSelector('.vsidian-reading-block.vsidian-reading-code-card')
