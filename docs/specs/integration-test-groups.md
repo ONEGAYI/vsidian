@@ -75,7 +75,7 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 
 tableCaret 的原始两次失败已确认是 `handle-hover` 读隐藏新增带 opacity 时得到空串，报告 `TIMEOUT=false`；约 70s 是套件总耗时。控件重建期间取到脱离 DOM 的节点可稳定复现同款失败。修复将查询与样式读取合在同一浏览器回调，补充重建期间的连续采样回归，并恢复 core；该候选须在同一提交两轮独立 CI 通过后合并，远端证据与勾销状态记录于修复 PR 和 #446 条目 9。根因与本地红绿证据见本文末节。
 
-tableInput 曾因 PR #650 / run40656739949 两次边沿 IME 超时由 #660 移入敏感组。2026-10-30 在 Linux 0.5CPU 三并发下复现同一30秒等待；原生事件显示 Home 落点在 keyup 前被度量回投重置，随后中文写入表头。生产回投修订与原生按住导航键重配回归随本批交付，用户要求恢复 core；两个未修复的附加组件套件继续敏感。合并前仍按同提交多轮 CI 核对恢复候选，记录见本文末尾及 #552。
+tableInput 曾因 PR #650 / run40656739949 两次边沿 IME 超时由 #660 移入敏感组。2026-10-30 在 Linux 0.5CPU 三并发下复现同一30秒等待；原生事件显示 Home 落点在 keyup 前被度量回投重置，随后中文写入表头。生产回投修订与原生按住导航键重配回归随本批交付，用户要求恢复 core；两个未修复的附加组件套件继续敏感。合并前仍按同提交多轮 CI 核对恢复候选；历史记录见本文末尾和已归档的 #552。
 
 ### CI 语义
 
@@ -83,7 +83,7 @@ tableInput 曾因 PR #650 / run40656739949 两次边沿 IME 超时由 #660 移�
 - 新 job `browser-sensitive` 设 `VSIDIAN_TEST_BROWSER_GROUP=sensitive`，不在任何 needs 链上：不用 continue-on-error、不自动重试、不放宽断言——失败保留红灯、逐套件报告与非零退出码，整轮 workflow 可为 failure，但不阻断必需检查。
 - 本地默认（不设环境变量）仍是全量，回归习惯与全量验证口径不变；`VSIDIAN_TEST_BROWSER_GROUP=sensitive npm run test:browser` 单跑敏感组（Git Bash），PowerShell 用 `$env:VSIDIAN_TEST_BROWSER_GROUP='sensitive'` 后清除。
 
-此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组本身不修复产品行为、不修改套件断言；名单内两套件的共享构建互删已由 PR #520 初步修复，敏感分组仍保留，历史归因与处置见 #446 条目5/9。#446 已关闭归档，后续新增未定性失败统一记录于[跟踪集合 #552](https://github.com/ONEGAYI/vsidian/issues/552)。
+此处「敏感」与集成第五组同义：基于证据的临时隔离，不是豁免归因，不能用来自动归类未来的新失败。移入须有独立日志与明确决定；移回 core（恢复 browser 强制面）须同提交多次 CI 验证通过。分组本身不修复产品行为、不修改套件断言；名单内两套件的共享构建互删已由 PR #520 初步修复，敏感分组仍保留，历史归因与处置见 #446 条目5/9。#446、#552 均已归档，后续新增未定性失败统一记录于[跟踪集合 #684](https://github.com/ONEGAYI/vsidian/issues/684)。
 
 ### Windows 剪贴板族诊断与互斥（2026-10-10）
 
@@ -524,7 +524,7 @@ PR #517首候选a5c70036的CI38571228234第1片103/104，ui-command再次等待�
 
 ## #446 条目12：历史弹窗等待阶段定位与诊断补全（2026-10-15）
 
-**后续入口已迁移**：本节保留历史调查记录；条目12仍未定因、未修复，现于[#552](https://github.com/ONEGAYI/vsidian/issues/552)等待新证据。旧 #446 已按用户要求归档关闭。
+**后续入口已迁移**：本节保留历史调查记录；条目 12 仍未定因、未修复，现于 [#684](https://github.com/ONEGAYI/vsidian/issues/684) 等待新证据。旧集合 #446、#552 均已归档。
 
 **已定位到第二段弹窗SVG等待**。原主线696a1668的CI38521864148第2片在60841ms超时。按原提交归档源码及原lockfile重新安装依赖，只重建集成入口（esbuild0.28.2、原node18/cjs配置）；lockfile与构建脚本git对象分别为7f1bd52c656cfd847a4ca35bc774a3700f79bcc9、b3685f5936b4c43823780365ff71db115176c78f。旧堆栈70875:13、76270:20、85812:9三处均与重建bundle对齐，source map对应cases.ts:1345、7464与index.ts:168；7464是弹窗请求之后等待overlay与overlaySvg的第二段。由此排除首次frame等待与后续reading等待为这一次超时所在阶段，不据此判定弹窗未打开还是取图失败。
 
@@ -616,7 +616,7 @@ symbolInput 原 76 场景本机基线为 37.024s；复用夹具并新增隔离�
 
 其余本轮未复现项继续未定因：表格边沿 IME 原生回放 12 次、六倍 CPU 减速 12 次均过；引用表格边界导航、四类渲染链接、未加持续重配的新增带悬停分别在六倍 CPU 减速下通过 12/8/10 轮。集成定向覆盖 #246、#381、#570、#13、#281、#569、#43、中格光标与 T10 注册目录。中格光标等待与 T10 全目录等待已分别由 `e69867e3`、`c8ca1c7f` 修改，不计本轮成果。条目12按既定安排等待新证据，未追加主动复现实验；PR #606 跨功能文件事件故障没有本轮新现场，不并因、不勾销。
 
-证据留在本轮工作树 `out/test/552/`：`hover-refresh-red.log`、`hover-refresh-red-confirm.log` 为受控红态，`hover-refresh-atomic.log` 为单变量对照，`hover-permanent-red.log` 为永久回归修复前失败，`browser-final.log`、`unit-baseline.log`、`integration-baseline.log` 为完整验证输出与退出码。永久红态报告为 `out/test/browser-runs/run-f1xWWE/`，修订后报告为 `out/test/browser-runs/run-lVomIa/`。修订登记于独立票 [#664](https://github.com/ONEGAYI/vsidian/issues/664) 及 [#552](https://github.com/ONEGAYI/vsidian/issues/552)；按用户后续要求，本轮修订在 PR 前不打勾，已取消对应勾选，已有主线修订的勾选保留。代码仍仅在本地。
+证据留在本轮工作树 `out/test/552/`：`hover-refresh-red.log`、`hover-refresh-red-confirm.log` 为受控红态，`hover-refresh-atomic.log` 为单变量对照，`hover-permanent-red.log` 为永久回归修复前失败，`browser-final.log`、`unit-baseline.log`、`integration-baseline.log` 为完整验证输出与退出码。永久红态报告为 `out/test/browser-runs/run-f1xWWE/`，修订后报告为 `out/test/browser-runs/run-lVomIa/`。修订登记于独立票 [#664](https://github.com/ONEGAYI/vsidian/issues/664) 及旧集合 #552。按用户后续要求，记录时修订尚未建 PR、仍在本地；已取消对应勾选，已有主线修订的勾选保留。
 
 文件树严格校验另报主线已有三项漏登记：`test/browser/codeCardClickOffset.mjs`、`test/browser/codeCardClickOffsetFixture.ts`、`test/unit/calloutCommands.test.ts`，本轮未扩大修复范围。首轮 Linux 镜像下载未完成，未启动容器回放；后续 Linux 补证见下节。
 
@@ -634,7 +634,7 @@ symbolInput 原 76 场景本机基线为 37.024s；复用夹具并新增隔离�
 
 Linux 环境为隔离 Docker、Ubuntu24.04、Node22.23.4、VS Code1.82.3、Xvfb、CI=1，1CPU/4GiB，以root运行本套不含权限负向的定向用例；不声称等同完整 CI runner。代码固定主线 `964c358c` 加本轮测试修订，依赖锁的暂存副本只替换 npm 下载域名，integrity 与版本不变，仓库 lockfile 未改。
 
-**历史归因仍有限制**。条目31原失败在“B 内块候选可见”，本轮受控真实宿主失败在“↓ 高亮首项”，等待点不同。修复固定已证明的初始化窗口，不把它写成历史全部样本的唯一原因。本轮修订在 PR 建立前不勾选；PR 与实际合入状态由独立票 [#665](https://github.com/ONEGAYI/vsidian/issues/665) 和 #552 维护。
+**历史归因仍有限制**。条目31原失败在“B 内块候选可见”，本轮受控真实宿主失败在“↓ 高亮首项”，等待点不同。修复固定已证明的初始化窗口，不把它写成历史全部样本的唯一原因。当时按约定在 PR 建立前不勾选；后续合入见独立票 [#665](https://github.com/ONEGAYI/vsidian/issues/665) 和 [PR #667](https://github.com/ONEGAYI/vsidian/pull/667)。
 
 继续排查的负样本分别保留：Windows 快速原生按键下边沿IME和引用表格边界导航通过；混排深度3→1→3在0/200ms子响应两组各10轮通过。Linux默认三并发原 `tableInput,blockquoteTablePaint,contextMenu` 三套件在1CPU通过，耗时21.89/30.01/34.75秒；它们仍未定因，不因本次通过勾销。
 
@@ -658,7 +658,7 @@ Linux 环境为隔离 Docker、Ubuntu24.04、Node22.23.4、VS Code1.82.3、Xvfb�
 
 按用户收尾要求，`tableInput` 恢复 core，名单与分组契约同步；两个尚未修复的附加组件敏感套件保留。恢复候选合并前仍按同提交多轮 CI 核对。独立记录见 [#666](https://github.com/ONEGAYI/vsidian/issues/666)；原CI缺少事件流，不将全部历史样本写成已获唯一归因。
 
-本期在这项修复后结束排查，连同 #664 的几何采样和 #665 的正文初始化等待一并交付 PR。#12、#25、#27、#43及其他未定因项继续留在 #552，未扩大修复或调整其归组。0.5CPU下CSS/IME八文件八worker另有222/222负样本（CSS子进程902ms，原5秒预算），不勾销条目25。
+本期在这项修复后结束排查，连同 #664 的几何采样和 #665 的正文初始化等待一并交付 PR。条目 12、25、27、#43 行列轮廓及其他当时未定因的样本保留在旧集合 #552，本轮未扩大修复或调整归组。至今仍未结的条目由 [#684](https://github.com/ONEGAYI/vsidian/issues/684) 跟踪。0.5CPU下CSS/IME八文件八worker另有222/222负样本（CSS子进程902ms，原5秒预算），不勾销条目25。
 
 原始事件与失败日志为 `linux-ime-probes/parallel-tableInput552.log`、`home-metrics-red.log`、`table-input-permanent-red.log`；最终记录为 `final-browser-local.log`、`final-unit.log`、`browser-runner-final.log`、`final-compile.log`、`linux-ime-final-control.log`，均位于本轮 `out/test/552/`。中间方案在边沿返格和几何取样处的失败另留原日志，不据最终通过抹去，也不作为额外问题已修复的证据。
 
