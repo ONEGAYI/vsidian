@@ -659,8 +659,8 @@ export class LiveEditorInstance {
    *  兜底）组合前事务可能已入账，起点差异无法补记，材料缺席退 null 不
    *  引入新错位（#495 补偿同口径）。与 multiCursorCompose（#495 选区补偿，
    *  互不依赖；空白格/表格组合（blankComposition 归表格管线）同样建立但
-   *  补驱动门控先行拦截，不消费。 */
-  private composeNetChanges: { startDoc: Text; net: ChangeSet } | null = null
+   *  补驱动门控先行拦截，不消费）。行末单光标另留起点供定稿光标校正。 */
+  private composeNetChanges: { startDoc: Text; net: ChangeSet; lineEndCaret: number | null } | null = null
   /** 组合期间到达、待 flush 的外部增量（按到达序） */
   private pendingExternal: BufferedIncremental[] = []
   /** 组合期间到达、待 flush 的全文消息（覆盖增量形态）。source 记录来源
@@ -1294,6 +1294,48 @@ export class LiveEditorInstance {
     if (!settled) {
       view.dispatch({ selection: derived })
     }
+  }
+
+  /**
+   * IME 在行末提交单个标点时，文本可能已插入，但浏览器仍报告插入点
+   * 之前的折叠选区。只在净变更能证明是起点光标处的纯追加时校正。
+   * 微任务等 CM6 定稿，不在组合事件内写 DOM；补全和附加组件随后读落点。
+   */
+  private settleLineEndPunctuationCaret(data: string): void {
+    const compose = this.composeNetChanges
+    const view = this.view
+    if (!view || !compose || compose.lineEndCaret === null ||
+        this.blankComposition !== null || this.compositionInTableRegion ||
+        data.length !== 1 || !/\p{P}/u.test(data)) {
+      return
+    }
+    const at = compose.lineEndCaret
+    let count = 0
+    let appended = false
+    compose.net.iterChanges((from, to, _fromB, _toB, inserted) => {
+      count++
+      appended = from === at && to === at && inserted.toString() === data
+    })
+    if (count !== 1 || !appended) return
+
+    const lineFrom = compose.startDoc.lineAt(at).from
+    const committedDoc = view.state.doc
+    const after = at + data.length
+    queueMicrotask(() => {
+      const { doc, selection } = view.state
+      if (view.compositionStarted || !view.hasFocus || doc !== committedDoc ||
+          selection.ranges.length !== 1 || !selection.main.empty) return
+      let head = selection.main.head
+      if (head === after) {
+        // DOM selectionchange 还没被 CM6 消费：模型已正确，仍须同步原生落点。
+        const dom = view.contentDOM.ownerDocument.getSelection()
+        if (!dom?.isCollapsed || !dom.focusNode || !view.contentDOM.contains(dom.focusNode)) return
+        head = view.posAtDOM(dom.focusNode, dom.focusOffset)
+      }
+      if (head >= lineFrom && head < at) {
+        view.dispatch({ selection: { anchor: after } })
+      }
+    })
   }
 
   /**
@@ -2741,9 +2783,13 @@ export class LiveEditorInstance {
       // R1 审查实证）
       this.composing = true
       if (this.view) {
+        const { doc, selection } = this.view.state
+        const head = selection.main.head
         this.composeNetChanges = {
-          startDoc: this.view.state.doc,
-          net: ChangeSet.empty(this.view.state.doc.length),
+          startDoc: doc,
+          net: ChangeSet.empty(doc.length),
+          lineEndCaret: selection.ranges.length === 1 && selection.main.empty &&
+            doc.lineAt(head).to === head ? head : null,
         }
       }
       this.beginBlankComposition()
@@ -3107,6 +3153,7 @@ export class LiveEditorInstance {
           // 放在 compositionend 而非事务过滤器的缘故）
           this.compensateMultiCursorCompose()
           this.scheduleFlush()
+          this.settleLineEndPunctuationCaret(event.data || '')
           // #399 组合定稿驱动行为链。实证（CDP + Chromium）：定稿事务
           // （insertCompositionText，userEvent 'input.type.compose'）**先于**
           // compositionend 派发、处于组合期门控窗口内被 maybeDriveAddonBehaviors

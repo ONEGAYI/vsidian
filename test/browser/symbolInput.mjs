@@ -201,6 +201,37 @@ try {
     await check(page, '（）', 2, '完整对不补')
   })
 
+  // 微信输入法现场：文档已正确插入标点，浏览器选区却留在最后一个「好」前。
+  // 真机第二笔组合事务同时携带文本变更和旧选区。用不同预编辑标点让
+  // CDP 定稿产生替换，再仅模拟 DOM 选区回退，仍由 CM6 观察并生成事务。
+  for (const [phase, mark, tail] of [
+    ['input', '：', '：'],
+    ['compositionend', '：', '：'],
+    ['compositionend', '“', '“”'],
+  ]) {
+    const doc = '测试\n  - 好还好好'
+    await scenario(`IME 定稿恢复行末光标：${phase} ${mark}`,
+      { doc, cursor: doc.length }, async (page) => {
+        await page.evaluate(({ phase, mark }) => {
+          const content = document.querySelector('.cm-content')
+          let inputs = 0
+          content.addEventListener(phase, (event) => {
+            if ((phase === 'input' && ++inputs !== 2) || event.data !== mark) return
+            const selection = getSelection()
+            selection.collapse(selection.focusNode, 3)
+          }, true)
+        }, { phase, mark })
+        await cdpSession.send('Input.imeSetComposition', {
+          text: phase === 'input' ? '；' : mark, selectionStart: 1, selectionEnd: 1,
+        })
+        await cdpSession.send('Input.insertText', { text: mark })
+        await nextPaint(page)
+        await check(page, doc + tail, doc.length + 1, '定稿光标应在输入符号后')
+        await page.keyboard.press('ArrowLeft')
+        await check(page, doc + tail, doc.length, '定稿后仍能主动左移')
+      })
+  }
+
   // ---- 代码上下文 ----
   for (const symbols of [true, false]) {
     await scenario(`行内代码后 IME 句号：组合期保留反引号、结束恢复隐藏（符号辅助 ${symbols}）`,
