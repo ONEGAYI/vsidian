@@ -10,7 +10,9 @@
 //   新链 load 前旧链持续生效；load 失败只移除失败的新链并回报，旧链保留。
 // - 明确停用/删除立即撤下（不在清单即摘链）。
 // - 幂等：同版本同 URI 不重装（无闪烁、无重复请求）。
+// - 文档样式后置：pending 与 settled 链均插在首个文档样式产物之前。
 import type { SnippetLinkList } from '../shared/cssSnippets'
+import { DOC_STYLE_ELEMENT_ATTR } from './docStyleLoader'
 
 /** 片段链元素标记（data 属性承载片段名；测试与诊断的观测位） */
 export const SNIPPET_LINK_ATTR = 'data-vsidian-snippet'
@@ -106,7 +108,7 @@ export class SnippetLoader {
           // URI 的下一次 apply 不摘除不重装（重装会闪断已生效规则），保持
           // pending 原样等待。DOM 顺序不参与 reorder：与「等待晋升的
           // pending 自带最新 DOM 位次」的既有语义一致（reorder 只重排
-          // settled；opaque 永不晋升，位次停留在自然 append 处即可——
+          // settled；opaque 永不晋升，位次停留在初次插入处即可——
           // 生产 webview 片段链与页面同源，不出现该态）。
           continue
         } else {
@@ -168,7 +170,7 @@ export class SnippetLoader {
       }
       link.addEventListener('load', () => settle(true))
       link.addEventListener('error', () => settle(false))
-      document.head.append(link)
+      document.head.insertBefore(link, document.head.querySelector(`style[${DOC_STYLE_ELEMENT_ATTR}]`))
       slot.pending = link
     }
     // 3. 稳态顺序（等待晋升的 pending 自带最新 DOM 位次，不参与重排）
@@ -210,10 +212,11 @@ export class SnippetLoader {
 
   /** settled 链按最近 apply 的清单顺序重排（DOM 移动不重新取资源） */
   private reorder(): void {
+    const firstDocumentStyle = document.head.querySelector(`style[${DOC_STYLE_ELEMENT_ATTR}]`)
     for (const name of this.order) {
       const el = this.slots.get(name)?.settled
       if (el) {
-        document.head.append(el)
+        document.head.insertBefore(el, firstDocumentStyle)
       }
     }
   }

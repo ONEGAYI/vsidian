@@ -83,27 +83,31 @@ export class NewlineCoordinator {
 
   /** 统计宿主坐标 pos 之前（严格小于）的 \r\n 数量 */
   private countCrlfBefore(hostPos: number): number {
-    let count = 0
-    for (const p of this.crlfPositions) {
-      if (p < hostPos) {
-        count++
+    let low = 0
+    let high = this.crlfPositions.length
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2)
+      if (this.crlfPositions[mid] < hostPos) {
+        low = mid + 1
       } else {
-        break
+        high = mid
       }
     }
-    return count
+    return low
   }
 
   /** 统计 LF 坐标 lfPos 之前的 CRLF 行尾数量（第 i 个 CRLF 的 LF 坐标为 crlfPositions[i] - i） */
   private countCrlfLfBefore(lfPos: number): number {
-    let count = 0
-    for (let i = 0; i < this.crlfPositions.length; i++) {
-      if (this.crlfPositions[i] - i < lfPos) {
-        count++
+    let low = 0
+    let high = this.crlfPositions.length
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2)
+      if (this.crlfPositions[mid] - mid < lfPos) {
+        low = mid + 1
       } else {
-        break
+        high = mid
       }
     }
-    return count
+    return low
   }
 }

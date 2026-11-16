@@ -85,6 +85,8 @@ export class AddonSettingsService {
   private readonly definitions = new Map<string, readonly AddonSettingDefinition[]>()
   /** 组件 ID → 组声明表（#472 声明序保留；与定义集同生命周期清换） */
   private readonly groups = new Map<string, readonly AddonSettingGroup[]>()
+  /** 已释放但仍被其他注册批引用的组，最后一个定义撤回时一起回收。 */
+  private readonly releasedGroups = new WeakSet<AddonSettingGroup>()
   private readonly user: LayerState
   private readonly workspace: LayerState
   private readonly listeners = new Set<(change: AddonSettingsChange) => void>()
@@ -160,6 +162,17 @@ export class AddonSettingsService {
   clearDefinitions(addonId: string): void {
     this.definitions.delete(addonId)
     this.groups.delete(addonId)
+  }
+
+  /** 撤回本次登记的定义/组，按对象身份区分重新登记的同名项；持久值不动。 */
+  releaseDefinitions(addonId: string, defs: readonly unknown[], groups: readonly unknown[]): void {
+    const remaining = this.definitionsOf(addonId).filter((def) => !defs.includes(def))
+    this.definitions.set(addonId, remaining)
+    const referenced = new Set(remaining.map((def) => def.group))
+    this.groups.set(addonId, this.groupsOf(addonId).filter((group) => {
+      if (groups.includes(group)) this.releasedGroups.add(group)
+      return !this.releasedGroups.has(group) || referenced.has(group.key)
+    }))
   }
 
   definitionsOf(addonId: string): readonly AddonSettingDefinition[] {

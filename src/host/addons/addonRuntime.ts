@@ -550,10 +550,15 @@ export class AddonRuntime {
             return NOOP_HANDLE
           }
           record.collectedDefinitions.push(...(stored as unknown[]))
+          this.notify()
+          let released = false
           return {
             dispose: () => {
-              const first = record.collectedDefinitions.indexOf(stored)
-              if (first >= 0) record.collectedDefinitions.splice(first, 1)
+              if (released || this.records.get(addonId) !== record) return
+              released = true
+              settings.releaseDefinitions(addonId, stored as unknown[], storedGroups ?? [])
+              record.collectedDefinitions = record.collectedDefinitions.filter((def) => !(stored as unknown[]).includes(def))
+              this.notify()
             },
           }
         },

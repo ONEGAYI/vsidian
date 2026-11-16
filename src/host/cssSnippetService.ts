@@ -277,11 +277,8 @@ export class CssSnippetService {
     if (typeof paused !== 'boolean') {
       return Promise.resolve({ ok: false, reason: 'invalid' })
     }
-    if (this.stored.paused === paused) {
-      return Promise.resolve({ ok: true, state: this.getState() })
-    }
     return this.serialize(async () => {
-      // 串行段内再查一次：并发翻转以最后一笔为准，中间笔自然跳过
+      // 等前序写入落定再判断幂等，不能用队列外旧状态丢弃反向操作。
       if (this.stored.paused === paused) {
         return { ok: true, state: this.getState() }
       }

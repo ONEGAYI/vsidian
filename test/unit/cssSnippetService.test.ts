@@ -418,6 +418,19 @@ describe('环境隔离分桶（#131：存储值内环境戳——globalState 宿
 })
 
 describe('暂停/恢复（#131：全局冻结叠加层，不清逐片段开关）', () => {
+  it.each([false, true])('R10 初始 paused=%s，连续反向操作以最后一笔为准', async (initial) => {
+    const storage = makeStorage()
+    const svc = makeService(storage, makeFs())
+    await svc.setPaused(initial)
+    const changed: boolean[] = []
+    svc.onChange((state) => changed.push(state.paused))
+    await Promise.all([svc.setPaused(!initial), svc.setPaused(initial)])
+    expect(svc.getState().paused).toBe(initial)
+    expect(storage.writes.at(-1)?.value).toMatchObject({ paused: initial })
+    expect(changed).toEqual([!initial, initial])
+    svc.dispose()
+  })
+
   it('setPaused(true)：持久化 paused、版本推进、通知 pause；清单与开关原样保留', async () => {
     const storage = makeStorage()
     const fs = makeFs(['a.css'])

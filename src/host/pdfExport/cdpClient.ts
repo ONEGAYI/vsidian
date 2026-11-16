@@ -59,6 +59,8 @@ function parseFrameHeader(buf: Buffer): FrameHeader | null {
 export class MiniWebSocket {
   private socket: Socket
   private buffer: Buffer = Buffer.alloc(0)
+  private frameChunks: Buffer[] = []
+  private frameBytes = 0
   private established = false
   private closed = false
   private fragments: Buffer[] = []
@@ -105,13 +107,14 @@ export class MiniWebSocket {
   }
 
   private onData(chunk: Buffer): void {
-    this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk])
     if (!this.established) {
+      this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk])
       // 握手阶段：解析到 \r\n\r\n 为止
       const headerEnd = this.buffer.indexOf('\r\n\r\n')
       if (headerEnd < 0) return
       const header = this.buffer.subarray(0, headerEnd).toString('utf8')
-      this.buffer = this.buffer.subarray(headerEnd + 4)
+      chunk = this.buffer.subarray(headerEnd + 4)
+      this.buffer = Buffer.alloc(0)
       if (!/^HTTP\/1\.1 101/.test(header)) {
         this.rejectReady(new Error(`WebSocket handshake failed (non-101 status): ${header.split('\r\n')[0]}`))
         this.destroy()
@@ -120,19 +123,29 @@ export class MiniWebSocket {
       this.established = true
       this.resolveReady()
     }
+    if (chunk.length === 0) return
+    this.frameChunks.push(chunk)
+    this.frameBytes += chunk.length
     // 帧解析循环
-    for (;;) {
-      const header = parseFrameHeader(this.buffer)
+    while (this.frameBytes > 0) {
+      // 帧头最长 14 字节；正文未齐时只窥读帧头，不反复复制累计正文。
+      const prefix = this.frameChunks.length === 1 ? this.frameChunks[0]
+        : Buffer.concat(this.frameChunks.slice(0, 14), Math.min(this.frameBytes, 14))
+      const header = parseFrameHeader(prefix)
       if (!header) return
-      if (this.buffer.length < header.headerSize + header.length) return
-      let payload = this.buffer.subarray(header.headerSize, header.headerSize + header.length)
+      const end = header.headerSize + header.length
+      if (this.frameBytes < end) return
+      const frame = this.frameChunks.length === 1 ? this.frameChunks[0]
+        : Buffer.concat(this.frameChunks, this.frameBytes)
+      let payload = frame.subarray(header.headerSize, end)
       if (header.masked) {
-        const mask = this.buffer.subarray(header.headerSize - 4, header.headerSize)
+        const mask = frame.subarray(header.headerSize - 4, header.headerSize)
         const unmasked = Buffer.allocUnsafe(header.length)
         for (let i = 0; i < header.length; i++) unmasked[i] = payload[i]! ^ mask[i & 3]!
         payload = unmasked
       }
-      this.buffer = this.buffer.subarray(header.headerSize + header.length)
+      this.frameBytes -= end
+      this.frameChunks = this.frameBytes > 0 ? [frame.subarray(end)] : []
       this.handleFrame(header.fin, header.opcode, payload)
     }
   }
@@ -194,16 +207,20 @@ export class MiniWebSocket {
   }
 
   close(): void {
-    if (!this.closed && this.established) {
+    if (this.closed) return
+    if (this.established) {
       try { this.sendRaw(0x8, Buffer.alloc(0)) } catch { /* 已关 */ }
     }
     this.closed = true
     this.destroy()
+    this.options.onClose?.(null, 'client closed')
   }
 
   private destroy(): void {
     this.fragments = []
     this.buffer = Buffer.alloc(0)
+    this.frameChunks = []
+    this.frameBytes = 0
     this.socket.destroy()
   }
 }

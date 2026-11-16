@@ -542,6 +542,23 @@ describe('活跃度回调（周期核验调度启停数据源）', () => {
 })
 
 describe('#208 全量失效重挂（手动刷新通道）', () => {
+  it('R12：Live HTML 图片刷新后仍随脱树 sweep 释放，阅读槽位不被误收', () => {
+    const { manager } = makeManager()
+    const live = img()
+    const reading = img()
+    document.body.append(live)
+    manager.attach(live, './live.png', undefined, { sweepOnDisconnect: true })
+    manager.attach(reading, './reading.png')
+    manager.invalidateAll()
+    manager.handleResult({ reqId: 3, ok: true, src: 'https://resolved/live.png?v=2' })
+    live.remove()
+    manager.sweep()
+    expect(manager.activeEntries().map((entry) => entry.src)).toEqual(['./reading.png'])
+    expect(live.getAttribute('src')).toBeNull()
+    expect(state(live)).toBe('')
+    manager.dispose()
+  })
+
   it('invalidateAll 清条目并对活跃槽位重发解析（新 reqId），新结果换新 src', () => {
     const { manager, posted } = makeManager()
     const el = img()

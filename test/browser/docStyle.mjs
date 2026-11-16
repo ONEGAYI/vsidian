@@ -34,9 +34,15 @@ const STYLE_2 = [
   'div { --a-mark: rgb(9, 130, 9); }',
   '.cm-content { color: rgb(250, 0, 250); }',
   '.vsidian-toolbar { color: rgb(250, 100, 0); }',
+  '@scope (body) {',
+  '  .vsidian-toolbar, .cm-content { color: rgb(231, 12, 34) !important; }',
+  '  .mark-a { outline: 2px solid rgb(33, 133, 233); }',
+  '}',
+  '.mark-a[data-label="a,b"] { border-left: 2px solid rgb(117, 17, 217); }',
+  '.mark-a { &[data-tone="a&b"] { border-right: 2px solid rgb(17, 117, 217); } }',
   '</style>',
 ].join('\n')
-const VAR_BLOCK = '<div class="mark-a" style="color: var(--a-mark, rgb(3, 3, 3))">A 变量消费</div>'
+const VAR_BLOCK = '<div class="mark-a" data-label="a,b" data-tone="a&b" style="color: var(--a-mark, rgb(3, 3, 3))">A 变量消费</div>'
 const FILLER = Array.from({ length: 60 }, (_, i) => `填充段落 ${i + 1}，撑开视口驱动虚拟化窗口滚动。`).join('\n\n')
 const A_DOC = [
   '# A 主标题',
@@ -127,6 +133,25 @@ try {
   // 排除面：工具栏与源码层不被定向规则污染（读值非攻击色）
   assert.notEqual(paint.toolbarColor, 'rgb(250, 100, 0)', '工具栏不被 .vsidian-toolbar{} 定向规则染指')
   assert.notEqual(paint.cmLineColor, 'rgb(250, 0, 250)', '源码层不被 .cm-content{} 定向规则染指')
+  assert.notEqual(paint.toolbarColor, 'rgb(231, 12, 34)', 'R04 @scope 内规则不污染工具栏')
+  assert.notEqual(paint.cmLineColor, 'rgb(231, 12, 34)', 'R04 @scope 内规则不污染源码层')
+  assert.equal(paint.aOutlineColor, 'rgb(33, 133, 233)', 'R04 @scope 内规则仍命中本篇 Reading 内容')
+  assert.equal(paint.aCommaColor, 'rgb(117, 17, 217)', 'R05 属性值逗号不拆坏 Reading 选择器')
+  assert.equal(paint.aAmpColor, 'rgb(17, 117, 217)', 'R05 嵌套规则不替换属性值的 &')
+
+  // R06：生产消息入口的初载、重复清单、热替换、停用与恢复均保持文档后置。
+  const snippet = (color) => 'data:text/css,' + encodeURIComponent(`.mark-a { background-color: ${color}; }`)
+  for (const [version, uri] of [[1, snippet('red')], [1, snippet('red')], [2, snippet('orange')], [3, null], [4, snippet('red')]]) {
+    await page.evaluate(([version, uri]) => window.controller.handleHostMessage({
+      kind: 'snippets.snapshot', version,
+      snippets: uri === null ? [] : [{ name: 'regression.css', uri }],
+    }), [version, uri])
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('link[data-vsidian-snippet]'))
+      .every((link) => link.sheet !== null))
+    assert.equal((await page.evaluate(() => window.readDocStylePaint())).aMarkBg, A_MARK_BG,
+      `R06 片段状态 ${version} 不压过同特异性文档规则`)
+  }
+  await page.screenshot({ path: artifactPath(root, 'docStyle/regression-reading.png') })
   // 纯 style 块 Reading 隐藏（渲染区无样式源文可见）+ 样式仍生效（上面已断言）
   assert.equal(paint.styleBlockVisible, false, '纯 style 块源文在 Reading 不可见')
   // 标记铺开：全部 Reading 块根挂 doc 标记
@@ -176,6 +201,10 @@ try {
   await page.waitForTimeout(200)
   paint = await page.evaluate(() => window.readDocStylePaint())
   assert.equal(paint.aPColor, BLUE, '滚动往返后 A 段落样式仍命中（产物挂 head 不随窗口）')
+  assert.equal(paint.aOutlineColor, 'rgb(33, 133, 233)', 'R04 视口重挂后隔离规则仍绘制')
+  assert.equal(paint.aCommaColor, 'rgb(117, 17, 217)', 'R05 视口重挂后带逗号的属性选择器仍绘制')
+  assert.equal(paint.aAmpColor, 'rgb(17, 117, 217)', 'R05 视口重挂后 & 字面值仍匹配')
+  assert.equal(paint.aMarkBg, A_MARK_BG, 'R06 重挂后文档仍覆盖片段')
   head = await page.evaluate(() => window.docStyleHeadInfo())
   assert.equal(head.find((h) => h.scope === 'doc')?.rules, mainEntry.rules, '滚动期间产物规则数稳定')
   passed += 2
@@ -197,11 +226,18 @@ try {
   assert.notEqual(liveLineBaseline, 'rgb(250, 0, 250)', 'Live 源码行不被定向规则污染')
   const liveHostPaint = await page.evaluate(() => {
     const host = document.querySelector('.vsidian-live-html .mark-a')
-    return host ? { bg: getComputedStyle(host).backgroundColor, color: getComputedStyle(host).color } : null
+    return host ? { bg: getComputedStyle(host).backgroundColor, color: getComputedStyle(host).color,
+      outlineColor: getComputedStyle(host).outlineColor,
+      commaColor: getComputedStyle(host).borderLeftColor,
+      ampColor: getComputedStyle(host).borderRightColor } : null
   })
   assert.ok(liveHostPaint, 'Live html 块 widget 在场')
   assert.equal(liveHostPaint.bg, A_MARK_BG, 'Live html 块类命中（双模式一致）')
   assert.equal(liveHostPaint.color, A_MARK, 'Live html 块变量消费命中')
+  assert.equal(liveHostPaint.outlineColor, 'rgb(33, 133, 233)', 'R04 @scope 内规则仍命中 Live HTML')
+  assert.equal(liveHostPaint.commaColor, 'rgb(117, 17, 217)', 'R05 属性逗号选择器在 Live 绘制')
+  assert.equal(liveHostPaint.ampColor, 'rgb(17, 117, 217)', 'R05 属性 & 字面值在 Live 绘制')
+  await page.screenshot({ path: artifactPath(root, 'docStyle/regression-live.png') })
   passed += 3
 
   // Live 编辑 style 块：真实事务替换块 2 的 p 色值 → 产物与绘制同步

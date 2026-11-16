@@ -38,6 +38,9 @@ import {
  *  粘贴不会耗尽；防御同名风暴） */
 const NAME_CANDIDATE_LIMIT = 100
 
+/** 同一宿主的各面板共享目录写入队列：文件名探测与写入必须不可交错。 */
+const pendingDirectoryWrites = new Map<string, Promise<void>>()
+
 export interface ImagePasteOutcome {
   ok: boolean
   markdown?: string
@@ -125,6 +128,12 @@ export async function runImagePaste(
   }
 
   const dirUri = opts.docUri.with({ path: dir.dirPath })
+  const directoryKey = process.platform === 'win32' ? dirUri.toString().toLowerCase() : dirUri.toString()
+  const previous = pendingDirectoryWrites.get(directoryKey)
+  let release!: () => void
+  const current = new Promise<void>((resolve) => { release = resolve })
+  pendingDirectoryWrites.set(directoryKey, current)
+  await previous
   try {
     // 目录不存在时递归创建（含各级父目录；已存在幂等）
     await vscode.workspace.fs.createDirectory(dirUri)
@@ -152,5 +161,8 @@ export async function runImagePaste(
   } catch {
     void vscode.window.showErrorMessage(t('host.imagePasteWriteFailed'))
     report({ ok: false, reason: 'write-failed' })
+  } finally {
+    release()
+    if (pendingDirectoryWrites.get(directoryKey) === current) pendingDirectoryWrites.delete(directoryKey)
   }
 }
