@@ -187,6 +187,24 @@ it('P2-04 保存采样不能把磁盘更新当成 dirty 已清零（#552 / #281�
   await expect(sample(async () => '【嵌入编辑】', { isDirty: false })).resolves.toBe(true)
 })
 
+it('P2-11 图片粘贴保存采样同时等待新引用落盘和 B 权威文档干净（#288）', async () => {
+  const callbacks: ts.Expression[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'poll' &&
+      ts.isStringLiteral(node.arguments[0]!) && node.arguments[0].text.startsWith('目标保存落盘') &&
+      node.arguments[1]?.getText(source).includes('embed-assets/嵌入资源目标.md')) callbacks.push(node.arguments[1])
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(callbacks).toHaveLength(1)
+  const code = ts.transpile(`return (${callbacks[0]!.getText(source)})();`, { target: ts.ScriptTarget.ES2022 })
+  const sample = new Function('readDisk', 'bDoc', code)
+  const saved = '![Pasted image 20261117000100](Pasted%20image%2020261117000100.png)'
+  await expect(sample(async () => saved, { isDirty: true })).resolves.toBeUndefined()
+  await expect(sample(async () => '旧内容', { isDirty: false })).resolves.toBeUndefined()
+  await expect(sample(async () => saved, { isDirty: false })).resolves.toBe(true)
+})
+
 it('文档样式采样等待 Reading 标签挂载，错误颜色仍交给原断言报告（#552 / #569）', () => {
   const callbacks: ts.Expression[] = []
   const visit = (node: ts.Node): void => {
