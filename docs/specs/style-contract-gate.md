@@ -24,11 +24,19 @@
 
 候选分支（含自动编码代理）可修改工作流、检查器与基线本身。分层防线如下，**每层的边界如实声明**：
 
-1. **git 锚定复验**（verify-baseline）：候选改基线 JSON 抹历史承诺 → 从固定 SHA（v0.4.0 tag = 75c3df7）的 git 对象重新解析映射表比对，多一行少一行都失败。边界：候选同时改检查器（弱化复验逻辑）可绕过本地防线——工作流无法自证检查器不被改。
+1. **git 锚定复验**（verify-baseline）：从固定 SHA（v0.4.0 tag = 75c3df7）的 Git 对象重新解析映射表，同时从独立的结构化快照锚点核对历史条目、映射和保护规则；保留行 key 但删除条目或 `ids` 也会失败。边界：候选同时改检查器（弱化复验逻辑）可绕过本地防线——工作流无法自证检查器不被改。
 2. **变更可见性**（step summary + PR）：`.github/workflows/`、`scripts/checkStyleContract.mjs`、`scripts/styleContractCheck.mjs`、`test/style-contract/` 的变更在 PR 的 Files changed 与 style-contract job summary 中可见，配合技能 style-contract「检查器/CI/基线变更须独立列出理由与保护效果」约定，使静默替换需要显式评审放行。边界：可见性只是审查辅助，不构成强制。
 3. **远端必需检查 + 分支保护**（根治，**已配置**，2026-09-27）：`style-contract` 已加入 main 分支保护的必需检查（配置后读回验证 `contexts = ["unit","integration","style-contract"]`，其余保护项原样），候选删除该 job 或使其失败都不能合并（保护规则在 GitHub 服务端判定，不随候选分支变化）。边界（2026-09-27 实读）：`enforce_admins: false`——管理员（仓库 owner）直接推送仍可绕过分支保护；`allow_force_pushes: false` 已关闭。
 
 本地工作流无法对抗的组合（诚实记录）：候选分支删除 `style-contract` job、删除检查器脚本或 `continue-on-error` 短路检查步骤。对抗手段只剩远端配置：必需检查（job 删除后 context 缺失 → PR 无法满足保护规则，2026-09 起分支保护对缺失 context 的默认行为是挂起等待而非放行）+ 工作流文件变更经 PR 审查（`pull_request` 触发的 workflow 使用 PR merge ref 的 `.github/` 内容，直接 push main 被保护拦截）。
+
+### 结构化基线的第二 Git 锚点（2026-11-16，G02）
+
+原始映射表没有人工迁移后的条目 ID、非表格来源条目和豁免记录，单比行 key 无法证明这些保护仍完整。检查器将 `70c19495bcf8f3522ed0aa42059a7df08fbae0e4` 中的 `test/style-contract/baseline-v0.4.0.json` 固定为结构锚点；该历史提交已包含批准的 `mode-toggle` 纠错豁免。
+
+复验保护 `sourceRows`、`entries`、`legacySnippetCases`、`guardManifest`、`lifecycleExemptions`、`entryComparisonExemptions`，以及 `meta` 中的基线版本、来源 tag/SHA、迁移提交和冻结日期。上述字段已与修复前基线逐字段核对一致；不修改或重生成旧基线。字段漂移报 `baseline-structure-mismatch`，锚点不可达报 `baseline-structure-anchor-unreachable`。
+
+**后续维护**：发布记录 `releases` 与来源说明 `meta.provenance` 仍可按原流程追加，发布真实性继续由 CHANGELOG/tag 交叉校验。确需修订受保护字段时，先保留旧锚点和失败证据、说明变更依据，再显式更新检查器的 `STRUCTURED_BASELINE_ANCHOR` 并独立评审；检查器不接受候选基线自行指定新的结构锚点。
 
 ## 远端保护配置实读（2026-09-27，只读）
 

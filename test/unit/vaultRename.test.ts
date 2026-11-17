@@ -16,6 +16,7 @@ import {
   type RenamePlanContext,
 } from '../../src/shared/vaultRename'
 import type { VaultEdge } from '../../src/shared/vaultIndexModel'
+import { extractVaultEdges } from '../../src/host/vaultLinkExtract'
 
 /** 构造一条索引边（区间由用例文本手工定位——与抽取器同语义即可） */
 function edge(o: {
@@ -58,6 +59,25 @@ function refDoc(fsPath: string, text: string, edges: readonly VaultEdge[], edgeR
 }
 
 describe('vaultRename：指向被移动目标的引用重算', () => {
+  it.each([
+    ['[x](target.md "显示标题")\n[[target]]\n', 'target.md', '[x](renamed.md "显示标题")\n[[renamed]]\n'],
+    ["[x](<target.md> '显示标题')\n", 'target.md', "[x](renamed.md '显示标题')\n"],
+    ['![a](target.png (图片标题))\n', 'target.png', '![a](renamed.png (图片标题))\n'],
+  ])('R02：内联 title 保留且不使同文档引用误报过期：%s', (text, filename, expected) => {
+    const oldFsPath = `/vault/${filename}`
+    const newFsPath = oldFsPath.replace('target', 'renamed')
+    const edges = extractVaultEdges('ref.md', text, {
+      docDir: '/vault', rootDir: '/vault', isWindowsHost: false,
+    }, (p) => p === oldFsPath ? oldFsPath : null)
+    const result = planVaultRenameRewrites({
+      rootFsPaths: ['/vault'], isWindowsHost: false,
+      moves: [{ oldFsPath, newFsPath }], targetExists: (p) => p === newFsPath,
+    }, [refDoc('/vault/ref.md', text, edges, '/vault')])
+    expect(result.skipped).toEqual([])
+    expect(result.docs).toHaveLength(1)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe(expected)
+  })
+
   it('同目录 rename：双链省略扩展名维持省略，mdlink 显式 .md 保持扩展名', () => {
     const text = '见 [[target]] 与 [x](target.md)。\n'
     const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
@@ -481,6 +501,21 @@ function movesOf(moves: readonly RenameMoveEntry[]): Array<[string, string]> {
 }
 
 describe('vaultRename：#200 目录移动映射展开（expandRenameMoves）', () => {
+  it.each([true, false])('R03：两个点开头的合法文件与子目录不作越界（Windows=%s）', async (windows) => {
+    const root = windows ? 'C:/vault' : '/vault'
+    const dir = `${root}/old`
+    const port = expandPort({
+      dirs: [dir],
+      filesUnder: { [dir]: [`${dir}/..note.md`, `${dir}/..dir/child.md`, `${dir}/../outside.md`] },
+      indexed: { [dir]: [`${dir}/..note.md`, `${dir}/..dir/child.md`] },
+    })
+    const result = await expandRenameMoves(windows, [{ oldFsPath: dir, newFsPath: `${root}/new` }], port)
+    expect(movesOf(result.moves)).toEqual([
+      [`${dir}/..dir/child.md`, `${root}/new/..dir/child.md`],
+      [`${dir}/..note.md`, `${root}/new/..note.md`],
+    ])
+  })
+
   it('目录 rename：展开为目录下全部受影响文件的逐文件映射（嵌套多层 + 索引 asset + fs 遗漏 md 兜底）', async () => {
     const port = expandPort({
       dirs: [`${WIN_ROOT}/dir-old`],

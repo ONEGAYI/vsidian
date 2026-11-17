@@ -62,6 +62,7 @@
 import * as path from 'node:path'
 import { planVaultLinkPath, shortnameLookupKeyOf, splitLineSuffix, type VaultLinkPathContext } from './vaultLink'
 import { isEscapedAt } from './tableCells'
+import { markdownTreeParser } from './markdownDoc'
 import type { VaultEdge } from './vaultIndexModel'
 
 /** 单条移动映射（单文件 rename/move 传 1 条；批量/目录移动传多条） */
@@ -169,7 +170,7 @@ export async function expandRenameMoves(
         return // 显式文件条目/先前展开优先
       }
       const rel = ops.relative(oldDir, norm(absFsPath))
-      if (rel === '' || rel.startsWith('..')) {
+      if (rel === '' || rel === '..' || rel.startsWith(`..${ops.sep}`) || ops.isAbsolute(rel)) {
         return // 防御：非目录内路径
       }
       const entry: RenameMoveEntry = {
@@ -1075,20 +1076,31 @@ function buildHrefEdit(
       destEnd = destStart + len
     }
   } else {
-    const open = s.lastIndexOf('](')
-    if (open < 0 || !s.endsWith(')')) {
-      return null
-    }
-    const inner = s.slice(open + 2, s.length - 1)
-    const lead = inner.length - inner.trimStart().length
-    const innerTrimmed = inner.trimStart().trimEnd()
-    if (innerTrimmed.startsWith('<') && innerTrimmed.endsWith('>') && innerTrimmed.length >= 2) {
-      destStart = open + 2 + lead
-      destEnd = destStart + innerTrimmed.length
-      angleWrapped = true
+    // 标准内联链接/图片沿用索引抽取器的 URL 节点边界：title 不属于目标。
+    // 非标准宽松链接可能不成 Link/Image 节点，仍沿既有整段目标口径。
+    const node = markdownTreeParser.parse(s).topNode.firstChild
+      ?.getChild(edge.kind === 'image' ? 'Image' : 'Link')
+    const url = node?.from === 0 && node.to === s.length ? node.getChild('URL') : null
+    if (url) {
+      destStart = url.from
+      destEnd = url.to
+      angleWrapped = s[destStart] === '<' && s[destEnd - 1] === '>'
     } else {
-      destStart = open + 2 + lead
-      destEnd = destStart + innerTrimmed.length
+      const open = s.lastIndexOf('](')
+      if (open < 0 || !s.endsWith(')')) {
+        return null
+      }
+      const inner = s.slice(open + 2, s.length - 1)
+      const lead = inner.length - inner.trimStart().length
+      const innerTrimmed = inner.trimStart().trimEnd()
+      if (innerTrimmed.startsWith('<') && innerTrimmed.endsWith('>') && innerTrimmed.length >= 2) {
+        destStart = open + 2 + lead
+        destEnd = destStart + innerTrimmed.length
+        angleWrapped = true
+      } else {
+        destStart = open + 2 + lead
+        destEnd = destStart + innerTrimmed.length
+      }
     }
   }
   const destRaw = s.slice(destStart, destEnd)

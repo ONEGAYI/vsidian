@@ -17051,8 +17051,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'embed.test.save', inner: 'embed-assets/嵌入资源目标',
     })
-    await poll('目标保存落盘', async () =>
-      /Pasted%20image%20\d{14}\.png/.test(await readDisk('embed-assets/嵌入资源目标.md')) ? true : undefined)
+    // 保存请求通过消息异步执行；磁盘内容不能单独代表文档 dirty 已清零。
+    await poll('目标保存落盘且权威文档干净', async () =>
+      /Pasted%20image%20\d{14}\.png/.test(await readDisk('embed-assets/嵌入资源目标.md')) && !bDoc.isDirty ? true : undefined)
     assert(!bDoc.isDirty, '保存后目标干净')
     assert(await readDisk('p211-资源嵌入.md') === parentBefore, '保存目标不动父文档')
     console.log('[P2-11] 嵌入图片粘贴按 B 落盘且只插 B 通过')

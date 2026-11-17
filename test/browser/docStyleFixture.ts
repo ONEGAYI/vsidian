@@ -206,6 +206,9 @@ Object.assign(window, {
       aPColor: read(firstReading('.vsidian-reading-paragraph p'), 'color'),
       aVarColor: read(firstReading('.vsidian-reading-html .mark-a'), 'color'),
       aMarkBg: read(firstReading('.vsidian-reading-html .mark-a'), 'background-color'),
+      aOutlineColor: read(firstReading('.vsidian-reading-html .mark-a'), 'outline-color'),
+      aCommaColor: read(firstReading('.vsidian-reading-html .mark-a'), 'border-left-color'),
+      aAmpColor: read(firstReading('.vsidian-reading-html .mark-a'), 'border-right-color'),
       toolbarColor: read(document.querySelector('.vsidian-toolbar'), 'color'),
       cmLineColor: read(document.querySelector('.cm-content .cm-line'), 'color'),
       /** 主容器**直接子块**（A 的内容块——B 卡内块挂 B 键不计入） */

@@ -29,7 +29,7 @@ async function main() {
 
   if (process.argv.includes('--verify-baseline')) {
     // 基线 git 锚定复验：从固定 SHA 的映射表对象重新解析并与基线 sourceRows
-    // 做精确集合比对（候选分支改基线文件即在此暴露）
+    // 做精确集合比对，并以独立结构锚点核对条目、映射、豁免与探针。
     const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'))
     const mapMd = execFileSync('git', ['show', `${baseline.meta.sourceSha}:docs/design/obsidian-selector-map.md`], {
       cwd: SELF_ROOT,
@@ -43,7 +43,7 @@ async function main() {
       process.exitCode = 1
       return
     }
-    console.log('基线与 git 锚定内容一致（sourceRow 集合零差异）')
+    console.log('基线与 Git 锚定内容一致（历史映射表与结构化保护字段零差异）')
     return
   }
 

@@ -325,17 +325,18 @@ export class ImageResourceManager {
       slot: HTMLElement
       rawSrc: string
       render?: (slot: HTMLElement, src: string) => HTMLImageElement
+      sweepOnDisconnect?: boolean
     }> = []
     for (const slot of [...this.slots.keys()]) {
       const record = this.slots.get(slot)
       if (!record) {
         continue
       }
-      reattach.push({ slot, rawSrc: record.rawSrc, render: record.render })
+      reattach.push({ slot, rawSrc: record.rawSrc, render: record.render, sweepOnDisconnect: record.sweepOnDisconnect })
       this.detach(slot)
     }
     for (const item of reattach) {
-      this.attach(item.slot, item.rawSrc, item.render)
+      this.attach(item.slot, item.rawSrc, item.render, { sweepOnDisconnect: item.sweepOnDisconnect })
     }
   }
 

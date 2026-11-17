@@ -355,17 +355,28 @@ export async function verifyAddonApiBaseline(baseline, gitAccess, ctx = {}) {
     failures.push(fail(vctx, 'baseline-release-mismatch', `基线台账快照与锚点台账不一致：${releaseDiffs[0]}${releaseDiffs.length > 1 ? ` 等 ${releaseDiffs.length} 处` : ''}`, null, `锚点 ${String(sha).slice(0, 7)} 台账与基线文件不同——台账历史（状态/日期/实验清单）不可被当前树改写`))
   }
 
-  // 签名声明文本比对（基线独立于当前树的事实源文件）
-  for (const [module, symbols] of Object.entries(baseline.declarations ?? {})) {
+  // 应有签名集合由 Git 锚点清单决定，不能由可被删改的快照自报。
+  const expectedSources = collectSignatureSources(snap.entries)
+  for (const [module, symbols] of expectedSources) {
     const text = gitAccess.showCommitFile(sha, module)
     if (text === null) {
       failures.push(fail(vctx, 'baseline-declaration-mismatch', `锚点缺签名源模块：${module}`, { id: module, target: module }, `锚点 ${String(sha).slice(0, 7)} 不可读出该模块——基线声明的来源不可证实`))
       continue
     }
-    const extracted = extractSymbolDeclarations(text, module, Object.keys(symbols))
-    for (const [symbol, stored] of Object.entries(symbols)) {
-      if (extracted.get(symbol) !== stored) {
+    const extracted = extractSymbolDeclarations(text, module, [...symbols])
+    for (const symbol of symbols) {
+      const stored = baseline.declarations?.[module]?.[symbol]
+      if (stored === undefined) {
+        failures.push(fail(vctx, 'baseline-declaration-missing', `基线缺少历史签名声明：${module}#${symbol}`, { id: `${module}#${symbol}`, target: symbol }, `锚点 ${String(sha).slice(0, 7)} 清单要求该签名——删除符号、模块或整张声明表不能撤销历史保护`))
+      } else if (extracted.get(symbol) !== stored) {
         failures.push(fail(vctx, 'baseline-declaration-mismatch', `基线声明文本与锚点不一致：${module}#${symbol}`, { id: `${module}#${symbol}`, target: symbol }, `锚点 ${String(sha).slice(0, 7)} 的声明文本与基线记录不同——基线被改写`))
+      }
+    }
+  }
+  for (const [module, symbols] of Object.entries(baseline.declarations ?? {})) {
+    for (const symbol of Object.keys(symbols)) {
+      if (!expectedSources.get(module)?.has(symbol)) {
+        failures.push(fail(vctx, 'baseline-declaration-mismatch', `基线声明不在锚点签名集合中：${module}#${symbol}`, { id: `${module}#${symbol}`, target: symbol }, '基线签名集合须与 Git 锚点清单一致，不能额外声明来源'))
       }
     }
   }
@@ -541,9 +552,11 @@ export function checkSignatureTexts(baseline, extracted, ctx) {
       for (const symbol of source.symbols) {
         const stored = baseline.declarations?.[source.module]?.[symbol]
         const actual = modTexts?.get(symbol)
-        if (actual === undefined) {
+        if (stored === undefined) {
+          failures.push(fail(ctx, 'signature-baseline-missing', `历史签名快照缺失：${source.module}#${symbol}`, { id: entry.id, target: symbol }, '声明快照缺失时无法证明兼容，必须失败；先从原 Git 锚点恢复完整基线'))
+        } else if (actual === undefined) {
           failures.push(fail(ctx, 'signature-symbol-missing', `签名符号在候选事实源中缺失：${source.module}#${symbol}`, { id: entry.id, target: symbol }, '公开声明的签名必须真实存在于事实源模块（T13 存在性门禁的同口径负向）'))
-        } else if (stored !== undefined && actual !== stored) {
+        } else if (actual !== stored) {
           failures.push(fail(ctx, 'signature-declaration-changed', `签名声明文本与基线不一致：${source.module}#${symbol}`, { id: entry.id, target: symbol }, '签名文本即类型契约（参数 / 结果收窄或任何形状变化）——变化须显式重锚定基线并走 API 版本化'))
         }
       }

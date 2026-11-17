@@ -907,7 +907,8 @@ export class VaultIndexService {
         }
       }
       const files = new Map<string, VaultFileEntry>()
-      const edges: VaultEdge[] = []
+      // 二遍重抽按来源替换，避免每篇都扫描/搬移全库边表；发布前只展平一次。
+      const edgesBySource = new Map<string, VaultEdge[]>()
       /** 附件登记：fold(身份) → 身份（两遍法的第二遍起可见；#556 T2 起
        *  键域为规范绝对身份——根内附件与外部/跨根目标同域，resolver 统一
        *  命中） */
@@ -1000,7 +1001,7 @@ export class VaultIndexService {
         }
         const text = normalizeLf(raw)
         const docEdges = extractVaultEdges(rel, text, ctxOf(abs), resolveWith, extractOptions)
-        edges.push(...docEdges)
+        edgesBySource.set(rel, docEdges)
         files.set(rel, {
           path: rel,
           kind: 'markdown',
@@ -1053,6 +1054,7 @@ export class VaultIndexService {
       }
 
       // 第二遍：重抽存在断链边的文件（asset 集合就绪后可能命中；逐文件幂等替换）
+      let reprocessed = 0
       for (const rel of pendingSources) {
         if (cancelled()) {
           return
@@ -1062,12 +1064,16 @@ export class VaultIndexService {
           continue
         }
         const raw = await this.scan.readFileText(abs)
-        if (raw === null) {
-          continue
+        if (raw !== null) {
+          const text = normalizeLf(raw)
+          const next = extractVaultEdges(rel, text, ctxOf(abs), resolveWith, extractOptions)
+          // 维持原替换后移到尾部的来源顺序，不改变同来源内的源文顺序。
+          edgesBySource.delete(rel)
+          edgesBySource.set(rel, next)
         }
-        const text = normalizeLf(raw)
-        const next = extractVaultEdges(rel, text, ctxOf(abs), resolveWith, extractOptions)
-        replaceEdgesOf(edges, rel, next)
+        if (++reprocessed % this.scanBatch === 0) {
+          await this.scan.yieldToEventLoop()
+        }
       }
 
       // 变化发布（#198）：与上一版模型比对 stat（重扫/重建场景）；首扫描
@@ -1113,7 +1119,7 @@ export class VaultIndexService {
       if (cancelled()) {
         return
       }
-      const model: VaultIndexModel = { files, edges }
+      const model: VaultIndexModel = { files, edges: [...edgesBySource.values()].flat() }
       state.model = model
       state.foldedAbsKeys = null // 模型整体替换：绝对键缓存随之作废（#562）
       this.refreshDerived(state)
@@ -3660,16 +3666,6 @@ function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   } else {
     map.set(key, [value])
   }
-}
-
-/** 原地替换指定 source 的全部边（单文件重扫/重抽的幂等替换） */
-function replaceEdgesOf(edges: VaultEdge[], source: string, next: readonly VaultEdge[]): void {
-  for (let i = edges.length - 1; i >= 0; i--) {
-    if (edges[i]!.source === source) {
-      edges.splice(i, 1)
-    }
-  }
-  edges.push(...next)
 }
 
 /** 写者随机段（多窗口并发防撞，ADR-0008 三不变量之一） */

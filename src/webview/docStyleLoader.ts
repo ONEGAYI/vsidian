@@ -40,9 +40,6 @@ export interface DocStyleResourcePort {
 /** 原样保留的 at-rule 头前缀（无选择器语义可隔离——矩阵见 shared/docStyle 模块头） */
 const RAW_AT_PREFIXES = ['@keyframes', '@font-face', '@import', '@property', '@charset', '@namespace']
 
-/** 递归下钻的组块 at-rule 头前缀 */
-const GROUP_AT_PREFIXES = ['@media', '@supports', '@layer', '@container']
-
 /** CSSRule → DocStyleRule 数据投影（鸭子判定：不依赖可被 minify 改写的 constructor.name） */
 function adaptCssRule(rule: CSSRule): DocStyleRule {
   const raw = rule as unknown as Record<string, unknown>
@@ -61,10 +58,13 @@ function adaptCssRule(rule: CSSRule): DocStyleRule {
     if (RAW_AT_PREFIXES.some((p) => head.startsWith(p))) {
       return { rawCssText: cssText }
     }
-    if (GROUP_AT_PREFIXES.some((p) => head.startsWith(p))) {
+    // CSSOM 已识别的分组一律递归（含 @scope）：未知规则也不能借整条
+    // raw 透传让内层选择器绕过 docScope。keyframes 等无正文选择器规则
+    // 已由上方明确矩阵接走，不把关键帧的百分比误当成正文选择器。
+    if (raw['cssRules'] !== undefined) {
       return { groupHead: head, cssRules: adaptCssRules(raw['cssRules'] as CSSRuleList | undefined) }
     }
-    return { rawCssText: cssText } // 未知 at-rule：保守原样
+    return { rawCssText: cssText } // 无子规则的未知 at-rule：保留原生声明语义
   }
   // 裸声明规则（CSSNestedDeclarations：嵌套/组块内无选择器的声明——
   // 语义 = 父选择器的声明，`& { … }` 形态）。空 selectorText 标记，
@@ -379,11 +379,12 @@ export class DocumentStyleBinding {
     if (this.released) {
       return
     }
-    if (text === this.lastText && tree === this.lastTree) {
+    const currentTree = tree ?? null
+    if (text === this.lastText && currentTree === this.lastTree) {
       return
     }
     this.lastText = text
-    this.lastTree = tree ?? null
+    this.lastTree = currentTree
     const usable = tree !== undefined && tree !== null && tree.length === text.length ? tree : null
     documentStyleRegistry.update(this.docScope, collectDocumentStyles(text, usable), this.resourcePort)
   }

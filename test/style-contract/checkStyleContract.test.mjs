@@ -144,6 +144,34 @@ test('verifyBaselineRows：候选改动基线（删一条 sourceRow）被 git �
   assert.ok(failures.some((f) => f.code === 'baseline-row-extra'), '应报 baseline-row-extra（历史表有行而基线丢项）：' + JSON.stringify(failureCodes(failures)))
 })
 
+test('G02：保留历史行 key 不能掩盖条目、字段、映射或保护清单的删改', () => {
+  const md = execFileSync('git', ['show', `${BASELINE.meta.sourceSha}:docs/design/obsidian-selector-map.md`], { cwd: REPO_ROOT, encoding: 'utf8' })
+  const rows = parseSelectorMapRows(md)
+  const mutations = [
+    (b) => {
+      b.entries = b.entries.filter((e) => e.id !== 'live-heading-line')
+      for (const row of b.sourceRows) row.ids = row.ids?.filter((id) => id !== 'live-heading-line')
+    },
+    (b) => { b.entries.find((e) => e.id === 'live-heading-line').views = [] },
+    (b) => { b.entryComparisonExemptions.push('live-heading-line') },
+    (b) => { b.guardManifest.requiredFiles = [] },
+    (b) => { b.legacySnippetCases = [] },
+  ]
+  for (const mutate of mutations) {
+    const tampered = structuredClone(BASELINE)
+    mutate(tampered)
+    assert.ok(verifyBaselineRows(tampered, rows).some((f) => f.code === 'baseline-structure-mismatch'))
+  }
+})
+
+test('G02：结构冻结不禁止合法追加发布记录与来源说明', () => {
+  const md = execFileSync('git', ['show', `${BASELINE.meta.sourceSha}:docs/design/obsidian-selector-map.md`], { cwd: REPO_ROOT, encoding: 'utf8' })
+  const appended = structuredClone(BASELINE)
+  appended.releases['9.9.9'] = { date: '2026-11-16', tag: 'fixture/v9.9.9', sha: 'fixture-only' }
+  appended.meta.provenance.push('测试追加说明；发布记录仍由独立发布记录检查核对')
+  assert.deepEqual(verifyBaselineRows(appended, parseSelectorMapRows(md)), [])
+})
+
 // ---------------------------------------------------------------------------
 // 3. 版本跨度与天数计算
 // ---------------------------------------------------------------------------

@@ -164,3 +164,40 @@ describe('大纲多段搬移的 CRLF 转换不变式（review-loops C7）', () =
     expect(hostAfter).toBe('# 序\r\n序内容\r\n# 甲\r\n甲内容\r\n# 丙\r\n丙内容\r\n')
   })
 })
+
+describe('R16：批量替换坐标与数量级成本', () => {
+  it('十万行全部替换的双向映射不逐变更重扫行尾表', () => {
+    const n = 100_000
+    const coordinator = new NewlineCoordinator('x\r\n'.repeat(n))
+    const lf = Array.from({ length: n }, (_, i) => ({ offset: i * 2, length: 1, text: 'y' }))
+    const host = Array.from({ length: n }, (_, i) => ({ offset: i * 3, length: 1, text: 'y' }))
+    const started = performance.now()
+    const mappedHost = coordinator.lfChangesToHost(lf)
+    const lfToHostMs = performance.now() - started
+    const hostStarted = performance.now()
+    const mappedLf = coordinator.hostChangesToLf(host)
+    const hostToLfMs = performance.now() - hostStarted
+    console.info(JSON.stringify({ n, lfToHostMs, hostToLfMs }))
+    expect(mappedHost).toEqual(host)
+    expect(mappedLf).toEqual(lf)
+    // 仅防平方级退化，不是产品延迟承诺；旧实现单方向数秒，二分实现远低于预算。
+    expect(lfToHostMs).toBeLessThan(2000)
+    expect(hostToLfMs).toBeLessThan(2000)
+  }, 30_000)
+
+  it('混合行尾的乱序批量查询保持旧坐标，插入文本不改风格', () => {
+    const coordinator = new NewlineCoordinator('a\r\nb\nc\r\nd')
+    const lf = [
+      { offset: 6, length: 1, text: 'D\nE' },
+      { offset: 0, length: 1, text: 'A' },
+      { offset: 2, length: 3, text: 'B\nC' },
+    ]
+    const host = [
+      { offset: 8, length: 1, text: 'D\nE' },
+      { offset: 0, length: 1, text: 'A' },
+      { offset: 3, length: 3, text: 'B\nC' },
+    ]
+    expect(coordinator.lfChangesToHost(lf)).toEqual(host)
+    expect(coordinator.hostChangesToLf(host)).toEqual(lf)
+  })
+})

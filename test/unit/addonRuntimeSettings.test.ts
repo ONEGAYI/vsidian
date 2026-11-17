@@ -122,6 +122,50 @@ const DEFS = [
 ]
 
 describe('T04 runtime：setup context 设置 API（公开消费面）', () => {
+  it('R09 注册句柄释放本批定义和组，保留其他批及持久值，重注册与旧句柄互不干扰', async () => {
+    const h = harness()
+    let api!: import('../../src/host/addons/addonRegistry').AddonSetupContext['settings']
+    let first!: import('../../src/host/addons/addonRegistry').AddonRegistrationHandle
+    h.register({ setup(context) {
+      api = context.settings
+      first = api.registerDefinitions([{ ...DEFS[0], group: 'first' }], [{ key: 'first', title: 'First' }])
+      api.registerDefinitions([{ ...DEFS[1], group: 'other' }], [{ key: 'other', title: 'Other' }])
+    } })
+    await api.update('user', { flag: false })
+    let changes = 0
+    h.runtime.onChanged(() => { changes++ })
+    first.dispose()
+    expect(h.settings.definitionsOf('fixture.demo').map((def) => def.key)).toEqual(['threshold'])
+    expect(h.settings.groupsOf('fixture.demo').map((group) => group.key)).toEqual(['other'])
+    expect(h.runtime.collectedDefinitions('fixture.demo')).toHaveLength(1)
+    expect(api.get().userValues).toEqual({ flag: false })
+    expect(changes).toBe(1)
+    const next = api.registerDefinitions([{ ...DEFS[0], group: 'first' }], [{ key: 'first', title: 'New' }])
+    first.dispose()
+    expect(api.get().values).toMatchObject({ flag: false, threshold: 20 })
+    expect(h.settings.groupsOf('fixture.demo').map((group) => group.title)).toEqual(['Other', 'New'])
+    next.dispose()
+    h.registry.release('fixture.demo')
+    h.register({ setup(context) { context.settings.registerDefinitions([DEFS[0]]) } })
+    next.dispose()
+    expect(h.settings.definitionsOf('fixture.demo')).toHaveLength(1)
+  })
+
+  it('R09 被其他批引用的组在拥有者释放后仍可用，最后引用释放后回收', () => {
+    const h = harness()
+    const handles: import('../../src/host/addons/addonRegistry').AddonRegistrationHandle[] = []
+    h.register({ setup(context) {
+      handles.push(context.settings.registerDefinitions([{ ...DEFS[0], group: 'shared' }], [{ key: 'shared', title: 'Shared' }]))
+      handles.push(context.settings.registerDefinitions([{ ...DEFS[1], group: 'shared' }]))
+    } })
+    handles[0]!.dispose()
+    expect(h.settings.definitionsOf('fixture.demo').map((def) => def.key)).toEqual(['threshold'])
+    expect(h.settings.groupsOf('fixture.demo').map((group) => group.key)).toEqual(['shared'])
+    handles[1]!.dispose()
+    expect(h.settings.definitionsOf('fixture.demo')).toEqual([])
+    expect(h.settings.groupsOf('fixture.demo')).toEqual([])
+  })
+
   it('registerDefinitions 进入服务；get() 返回默认值与来源 default', () => {
     const h = harness()
     let api: import('../../src/host/addons/addonRegistry').AddonSetupContext['settings'] | undefined

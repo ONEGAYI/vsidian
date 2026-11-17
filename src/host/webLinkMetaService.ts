@@ -211,7 +211,8 @@ export class WebLinkMetaService {
       // 任务收敛（成功写缓存之后）即移除在途条目——迟到的同 URL 请求走
       // 缓存命中而非合并到已完成的任务
       pending.task = this.runFetch(check.url, pending, shape).finally(() => {
-        this.inflight.delete(key)
+        // 取消后同键可立即有新请求；旧任务收尾不能撤掉新任务的取消登记。
+        if (this.inflight.get(key) === pending) this.inflight.delete(key)
       })
       this.inflight.set(key, pending)
       entry = pending
@@ -224,7 +225,7 @@ export class WebLinkMetaService {
         consumer.consumers--
         if (consumer.consumers <= 0) {
           consumer.controller.abort()
-          this.inflight.delete(key)
+          if (this.inflight.get(key) === consumer) this.inflight.delete(key)
         }
         reject(new DOMException('This operation was aborted', 'AbortError'))
       }

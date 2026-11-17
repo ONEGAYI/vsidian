@@ -17,7 +17,7 @@
 //   特定覆盖全局配置）；片段启停/排序/契约不因本功能改写。
 //
 // at-rule 矩阵（票面「逐类核对」的落档去向）：
-// - @media / @supports / @layer / @container：**递归改写内层**（组块头
+// - @media / @supports / @layer / @container / @scope：**递归改写内层**（组块头
 //   原样保留——层叠序/层序/容器条件语义不变，仅内层选择器进隔离前缀）。
 // - @keyframes：**原样保留**。名字空间是文档级——嵌套场景 A/B 同名动画
 //   冲突属既有 CSS 语义（探针第七节），不改名（animation 属性里的名字
@@ -29,7 +29,7 @@
 // - CSS 嵌套（&）：**递归代换改写**（探针警示的静默丢失不允许：& 按
 //   「父选择器整体 :is() 代换 + 无 & 隐式后代」展开，多层嵌套累积祖先链，
 //   伪元素后缀在代换后拆分）。
-// - 未知 at-rule：原样保留（保守：不猜语义）。
+// - 未知 at-rule：CSSOM 暴露子规则时递归隔离；无子规则才原样保留。
 import { canonicalRefTargetKey } from './refExpansion'
 import { frontmatterRange, markdownTreeParser } from './markdownDoc'
 import { htmlIdScopePrefix, scopeCssFragmentRefs, scopeSelectorIdTokens } from './htmlFragment'
@@ -179,7 +179,7 @@ function inMask(mask: Array<{ from: number; to: number }>, pos: number): boolean
  * DOM 依赖）。四种形态：
  * - 样式规则：selectorText + declarations（+ cssRules 嵌套子规则）
  * - 组块规则：groupHead（如 `@media (min-width: 1px)`）+ cssRules
- * - 原样规则：rawCssText（@keyframes/@font-face/@import/@property/未知）
+ * - 原样规则：rawCssText（@keyframes/@font-face/@import/@property/无子规则的未知规则）
  * - 空形态（解析丢弃）自动跳过
  */
 export interface DocStyleRule {
@@ -216,24 +216,43 @@ function splitPseudoElement(sel: string): { head: string; suffix: string } | nul
   return { head: m[1].trim(), suffix: m[2] }
 }
 
-/**
- * 括号感知的选择器列表拆项（`h1, .a` → 两项；`:is(.a, .b)` 内的逗号
- * 不拆——探针参考实现的 split(',') 会拆坏括号形态，此处修正）。
- */
+/** 选择器语法标点位置：字符串、注释、转义与属性值中的字面标点不参与改写。 */
+function selectorPunctuationOffsets(selector: string, token: ',' | '&'): number[] {
+  const offsets: number[] = []
+  let parentheses = 0
+  let brackets = 0
+  let quote: string | null = null
+  for (let i = 0; i < selector.length; i++) {
+    const ch = selector[i]
+    if (ch === '\\') {
+      i++
+    } else if (quote !== null) {
+      if (ch === quote) quote = null
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (ch === '/' && selector[i + 1] === '*') {
+      const end = selector.indexOf('*/', i + 2)
+      i = end < 0 ? selector.length : end + 1
+    } else if (ch === '[') {
+      brackets++
+    } else if (ch === ']') {
+      brackets--
+    } else if (brackets === 0) {
+      if (ch === '(') parentheses++
+      else if (ch === ')') parentheses--
+      else if (ch === token && (token === '&' || parentheses === 0)) offsets.push(i)
+    }
+  }
+  return offsets
+}
+
+/** 最外层逗号拆项；函数参数、属性字符串与转义逗号保持原选择器含义。 */
 export function splitSelectorList(selectorText: string): string[] {
   const out: string[] = []
-  let depth = 0
   let start = 0
-  for (let i = 0; i < selectorText.length; i++) {
-    const ch = selectorText[i]
-    if (ch === '(') {
-      depth++
-    } else if (ch === ')') {
-      depth = Math.max(0, depth - 1)
-    } else if (ch === ',' && depth === 0) {
-      out.push(selectorText.slice(start, i).trim())
-      start = i + 1
-    }
+  for (const i of selectorPunctuationOffsets(selectorText, ',')) {
+    out.push(selectorText.slice(start, i).trim())
+    start = i + 1
   }
   const last = selectorText.slice(start).trim()
   if (last !== '' || out.length > 0) {
@@ -249,10 +268,17 @@ export function splitSelectorList(selectorText: string): string[] {
  */
 export function substituteNesting(selector: string, parents: readonly string[]): string[] {
   const out: string[] = []
+  const nesting = selectorPunctuationOffsets(selector, '&')
   for (const parent of parents) {
-    const scoped = selector.includes('&')
-      ? selector.split('&').join(`:is(${parent})`)
-      : `:is(${parent}) ${selector}`
+    let scoped = ''
+    let start = 0
+    for (const at of nesting) {
+      scoped += selector.slice(start, at) + `:is(${parent})`
+      start = at + 1
+    }
+    scoped = nesting.length === 0
+      ? `:is(${parent}) ${selector}`
+      : scoped + selector.slice(start)
     out.push(scoped.trim())
   }
   return out

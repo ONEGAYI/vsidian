@@ -171,17 +171,14 @@ export function notifyHtmlResourceInvalidate(srcs: readonly string[]): void {
       entries.delete(key)
       continue
     }
-    if (entry.pendingReqId === null) {
-      sendRequest(entry)
-    }
+    // 失效也终结旧在途代次：新 reqId 替换后，迟到旧回包不能恢复旧 URI。
+    sendRequest(entry)
   }
 }
 
 /** 手动刷新（refresh.invalidated）：全量失效重取（新代次戳 URI） */
 export function invalidateAllHtmlResources(): void {
-  for (const raw of new Set([...entries.values()].map((e) => e.raw))) {
-    notifyHtmlResourceInvalidate([raw])
-  }
+  notifyHtmlResourceInvalidate([...new Set([...entries.values()].map((e) => e.raw))])
 }
 
 /**

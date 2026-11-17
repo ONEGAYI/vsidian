@@ -21,6 +21,17 @@ export const TOOL_ID = 'checkStyleContract'
 
 const SELF_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+// v0.4.0 映射表不含人工迁移后的条目/id 对照。第二锚点固定已批准的
+// 结构化快照（含 mode-toggle 纠错豁免）；不能从候选基线自报此来源。
+// 合法变更这些保护字段须显式修改锚点并独立评审，维护入口见门禁规格。
+export const STRUCTURED_BASELINE_ANCHOR = '70c19495bcf8f3522ed0aa42059a7df08fbae0e4'
+const STRUCTURED_BASELINE_PATH = 'test/style-contract/baseline-v0.4.0.json'
+const FROZEN_BASELINE_FIELDS = [
+  'sourceRows', 'entries', 'legacySnippetCases', 'guardManifest',
+  'lifecycleExemptions', 'entryComparisonExemptions',
+]
+const FROZEN_BASELINE_META_FIELDS = ['baselineVersion', 'sourceTag', 'sourceSha', 'migrationBaseCommit', 'frozenAt']
+
 const SUPPORT_RANK = { direct: 3, semantic: 2, native: 1, none: 0 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +350,24 @@ export function checkAliasBridge(baselineEntries, candidateAliases, ctx) {
 export function verifyBaselineRows(baseline, rows) {
   const failures = []
   const ctx = { candidateVersion: 'baseline-audit', baselineLabel: `${baseline.meta.baselineVersion} (${baseline.meta.sourceSha.slice(0, 7)})` }
+  let frozen
+  try {
+    frozen = JSON.parse(execFileSync('git', ['show', `${STRUCTURED_BASELINE_ANCHOR}:${STRUCTURED_BASELINE_PATH}`], {
+      cwd: SELF_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }))
+  } catch {
+    return [fail(ctx, 'baseline-structure-anchor-unreachable', '结构化历史基线的独立 Git 锚点不可读', null, `${STRUCTURED_BASELINE_ANCHOR}:${STRUCTURED_BASELINE_PATH} 必须可达；无 Git 对象或浅克隆不能降级通过`)]
+  }
+  for (const key of FROZEN_BASELINE_FIELDS) {
+    if (JSON.stringify(baseline[key]) !== JSON.stringify(frozen[key])) {
+      failures.push(fail(ctx, 'baseline-structure-mismatch', `历史基线保护字段被改写：${key}`, { id: key, target: key }, `与独立 Git 锚点 ${STRUCTURED_BASELINE_ANCHOR.slice(0, 7)} 的 ${STRUCTURED_BASELINE_PATH} 不同；保留 sourceRow key 不能抹去条目或保护规则`))
+    }
+  }
+  for (const key of FROZEN_BASELINE_META_FIELDS) {
+    if (baseline.meta[key] !== frozen.meta[key]) {
+      failures.push(fail(ctx, 'baseline-structure-mismatch', `历史基线来源字段被改写：meta.${key}`, { id: key, target: key }, `来源字段须与独立结构锚点 ${STRUCTURED_BASELINE_ANCHOR.slice(0, 7)} 一致`))
+    }
+  }
   const baselineKeys = new Set(baseline.sourceRows.map((r) => r.key))
   const rowKeys = new Set(rows.map((r) => r.key))
   for (const r of baseline.sourceRows) {

@@ -7,16 +7,49 @@
 //
 // 红测纪律：本文件先于实现编写——collectDocumentStyles /
 // rewriteDocumentStyleCss / docScopeKeyOf 尚不存在，import 即红。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   collectDocumentStyles,
   docScopeKeyOf,
   rewriteDocStyleRuleTree,
   MAIN_DOC_SCOPE,
+  splitSelectorList,
+  substituteNesting,
 } from '../../src/shared/docStyle'
 import { rewriteDocumentStyleCss } from '../../src/webview/docStyleLoader'
 
 const cssOf = (text: string): string[] => collectDocumentStyles(text).map((s) => s.css)
+
+it('R04：CSSOM 识别的未知分组规则也递归隔离内层选择器', () => {
+  const parse = vi.spyOn(CSSStyleSheet.prototype, 'replaceSync').mockImplementation(function (this: CSSStyleSheet) {
+    Object.defineProperty(this, 'cssRules', { value: [{
+      cssText: '@future-group { button { color: red; } }',
+      cssRules: [{ selectorText: 'button', style: { cssText: 'color: red;' } }],
+    }] })
+  })
+  try {
+    const output = rewriteDocumentStyleCss('@future-group { button { color: red; } }', 'doc')
+    expect(output).toContain(':where([data-vsidian-doc-scope="doc"]) :is(button)')
+  } finally {
+    parse.mockRestore()
+  }
+})
+
+describe('R05：选择器标点遵循字符串、转义与属性边界', () => {
+  it('逗号只拆最外层选择器项，不拆属性值、转义类名或函数参数', () => {
+    expect(splitSelectorList('[data-x="a,b"], .a\\,b, :is(.c, .d), [data-y="a\\\",b"]'))
+      .toEqual(['[data-x="a,b"]', '.a\\,b', ':is(.c, .d)', '[data-y="a\\\",b"]'])
+  })
+
+  it('仅代换语法位置的 &，属性值与转义标识符逐字保留', () => {
+    expect(substituteNesting('&[data-x="a&b"]', ['.parent']))
+      .toEqual([':is(.parent)[data-x="a&b"]'])
+    expect(substituteNesting('[data-x="a&b"]', ['.parent']))
+      .toEqual([':is(.parent) [data-x="a&b"]'])
+    expect(substituteNesting('.a\\&b:is(&, .child)', ['.parent']))
+      .toEqual(['.a\\&b:is(:is(.parent), .child)'])
+  })
+})
 
 describe('收集器：全文源码顺序与语法上下文排除', () => {
   it('纯 style 块：内容与源文区间（from=开标签起点，to=闭标签终点）', () => {

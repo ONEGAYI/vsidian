@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 // #569（T04）文档样式装载器生命周期契约：产物元素挂 head 末尾、多实例
 // 共享（引用计数）、释放无残留、源文更新同步产物（ADR-0019 决定 3/4）。
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { DocumentStyleBinding, DOC_STYLE_ELEMENT_ATTR, documentStyleRegistry } from '../../src/webview/docStyleLoader'
 
 afterEach(() => {
+  vi.restoreAllMocks()
   document.head.querySelectorAll(`[${DOC_STYLE_ELEMENT_ATTR}]`).forEach((el) => el.remove())
 })
 
@@ -60,14 +61,20 @@ describe('装载器：产物生命周期', () => {
 
   it('文本与树引用均未变时短路（零重复收集）', () => {
     const b = new DocumentStyleBinding('doc')
+    const update = vi.spyOn(documentStyleRegistry, 'update')
     b.sync('<style>p { color: red }</style>')
     const el = elOf('doc')!
     const before = el.textContent
-    const spy = { called: 0 }
     // 同文本同树（undefined）重复 sync：产物不变（短路不重写）
     b.sync('<style>p { color: red }</style>')
     expect(el.textContent).toBe(before)
-    expect(spy.called).toBe(0)
+    expect(update).toHaveBeenCalledTimes(1)
+    // 未提供树与显式 null 都表示同一个“无树”输入；文本改变仍正常更新。
+    b.sync('<style>p { color: red }</style>', null)
+    expect(update).toHaveBeenCalledTimes(1)
+    b.sync('<style>p { color: blue }</style>')
+    expect(update).toHaveBeenCalledTimes(2)
+    expect(el.textContent).toContain('blue')
     b.dispose()
   })
 

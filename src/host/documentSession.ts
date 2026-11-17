@@ -472,10 +472,10 @@ export class DocumentSession {
   /** #10 图片解析：同 src 在途去重与成功结果缓存（失败不缓存，重试重解析） */
   private readonly imageInFlight = new Map<string, Promise<ImageResolution>>()
   private readonly imageCache = new Map<string, ImageResolution>()
-  /** #201 图源 → 归一目标键登记（失效通道反查：按文件目标找 src 集合）。
+  /** #201 图源与归一目标的成对登记（失效通道反查：按文件目标找 src 集合）。
    *  #224 起来源化请求（悬停/嵌入 B 图片）同样登记（registerImageSrcTarget
    *  统一入口，有界）——B 图片文件变化经反查命中，广播 image.invalidate */
-  private readonly imageSrcTarget = new Map<string, string>()
+  private readonly imageSrcTarget = new Map<string, { src: string; target: string }>()
   /** #201 缓存世代（失效时推进）：在途请求跨失效窗口完成后不得回写缓存 */
   private readonly imageEpochs = new Map<string, number>()
   /** #201 失效时钟（单调）：归一目标键 → 最近失效时刻。在途请求发起时
@@ -1839,9 +1839,9 @@ export class DocumentSession {
    * 直连解析端口——不进会话缓存/在途去重表（键均为裸 src，跨来源会串
    * 台；重复请求的代价是重复 stat，跨开缓存不属本通道）。#224 起成功
    * 结果登记失效反查（B 图片文件变化 → invalidateImagesByFsPath 命中 →
-   * image.invalidate 广播 → B 管理器失效重挂；键为裸 src，跨来源同 src
-   * 指向不同文件时后登记覆盖前者——失效广播是「无条件失效重取」语义，
-   * 多杀自愈，见 imageSrcTarget 注释）。解析异常收敛 read-error 回发。
+   * image.invalidate 广播 → B 管理器失效重挂；跨来源同 src 指向不同文件
+   * 时分别保留登记。广播仍按 src 无条件重取，可能同时重取其他来源的
+   * 同名图，但不能漏掉仍在场的目标。解析异常收敛 read-error 回发。
    */
   private async resolveSourcedImageRequest(
     panel: PanelEntry,
@@ -1872,15 +1872,14 @@ export class DocumentSession {
     }
   }
 
-  /** 图源 → 归一目标键登记（#201 反查；#224 起来源化路径同样登记并有界：
+  /** 图源与归一目标成对登记（#201 反查；#224 来源化路径同样登记并有界：
    *  条目数上限按插入序淘汰，被淘汰 src 失去失效反查——重挂/重开重新
    *  登记自愈） */
   private registerImageSrcTarget(src: string, fsPath: string): void {
     const key = imageFsKey(fsPath, this.options.isWindowsHost ?? false)
-    if (this.imageSrcTarget.get(src) === key) {
-      this.imageSrcTarget.delete(src) // 重复登记同目标：移到 MRU（插入序语义）
-    }
-    this.imageSrcTarget.set(src, key)
+    const pair = JSON.stringify([src, key])
+    this.imageSrcTarget.delete(pair) // 重复登记同一对：移到 MRU（插入序语义）
+    this.imageSrcTarget.set(pair, { src, target: key })
     while (this.imageSrcTarget.size > IMAGE_SRC_TARGET_LIMIT) {
       const oldest = this.imageSrcTarget.keys().next().value
       if (oldest === undefined) {
@@ -1932,7 +1931,7 @@ export class DocumentSession {
     this.imageClock++
     this.imageInvalidatedAt.set(key, this.imageClock)
     const srcs: string[] = []
-    for (const [src, target] of this.imageSrcTarget) {
+    for (const { src, target } of this.imageSrcTarget.values()) {
       if (target === key) {
         srcs.push(src)
       }

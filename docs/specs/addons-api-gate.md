@@ -32,6 +32,8 @@ node scripts/demoAddonApiGate.mjs # 负向演示（退出码 0 = 全部场景符
 
 **先验证基线可信，再运行兼容检查**（CI 步骤序的核心）。验证语义：从锚点 git 对象重新派生条目集合、台账快照与全部签名声明文本，与基线文件**精确比对**（多一条、少一条、一字段漂移都失败）；锚点对象不可达（无 `.git` / 浅克隆 / 伪造 SHA / 标签消失）一律失败，不静默接受。
 
+**签名集合完整性（2026-11-16，G01）**：应有的模块与符号集合从原 Git 锚点清单派生，不从候选基线的 `declarations` 自报。删除单个签名、整个模块或整张声明表均报 `baseline-declaration-missing`；额外签名或文本漂移仍报 `baseline-declaration-mismatch`。兼容比较本身也将缺失快照报为 `signature-baseline-missing`，不会把缺失历史声明视作免检。该修复不重锚、不重生成历史基线。
+
 **当前状态澄清（2026-10-18，#582）**：发行台账已记录实际发行的 API 1.1.0 / 1.2.0，1.0.0 仍保留原候选记录；下表及首发流程中「尚未发行」和首个 1.0.0 的未来式表述保留为 2026-10-08 的历史设计记录，不代表当前发行状态。现用基线仍采用 bootstrap 提交锚点，保留已发行记录并继续复验兼容承诺。生成器沿用的 bootstrap `meta.note` 中「首个真实发行前」属于旧模板措辞，不改变实际台账；本票不修改检查器、模板或基线模式，也不伪造 release 标签。
 
 | 路径 | 锚点 | 额外核实 | 当前状态 |
@@ -58,7 +60,7 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 | （同上）验证关联 | 收回测试关联 | `verification-retracted` |
 | release-history | 改写 / 删除已登记台账记录（状态、日期、实验清单） | `release-history-mutated` |
 | removal-deadlines | 提前移除（双门槛）、非法版本号 | `removed-without-deprecation`、`removal-too-early`、`removal-minor-span-insufficient`、`ledger-version-malformed` |
-| signatures | 签名符号消失、声明文本变化 | `signature-symbol-missing`、`signature-declaration-changed` |
+| signatures | 历史声明快照缺失、签名符号消失、声明文本变化 | `signature-baseline-missing`、`signature-symbol-missing`、`signature-declaration-changed` |
 | verification-files | 关联测试文件被删 | `verification-file-missing` |
 | api-version-binding | 宿主版本与台账脱钩、台账超前宿主 | `api-version-not-in-ledger`、`ledger-ahead-of-host`、`api-version-malformed` |
 | reference-freshness | 版本参考漂移（check:addonapi 同口径） | `reference-stale` |

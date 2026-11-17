@@ -190,6 +190,43 @@ function itemsOf(r: Awaited<ReturnType<VaultIndexService['backlinksOf']>>) {
 }
 
 describe('VaultIndexService：初始化与持久化', () => {
+  it('R15 二遍按来源替换边且沿扫描批大小让出，不保留旧边或串到其他来源', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '[old](./old.png)',
+      'C:/vault/b.md': '[old](./old.png)',
+      'C:/vault/c.md': '[old](./old.png)',
+      'C:/vault/d.md': '[old](./old.png)',
+      'C:/vault/keep.md': '[keep](./new.png)',
+      'C:/vault/old.png': 'old',
+      'C:/vault/new.png': 'new',
+    })
+    const { service, scan } = makeService(fs)
+    const reads = new Map<string, number>()
+    const read = scan.readFileText.bind(scan)
+    let batch = 0
+    let maxBatch = 0
+    scan.readFileText = async (path) => {
+      const key = normalizeSeparators(path)
+      const count = (reads.get(key) ?? 0) + 1
+      reads.set(key, count)
+      if (count === 2) {
+        maxBatch = Math.max(maxBatch, ++batch)
+        if (key.endsWith('/a.md') || key.endsWith('/d.md')) return '[new](./new.png)'
+        if (key.endsWith('/c.md')) return 'no links'
+      }
+      return read(path)
+    }
+    const yieldOriginal = scan.yieldToEventLoop.bind(scan)
+    scan.yieldToEventLoop = async () => { batch = 0; await yieldOriginal() }
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect([...reads.values()]).toEqual([2, 2, 2, 2, 2])
+    expect(itemsOf(await service.backlinksOf('C:/vault/old.png')).map((item) => item.sourceRelPath)).toEqual(['b.md'])
+    expect(itemsOf(await service.backlinksOf('C:/vault/new.png')).map((item) => item.sourceRelPath)).toEqual(['a.md', 'd.md', 'keep.md'])
+    expect(service.maintenanceInfo().roots[0]!.edgeCount).toBe(4)
+    expect(maxBatch).toBeLessThanOrEqual(2)
+    service.dispose()
+  })
+
   it('无快照时全量扫描建索引并提交快照（CURRENT 指向新代）', async () => {
     const { service, storage } = makeService(makeFs({
       'C:/vault/a.md': '# A\n\n见 [[b]]。\n',

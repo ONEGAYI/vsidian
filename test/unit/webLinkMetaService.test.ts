@@ -513,6 +513,33 @@ describe('WebLinkMetaService 合并与取消', () => {
     await expect(again).resolves.toEqual({ ok: false, reason: 'web-timeout' }) // 挂起服务器最终超时
   })
 
+  it('R11 旧请求取消后立即重取同 URL，cancelAll 仍能中止新请求且不回填缓存', async () => {
+    let firstArrived!: () => void
+    let secondArrived!: (res: http.ServerResponse) => void
+    const firstSeen = new Promise<void>((resolve) => { firstArrived = resolve })
+    const secondSeen = new Promise<http.ServerResponse>((resolve) => { secondArrived = resolve })
+    let count = 0
+    const srv = await startServer((_req, res) => {
+      if (++count === 1) firstArrived()
+      else secondArrived(res)
+    })
+    const service = makeService({ timeoutMs: 1500 })
+    const controller = new AbortController()
+    const href = `http://127.0.0.1:${srv.port}/replace`
+    const first = service.fetch(href, controller.signal).catch((error: Error) => error.name)
+    await firstSeen
+    controller.abort()
+    const next = service.fetch(href)
+    const response = await secondSeen
+    await expect.poll(() => service.stats().activeFetches).toBe(1)
+    service.cancelAll()
+    response.writeHead(200, { 'content-type': 'text/html' })
+    response.end(PAGE)
+    expect(await first).toBe('AbortError')
+    expect(await next).toEqual({ ok: false, reason: 'web-unreachable' })
+    expect(service.stats().cacheEntries).toBe(0)
+  })
+
   it('cancelAll：中止全部在途（开关关闭语义；未传 signal 的消费者收敛为失败分态）', async () => {
     const srv = await startServer(() => {
       // 挂起

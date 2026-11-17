@@ -340,6 +340,27 @@ test('篡改基线声明文本被拒：baseline-declaration-mismatch', async () 
   )
 })
 
+test('G01：删签名快照（单符号、整模块、整表）均不能通过 Git 基线复验', async () => {
+  for (const scope of ['symbol', 'module', 'table']) {
+    const tampered = structuredClone(BASELINE)
+    if (scope === 'symbol') delete tampered.declarations['src/shared/addonIdentity.ts'].AddonIdentityDeclaration
+    else if (scope === 'module') delete tampered.declarations['src/shared/addonIdentity.ts']
+    else delete tampered.declarations
+    const failures = await verifyAddonApiBaseline(tampered, realGitAccess(REPO_ROOT), CTX)
+    assert.ok(failures.some((f) => f.code === 'baseline-declaration-missing'), scope)
+  }
+})
+
+test('G01：签名比较遇到缺失的历史声明必须失败，不能接受收窄候选', () => {
+  const tampered = structuredClone(BASELINE)
+  const module = 'src/shared/addonIdentity.ts'
+  const symbol = 'AddonIdentityDeclaration'
+  const extracted = new Map(Object.entries(BASELINE.declarations).map(([m, declarations]) => [m, new Map(Object.entries(declarations))]))
+  extracted.get(module).set(symbol, BASELINE.declarations[module][symbol].replace('api: string', "api: '^9.0.0'"))
+  delete tampered.declarations[module][symbol]
+  assert.ok(checkSignatureTexts(tampered, extracted, CTX).some((f) => f.code === 'signature-baseline-missing' && f.target === symbol))
+})
+
 test('篡改基线台账快照被拒：baseline-release-mismatch（含日期伪造）', async () => {
   const tampered = structuredClone(BASELINE)
   tampered.releases[0].releasedAt = '2026-01-01'

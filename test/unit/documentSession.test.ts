@@ -1537,6 +1537,38 @@ describe('#201 图片失效通道：缓存删除与全面板广播', () => {
   const req = (id: string, reqId: number, src: string): WebviewToHost =>
     ({ kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId, src }) as WebviewToHost
 
+  it.each(['image', 'html'] as const)('R07 %s 资源与主文档使用相同图源时，两目标都保留失效登记', async (resource) => {
+    const s = setup()
+    const out: HostToWebview[] = []
+    const calls: string[] = []
+    const bPath = 'D:/notes/sub/b.md'
+    const id = s.session.attachPanel({
+      send: (message) => out.push(message),
+      resolveImage: async (_src, source) => {
+        const fsPath = source ? 'D:/notes/sub/img.png' : 'D:/notes/img.png'
+        calls.push(fsPath)
+        return { ok: true, src: `res://${calls.length}`, fsPath }
+      },
+      readHoverTarget: (_payload, report) => report(mdReadOutcome(bPath, 'sub/b.md', '# B\n')),
+    })
+    await ready10(s, id)
+    await s.send(id, req(id, 1, './img.png'))
+    await s.send(id, { kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 2, instanceId: 'hover-b', sourceStart: 0, sourceEnd: 3, target: 'sub/b' })
+    const identity = { sessionId: id, docUri: DOC_URI, reqId: 3, sourceDocUri: bPath }
+    await s.send(id, resource === 'image'
+      ? { ...identity, kind: 'image.request', src: './img.png' }
+      : { ...identity, kind: 'htmlResource.request', url: './img.png' })
+    out.length = 0
+    s.session.invalidateImagesByFsPath('D:/notes/img.png')
+    expect(out).toEqual([{ kind: 'image.invalidate', srcs: ['./img.png'] }])
+    await s.send(id, req(id, 4, './img.png'))
+    expect(calls).toEqual(['D:/notes/img.png', 'D:/notes/sub/img.png', 'D:/notes/img.png'])
+    out.length = 0
+    s.session.invalidateImagesByFsPath('D:/notes/sub/img.png')
+    expect(out).toEqual([{ kind: 'image.invalidate', srcs: ['./img.png'] }])
+  })
+
   it('成功解析登记目标映射：invalidateImagesByFsPath 删缓存并广播全部面板', async () => {
     const s = setup()
     const calls: string[] = []

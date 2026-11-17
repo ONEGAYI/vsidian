@@ -67,9 +67,9 @@ export function createBrowserExportSession(
   let mergeMeta: { docNames: readonly string[]; pageBreak: boolean } | undefined
 
   const releaseKill = (): void => {
-    if (released) return
     released = true
     launched?.killSync()
+    launched = undefined
     server?.close()
     server = undefined
   }
@@ -78,8 +78,14 @@ export function createBrowserExportSession(
     if (released) return
     released = true
     if (launched) {
-      try { await launched.close() } catch { launched.killSync() }
-      launched = undefined
+      const browser = launched
+      try {
+        await browser.close()
+      } catch {
+        if (launched === browser) browser.killSync()
+      } finally {
+        if (launched === browser) launched = undefined
+      }
     }
     server?.close()
     server = undefined
@@ -99,11 +105,13 @@ export function createBrowserExportSession(
         } catch (error) {
           throw new PdfExportBrowserError('launch', `browser launch failed: ${error instanceof Error ? error.message : String(error)}`)
         }
+        if (released) throw new PdfExportBrowserError('launch', 'session cancelled during browser launch')
         try {
           server = await startExportResourceServer(deps.outWebviewDir, deps.resourceResolve)
         } catch (error) {
           throw new PdfExportBrowserError('launch', `export resource server failed to start: ${error instanceof Error ? error.message : String(error)}`)
         }
+        if (released) throw new PdfExportBrowserError('launch', 'session cancelled during resource server startup')
         let session
         try {
           session = await createPageSession(launched.connection)

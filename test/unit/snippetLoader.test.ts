@@ -4,6 +4,7 @@
 // 驱动（真实浏览器抓取与层叠效果由 test/browser/cssSnippets.mjs 钉住）。
 import { describe, it, expect, beforeEach } from 'vitest'
 import { SnippetLoader, SNIPPET_LINK_ATTR, type SnippetLoadOutcome } from '../../src/webview/snippetLoader'
+import { DocumentStyleBinding, DOC_STYLE_ELEMENT_ATTR } from '../../src/webview/docStyleLoader'
 
 // jsdom 的 document.head 跨用例共享：残留链会干扰 selector 命中，逐用例清场
 beforeEach(() => {
@@ -29,6 +30,31 @@ function headSnippetNames(): string[] {
 }
 
 describe('装载与晋升（成功路径）', () => {
+  it('R06：重复清单与热替换始终把全部片段放在文档样式之前', () => {
+    const loader = new SnippetLoader()
+    const docStyle = new DocumentStyleBinding('doc')
+    try {
+      const list = { version: 1, snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=1' }] }
+      loader.apply(list)
+      fireLoad(linkOf('a.css')!)
+      docStyle.sync('<style>p { color: red }</style>')
+      const style = document.head.querySelector(`[${DOC_STYLE_ELEMENT_ATTR}]`)!
+      loader.apply(list)
+      expect(style.previousElementSibling).toBe(linkOf('a.css'))
+      loader.apply({ version: 2, snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=2' }] })
+      const pending = document.head.querySelector<HTMLLinkElement>('link[href="https://w/a.css?v=2"]')!
+      expect(pending.compareDocumentPosition(style) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      fireLoad(pending)
+      expect(style.previousElementSibling).toBe(pending)
+      loader.apply({ version: 3, snippets: [] })
+      loader.apply(list)
+      expect(style.previousElementSibling).toBe(linkOf('a.css'))
+    } finally {
+      loader.clear()
+      docStyle.dispose()
+    }
+  })
+
   it('新清单挂 pending 链；load 后晋升 settled，href/data 属性正确', () => {
     const loader = new SnippetLoader()
     loader.apply({ version: 1, snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=1' }] })
