@@ -960,22 +960,17 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="life">引入：live SVG 塌缩修复（2026-09-29）</p>
     </article>
     <article class="entry" id="image-resize-handle">
-      <h3><code>.vsidian-image-resize-handle / .vsidian-image-resize-glow / .vsidian-image-resize-readout（相框右下角拖动手柄族，#636）</code><span class="eid">image-resize-handle</span></h3>
-      <p class="purpose">图片相框右下角拖动手柄（#636）：拖动即改图片显示尺寸并把结果写回源文尺寸后缀。手柄是硬性次要编辑入口——只在 Live 视图的非排除图片上出现；链接内与表格格内沿既有排除矩阵不出现（那里的点击语义归链接跳转与单元格编辑），阅读视图不出现（只读契约）。视觉 12×12、热区 20×20（沿用侧栏拖宽句柄的热区大于视觉做法），光标 nwse-resize，贴住相框右下角内侧并与圆角同心。glow 为沿右下角两条边线的内侧光带（背景两条 linear-gradient，不占布局）——底边与右边各自从边线起发光、向内递减至无，右带叠于底带之上（角落交汇处视觉同亮度），不向外溢出相框、其余两边无光；光带深度 = max(24px, min(相框宽, 相框高) × 10%)——取 max 不取和（避免大图边界难预期）、基数用短边（宽图沿底边的光带深度会与行高失衡，短边让光带与图的视觉体量成比例）。readout 为拖动中的实时尺寸读数（形如 `320 × 180`），松手即消失。</p>
+      <h3><code>.vsidian-image-resize-handle / .vsidian-image-resize-readout（相框右下角拖动手柄族，#636）</code><span class="eid">image-resize-handle</span></h3>
+      <p class="purpose">图片相框右下角拖动手柄（#636）：拖动改变图片显示尺寸，并把结果写回源文尺寸后缀。只在 Live 视图非排除图片上出现；链接内、表格格内与阅读视图不提供手柄。视觉为 16×16 的圆弯折角，热区 20×20，光标 nwse-resize。readout 为拖动中的实时尺寸读数（如 `320 × 180`），松手即消失。</p>
       <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
-<p class="states">状态：悬停相框时显现（与既有 .vsidian-graphic-chrome 同一套 frame:hover 模型，不常驻——常驻会让每张图右下角都挂装饰）。拖动中：相框挂 .vsidian-image-resizing（整个外框 1px 实线异色描边，取 --vscode-focusBorder），同时 glow 完全消失——两者互斥，避免一处出现两团亮区。拖动结束或 Esc 中止后两者一并撤下。手柄在图片 error / loading 态不呈现（无尺寸语义可调）；尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。</p>
+<p class="states">状态：悬停相框时显现，加载或失败时隐藏。拖动中，相框挂 .vsidian-image-resizing，以 --vscode-focusBorder 描 1px 实线；手柄保持可见。拖动结束或 Esc 中止后恢复悬停状态。尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。</p>
       <p class="obsidian">Obsidian 对应：无直接对应（Obsidian 不给图片拖动改尺寸的手柄；其尺寸靠源码尾缀手写）</p>
 
-      <p class="dom">DOM 关系：手柄元素是相框（live 侧 span.vsidian-image 兼任 vsidian-graphic-frame）的子节点，与既有 .vsidian-graphic-chrome 按钮组同级；glow 与 readout 同为其子节点（glow 承担边线光带、readout 承担拖动读数）。glow 的光带深度经内部协调属性 --vsidian-image-resize-glow 传递：JS（glowExtension：max(24px, 短边×10%)）以内联 setProperty 写在相框元素上，CSS 于 .vsidian-image-resize-glow 的背景两条 linear-gradient 消费（光带深度，均带 24px 兜底）。该属性不设公开 variable 条目——值是运行时几何派生而非主题可定制面，glow 消费的是从相框继承的内联值——CSS 片段把同名变量声明在 .vsidian-image-resize-glow 自身即可覆盖光带深度（元素自身声明优先于从父继承的内联值）；显隐互斥态由 opacity/visibility 类规则承担，不受该属性影响。</p>
-      <pre><code>/* 拖动中：相框异色描边，光晕消失（互斥） */
-.vsidian-image.vsidian-image-resizing {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 2px;
-}
-.vsidian-image.vsidian-image-resizing .vsidian-image-resize-glow {
-  opacity: 0;
+      <p class="dom">DOM 关系：手柄与 readout 都挂在相框内，与 .vsidian-graphic-chrome 同级。相框用小阴影呈现，旧光带绘制层与深度变量已移除。</p>
+      <pre><code>.vsidian-image-resize-handle::after {
+  border-color: var(--vscode-focusBorder);
 }</code></pre>
-      <p class="verify">验证：浏览器 imageResize：悬停显现与不常驻、等比与 Shift 双轴写回形态、一次拖动一笔 edit.request、Esc 不写文档、最小宽保底、光晕延伸距离与「描边 + 光晕消失」互斥态（计算样式断言）、链接内与表格格内无手柄、拖动开始 Shift 提示 toast；单元 imageResize：computeResizeTarget（等比/百分比/双轴保留/最小宽/最大宽钳制）、glowExtension（24 保底与短边 10%）、resizeHandleLayout 与 replaceSizeSuffix 纯逻辑</p>
+      <p class="verify">验证：浏览器 imageResize：悬停折角、小阴影与旧片段无法恢复光带、拖动描边；窄图/矮图按钮与手柄可分别点按；等比和 Shift 双轴写回、一次拖动一笔 edit.request、Esc 不写文档、最小宽、排除项和 Shift 提示；单元 imageResize：computeResizeTarget（等比/百分比/双轴保留/最小宽/最大宽钳制）、resizeHandleLayout 与 replaceSizeSuffix 纯逻辑</p>
       <p class="life">引入：#636（2026-10-22）</p>
     </article>
     <article class="entry" id="live-wikilink">
@@ -1571,16 +1566,16 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     <h2>界面域 · 图形化按钮与弹窗（2）</h2>
     <article class="entry" id="graphic-chrome">
       <h3><code>.vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）</code><span class="eid">graphic-chrome</span></h3>
-      <p class="purpose">图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#567（T02）起块级原生 HTML 的 Live 宿主复用同款按钮族 DOM/CSS（仅 edit 钮——buildGraphicChrome 的 onPopup 可缺省形态；宿主 .vsidian-live-html 自有定位规则，不入 frame 类）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。按钮底色为「主题面纯色渐变层 + 编辑器底实垫」双层合成（常态 editorWidget-background、悬停 button-secondaryBackground）：主题变量可能半透明（玻璃风主题），按钮直浮图片等斑驳内容时半透明面透出内容色，垫实底后任何主题不透底；主题值为实色时渐变层全覆盖、观感与单层等同。</p>
+      <p class="purpose">图形化代码块的定位包裹层与右上角按钮组：edit 进入源码编辑（仅实时预览），popup 打开图表弹窗。块级原生 HTML 的 Live 宿主复用同一按钮族（仅 edit；宿主 .vsidian-live-html 自有定位，不入 frame 类）。图片（#212）复用按钮与交互，Live 有 edit 和 popup，阅读仅 popup；链接内与表格格内图片不挂按钮组。图片按钮组共用不透明圆角阴影底座，单个按钮悬停才着色；图表与块级 HTML 保留独立按钮底色。悬停面继续使用主题色叠加编辑器底色的双层合成，避免半透明主题透出图面。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
-<p class="states">状态：渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。图片形态：loaded 态显示（data-vsidian-img-state 兄弟/子代选择器驱动），frame.vsidian-image 取行内布局（不破坏行内混排）。</p>
+<p class="states">状态：渲染成功后才允许显示，按钮默认隐藏，悬停相框或按钮键盘聚焦时显现。图片只在 loaded 态显示，由 data-vsidian-img-state 的兄弟或子代选择器驱动；相框布局保持行内混排与独行两种形态。</p>
       <p class="obsidian">Obsidian 对应：无（Obsidian 图表块无公开按钮组结构）</p>
 
-      <p class="dom">DOM 关系：live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。图片形态：live 槽位 span 兼任 frame（vsidian-image 叠加）；阅读 img 经 inline frame span 包裹。按钮组挂 frame 内 absolute 右上。</p>
+      <p class="dom">DOM 关系：live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。图片形态：live 槽位 span 兼任 frame（vsidian-image 叠加）；阅读 img 经 inline frame span 包裹。按钮组挂在 frame 内绝对定位；通常贴右上角，图片空间不足时紧凑底座贴到图外，避免盖住拖动手柄。</p>
       <pre><code>.vsidian-graphic-chrome {
   opacity: 1;
 }</code></pre>
-      <p class="verify">验证：集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons；浏览器 graphicPopup：悬停显隐（透明度两态）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;graphic-chrome&quot;] 探针命中；单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项；悬停按钮底色垫实底（computed backgroundColor 不透明 + 渐变面在场）</p>
+      <p class="verify">验证：集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons；浏览器 graphicPopup：悬停显隐（透明度两态）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;graphic-chrome&quot;] 探针命中；单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项；双模式聚合底座、悬停按钮不透出图片色（计算样式）</p>
       <p class="life">引入：#111（2026-09-26）</p>
     </article>
     <article class="entry" id="diagram-popup">

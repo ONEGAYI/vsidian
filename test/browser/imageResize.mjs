@@ -9,10 +9,11 @@
 //   D5 一次拖动 = 一笔 edit.request（宿主撤销一步）
 //   D6 Esc 中止不写文档
 //   D7 最小宽 24 保底
-//   D8 光晕延伸距离 = max(24, 短边 × 10%)（计算样式断言：保底档 + 短边 10% 档）
-//   D9 按住态：相框异色描边 + 光晕消失（互斥；描边与光晕两侧均有计算样式断言）
+//   D8 保留相框小阴影，旧片段不能重新启用光带
+//   D9 按住态：相框异色描边
 //   D10 表格格内与链接内图片均无手柄（沿既有排除矩阵；链接内先证图片仍渲染）
 //   D11 拖动开始弹 Shift 提示 toast（正反两断言：首拖未按 Shift 弹、已按住不弹）
+//   D12 窄图/矮图的工具栏与拖动手柄可分别点按
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, artifactPath, chromium } from './runtime.mjs'
@@ -79,10 +80,16 @@ try {
     const handle = document.querySelector('.vsidian-image-resize-handle')
     if (!handle) return null
     const style = getComputedStyle(handle)
+    const glyph = getComputedStyle(handle, '::after')
     const rect = handle.getBoundingClientRect()
+    const frame = handle.parentElement.getBoundingClientRect()
     const visible = style.display !== 'none' && style.visibility !== 'hidden'
       && Number.parseFloat(style.opacity) > 0 && rect.width > 0 && rect.height > 0
     return { visible, width: rect.width, height: rect.height, cursor: style.cursor,
+      glyph: [glyph.content, glyph.borderTopWidth, glyph.borderLeftWidth,
+        glyph.borderRightWidth, glyph.borderBottomWidth, glyph.borderBottomRightRadius],
+      inset: [frame.right - rect.right + Number.parseFloat(style.borderRightWidth),
+        frame.bottom - rect.bottom + Number.parseFloat(style.borderBottomWidth)],
       left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
   })
 
@@ -98,38 +105,32 @@ try {
   check('D1 悬停相框后手柄可见', afterHover !== null && afterHover.visible,
     `visible=${afterHover?.visible} size=${afterHover?.width}×${afterHover?.height}`)
   check('D1 手柄光标 nwse-resize', afterHover?.cursor === 'nwse-resize', `cursor=${afterHover?.cursor}`)
+  check('D1 右下手柄为圆弯折角，保留 20×20 热区',
+    afterHover.width === 20 && afterHover.height === 20
+      && afterHover.glyph.join('/') === '""/0px/0px/3px/3px/6px'
+      && afterHover.inset.every((gap) => near(gap, 10, 0.5)),
+    JSON.stringify({ glyph: afterHover.glyph, inset: afterHover.inset }))
 
-  // ---- D8：光晕光带深度（计算样式断言：保底档 + 短边 10% 档） ----
+  // ---- D8：相框只画小阴影，旧片段不能重新启用光带 ----
+  const legacyStyle = await page.addStyleTag({ content: `
+    .vsidian-image-resize-glow {
+      --vsidian-image-resize-glow: 64px;
+      background-image: linear-gradient(to top, red, transparent var(--vsidian-image-resize-glow));
+    }
+  ` })
   const glowState = () => page.evaluate(() => {
     const frame = document.querySelector('.cm-content .vsidian-image')
     const glow = document.querySelector('.vsidian-image-resize-glow')
-    if (!frame || !glow) return null
-    const rect = frame.getBoundingClientRect()
     return {
-      value: Number.parseFloat(getComputedStyle(frame).getPropertyValue('--vsidian-image-resize-glow')),
-      frameW: rect.width,
-      frameH: rect.height,
-      backgroundImage: getComputedStyle(glow).backgroundImage,
+      value: getComputedStyle(frame).getPropertyValue('--vsidian-image-resize-glow'),
+      layer: glow ? getComputedStyle(glow).backgroundImage : null,
+      shadow: getComputedStyle(frame.querySelector('img')).boxShadow,
     }
   })
-  // 保底档：固有 200×100（短边 100 → 10% = 10 < 24 → 保底 24px）
-  const glowFloor = await glowState()
-  check('D8 小图光晕在场且深度走 24px 保底',
-    glowFloor !== null && Number.isFinite(glowFloor.value) && near(glowFloor.value, 24, 2),
-    `glow=${glowFloor?.value}px bg=${glowFloor?.backgroundImage?.slice(0, 100)}`)
-  // 形态：边线光带为双 linear-gradient（底边 to top + 右边 to left）
-  const bgTop = (glowFloor?.backgroundImage.match(/to top/g) ?? []).length
-  const bgLeft = (glowFloor?.backgroundImage.match(/to left/g) ?? []).length
-  check('D8 光晕形态为双 linear-gradient（底边 to top + 右边 to left）',
-    bgTop >= 1 && bgLeft >= 1, `toTop=${bgTop} toLeft=${bgLeft}`)
-  // 短边 10% 档：|600 → 600×300（短边 300 → 30 > 24），期望按实测相框短边推导
-  await load('![[img.png|600]]')
-  const glowRatio = await glowState()
-  const shortEdge = glowRatio ? Math.min(glowRatio.frameW, glowRatio.frameH) : 0
-  const expectedGlow = Math.max(24, shortEdge * 0.1)
-  check('D8 大图光带深度 = max(24, 短边 × 10%)',
-    glowRatio !== null && shortEdge > 240 && near(glowRatio.value, expectedGlow, 2),
-    `glow=${glowRatio?.value}px 短边=${shortEdge.toFixed(1)} 期望≈${expectedGlow.toFixed(1)}`)
+  const painted = await glowState()
+  check('D8 保留相框小阴影，完全移除光带层和几何变量',
+    painted.shadow !== 'none' && painted.layer === null && painted.value === '', JSON.stringify(painted))
+  await legacyStyle.evaluate((el) => el.remove())
 
   // ---- D2：等比拖动 ----
   await load('![[img.png|100]]')
@@ -156,16 +157,6 @@ try {
     `h=${duringDrag.height.toFixed(1)} expected≈${(duringDrag.width / 2).toFixed(1)}`)
   check('D9 按住时相框异色描边', duringDrag.resizing && duringDrag.frameOutline !== '0px',
     `resizing=${duringDrag.resizing} outline=${duringDrag.frameOutline}`)
-  // 光带 opacity 带 0.12s 过渡，拖动开始后等待其归零再断言（即时采样在 CI 慢机上
-  // 会落在过渡尾部拿到 0.0004 残值误报）
-  let glowGone = true
-  try {
-    await page.waitForFunction(() => {
-      const g = document.querySelector('.vsidian-image-resize-glow')
-      return g != null && getComputedStyle(g).opacity === '0'
-    }, undefined, { timeout: 2000 })
-  } catch { glowGone = false }
-  check('D9 拖动中光晕消失（互斥）', glowGone, '拖动中光带 opacity 未在 2s 内过渡到 0')
   check('D2 拖动中有尺寸读数', duringDrag.readout !== null && /\d+\s*×\s*\d+/.test(duringDrag.readout),
     `readout=${JSON.stringify(duringDrag.readout)}`)
   await page.mouse.up()
@@ -288,6 +279,48 @@ try {
   check('D11 首拖已按 Shift 不弹提示', !shiftToastShown, `toast在场=${shiftToastShown}`)
   await page.mouse.up()
   await page.keyboard.up('Shift')
+
+  // ---- D12：真实点按窄图/矮图，两个按钮和手柄应各自可达 ----
+  const smallImage = page.locator('.cm-content .vsidian-graphic-frame.vsidian-image')
+  await load('![窄图|35x45](img.png)')
+  await smallImage.hover()
+  const edit = await smallImage.locator('.vsidian-graphic-chrome-edit').boundingBox()
+  await page.mouse.move(edit.x + edit.width / 2, edit.y + edit.height / 2, { steps: 8 })
+  await page.mouse.click(edit.x + edit.width / 2, edit.y + edit.height / 2)
+  check('D12 窄图编辑按钮可点击并显示源码', await smallImage.count() === 0,
+    `编辑按钮范围 x=${edit.x}…${edit.x + edit.width}`)
+  await page.evaluate(() => window.controller.getView().dispatch({ selection: { anchor: 0 } }))
+
+  await load('![矮图|100x60](img.png)')
+  await smallImage.hover()
+  const popup = await smallImage.locator('.vsidian-graphic-chrome-popup').boundingBox()
+  // 原回归点在预览按钮右边沿；不能用 click() 默认中心点避开遮挡。
+  await page.mouse.click(popup.x + popup.width - 3, popup.y + popup.height / 2)
+  const overlay = page.locator('.vsidian-diagram-overlay')
+  const opened = await overlay.count() > 0
+  check('D12 矮图预览按钮右边沿可打开弹窗', opened, `popup=${JSON.stringify(popup)}`)
+  if (opened) await page.keyboard.press('Escape')
+
+  await smallImage.hover()
+  const grip = await smallImage.locator('.vsidian-image-resize-handle').boundingBox()
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  check('D12 矮图右下手柄仍可进入拖动', await smallImage.evaluate(
+    (el) => getComputedStyle(el).outlineWidth === '1px'), `handle=${JSON.stringify(grip)}`)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+
+  // 给图下方只留 12px：紧凑底座要翻到上侧，仍要能点预览。
+  const lowFrame = await smallImage.boundingBox()
+  await page.mouse.move(0, 0)
+  await page.setViewportSize({ width: 1100, height: Math.ceil(lowFrame.y + lowFrame.height + 12) })
+  await smallImage.hover()
+  const flipped = await smallImage.locator('.vsidian-graphic-chrome-popup').boundingBox()
+  const lowTop = (await smallImage.boundingBox()).y
+  check('D12 图下空间不足时工具栏贴到图上侧', flipped.y + flipped.height < lowTop,
+    `图顶=${lowTop} 按钮底=${flipped.y + flipped.height}`)
+  await page.mouse.click(flipped.x + flipped.width / 2, flipped.y + flipped.height / 2)
+  check('D12 翻到图上侧后预览仍可点开', await overlay.count() > 0, '')
 
   check('无页面错误', errors.length === 0, errors.join('; ') || 'none')
 } finally {
