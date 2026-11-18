@@ -30,7 +30,7 @@ import { applyPercentWidthOnImageLoad, IMAGE_CLASS_NAMES, type ImageResourceMana
 import { imageSizeAttrs, sameImageSize, splitAliasAndSize, type ImageSize } from '../shared/imageSize'
 import { attachResizeHandleToLiveImage } from './imageResize'
 import { sweepHtmlResourceBindings } from './htmlResourceMount'
-import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } from './graphicBlockChrome'
+import { buildImageChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } from './graphicBlockChrome'
 import { imagePopupOptsOfView, openImagePopup } from './imagePopup'
 import {
   WIKILINK_CLASS_NAMES,
@@ -325,7 +325,7 @@ export class LiveImageWidget extends WidgetType {
       slot.appendChild(image)
       if (this.chrome) {
         slot.appendChild(
-          buildGraphicChrome({
+          buildImageChrome(slot, {
             // 编辑源码（同代码块 edit 语义）：光标落图片源码起点 →
             // selectionTouchesRange 命中 → widget 退场显源文
             onEdit: () => {

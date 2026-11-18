@@ -1,4 +1,4 @@
-// 图片拖动手柄契约（#636）：拖动目标计算、光晕延伸、手柄几何与源文尾缀
+// 图片拖动手柄契约（#636）：拖动目标计算、手柄几何与源文尾缀
 // 改写纯逻辑。规格单一事实源：docs/specs/image-resize.md §5、§6、§9.1。
 //
 // 纯函数部分不依赖真实布局与 DOM（jsdom 仅用于 attach 的静态断言）；
@@ -20,7 +20,6 @@ import {
   attachResizeHandle,
   attachResizeHandleToLiveImage,
   computeResizeTarget,
-  glowExtension,
   innerSpanOfImageSource,
   planSizeSuffixRewrite,
   replaceSizeSuffix,
@@ -279,28 +278,6 @@ describe('computeResizeTarget：百分比写回域（1–1000，越域改写像�
   })
 })
 
-describe('glowExtension：光晕延伸距离', () => {
-  it('小图走 24px 保底', () => {
-    expect(glowExtension(100, 100)).toBe(24)
-    expect(glowExtension(200, 50)).toBe(24)
-  })
-
-  it('大图走短边 10%', () => {
-    expect(glowExtension(1000, 1000)).toBe(100)
-    expect(glowExtension(600, 800)).toBe(60)
-  })
-
-  it('宽图以短边为基数（982x169 → max(24, 16.9) = 24）', () => {
-    expect(glowExtension(982, 169)).toBe(24)
-  })
-
-  it('退化输入回落到保底值', () => {
-    expect(glowExtension(0, 0)).toBe(24)
-    expect(glowExtension(Number.NaN, 500)).toBe(24)
-    expect(glowExtension(-10, 500)).toBe(24)
-  })
-})
-
 describe('resizeHandleLayout：留出相框内缘，小图仍可抓取', () => {
   it('默认热区与右边和底边各留 8px', () => {
     expect(resizeHandleLayout({ width: 300, height: 200 })).toEqual({ right: 8, bottom: 8 })
@@ -510,7 +487,7 @@ describe('attachResizeHandle：DOM 装配', () => {
     document.body.replaceChildren()
   })
 
-  it('挂手柄、光晕与读数三件套，幂等不重复', () => {
+  it('挂手柄与读数，幂等不重复', () => {
     const opts = {
       resolveStart: () => ({ declared: null }),
       onCommit: () => undefined,
@@ -519,7 +496,6 @@ describe('attachResizeHandle：DOM 装配', () => {
     expect(attachResizeHandle(frame, opts)).toBe(true)
     expect(attachResizeHandle(frame, opts)).toBe(true)
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)).toHaveLength(1)
-    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.glow}`)).toHaveLength(1)
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)).toHaveLength(1)
   })
 
@@ -532,13 +508,6 @@ describe('attachResizeHandle：DOM 装配', () => {
     expect(handle?.getAttribute('aria-label')).toBe('调整图片大小')
   })
 
-  it('光晕延伸距离写入自定义属性（无布局的 jsdom 走 24 保底）', () => {
-    attachResizeHandle(frame, {
-      resolveStart: () => ({ declared: null }),
-      onCommit: () => undefined,
-    })
-    expect(frame.style.getPropertyValue('--vsidian-image-resize-glow')).toBe('24px')
-  })
 })
 
 describe('attachResizeHandle：拖动时序（jsdom + rect stub）', () => {
@@ -697,7 +666,7 @@ describe('attachResizeHandle：拖动时序（jsdom + rect stub）', () => {
     const handle1 = frame.querySelector<HTMLElement>(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)!
 
     // 模拟 LiveImageWidget 的资源 render 回调（invalidateAll/invalidate 后重
-    // 走）：slot.textContent='' 删旧 img 与三件套，frame 不换、换新 img
+    // 走）：slot.textContent='' 删旧 img、手柄与读数，frame 不换、换新 img
     const refresh = (): HTMLImageElement => {
       frame.textContent = ''
       const img = document.createElement('img')
@@ -712,13 +681,11 @@ describe('attachResizeHandle：拖动时序（jsdom + rect stub）', () => {
     expect(handlesAfterRefresh).toHaveLength(1)
     const handle2 = handlesAfterRefresh[0]!
     expect(handle2).not.toBe(handle1) // 重建而非复用
-    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.glow}`)).toHaveLength(1)
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)).toHaveLength(1)
 
     // 再刷一次仍恰好一份（连续多次刷新不堆积）
     const img3 = refresh()
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.handle}`)).toHaveLength(1)
-    expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.glow}`)).toHaveLength(1)
     expect(frame.querySelectorAll(`.${IMAGE_RESIZE_CLASS_NAMES.readout}`)).toHaveLength(1)
 
     // 事件发往刷新后实际在场的当前手柄（按类名从 frame 重新查询）——向已
@@ -793,7 +760,7 @@ describe('attachResizeHandle：拖动时序（jsdom + rect stub）', () => {
   })
 })
 
-describe('main.css 手柄与光晕规则（#636 契约）', () => {
+describe('main.css 手柄规则（#636 契约）', () => {
   const css = readFileSync(path.resolve(process.cwd(), 'src/webview/main.css'), 'utf8')
 
   it('手柄热区/边框/视觉与 TS 常量联动（改常量即暴露 CSS 漂移）', () => {
@@ -812,14 +779,7 @@ describe('main.css 手柄与光晕规则（#636 契约）', () => {
     expect(rule).toMatch(/visibility:\s*hidden/)
   })
 
-  it('旧片段的装饰层不占布局且不拦事件，默认不画光带', () => {
-    const rule = cssRule(css, '#app .vsidian-image-resize-glow')
-    expect(rule).toMatch(/position:\s*absolute/)
-    expect(rule).toMatch(/pointer-events:\s*none/)
-    expect(rule).not.toMatch(/background/)
-  })
-
-  it('悬停显现且拖动中排除光晕（互斥不靠层叠顺序）', () => {
+  it('悬停显现，拖动时由拖动态接管', () => {
     const blocks = css.match(/[^{}]+\{[^{}]*\}/g) ?? []
     const hover = blocks.filter((block) => (block.split('{')[0] ?? '').includes(
       ':not(.vsidian-image-resizing):hover > .vsidian-image-resize-handle',
@@ -829,18 +789,15 @@ describe('main.css 手柄与光晕规则（#636 契约）', () => {
     expect(hover[0]).toMatch(/visibility:\s*visible/)
   })
 
-  it('拖动中整框 focusBorder 描边，同时光晕隐去（互斥）', () => {
+  it('拖动中整框 focusBorder 描边', () => {
     const frame = cssRule(css, '#app .vsidian-image.vsidian-image-resizing')
     expect(frame).toMatch(/outline:\s*1px solid var\(--vscode-focusBorder/)
-    const glow = cssRule(css, '#app .vsidian-image.vsidian-image-resizing > .vsidian-image-resize-glow')
-    expect(glow).toMatch(/opacity:\s*0/)
-    expect(glow).toMatch(/visibility:\s*hidden/)
   })
 
-  it('loaded 态门控：加载中/失败态不呈现手柄与光晕', () => {
+  it('loaded 态门控：加载中/失败态不呈现手柄', () => {
     const rule = cssRule(
       css,
-      '#app .vsidian-image:not([data-vsidian-img-state="loaded"]) > .vsidian-image-resize-glow',
+      '#app .vsidian-image:not([data-vsidian-img-state="loaded"]) > .vsidian-image-resize-handle',
     )
     expect(rule).toMatch(/display:\s*none/)
   })

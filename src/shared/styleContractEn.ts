@@ -428,8 +428,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     purpose:
       'Bottom-right image resize handle (#636). Dragging changes the displayed size and writes back to the source size suffix. It is available only on eligible Live images, not images inside links or table cells or images in Reading. The rounded elbow is 16×16 with a 20×20 hit area and a nwse-resize cursor. The live size readout disappears on release.',
     states:
-      'Shown while hovering a loaded image. When dragging, .vsidian-image-resizing gives the frame a 1px --vscode-focusBorder outline; the handle stays visible and snippet decorations on the hover layer are hidden. The hover state resumes when the drag ends or Esc cancels it. Oversized source values are still constrained by max-width:100%, without rewriting them.',
-    dom: 'The handle, glow and readout are frame children alongside .vsidian-graphic-chrome. The image now has a small shadow instead of a built-in light band. .vsidian-image-resize-glow stays available as a hover decoration layer and still inherits --vsidian-image-resize-glow (max(24px, short edge × 10%)). Snippets that only changed the old band depth can now supply a background on that layer and use the same depth.',
+      'Shown while hovering a loaded image. When dragging, .vsidian-image-resizing gives the frame a 1px --vscode-focusBorder outline; the handle stays visible. The hover state resumes when the drag ends or Esc cancels it. Oversized source values are still constrained by max-width:100%, without rewriting them.',
+    dom: 'The handle and readout are frame children alongside .vsidian-graphic-chrome. The image has a small shadow; the old light-band layer and depth variable have been removed.',
     obsidian: { counterpart: 'No direct counterpart (Obsidian gives no drag-to-resize handle for images; sizes are hand-written as source suffixes)' },
   },
   'live-wikilink': {
@@ -677,7 +677,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       "The graphic code block wrapper and its top-right button group: edit opens source editing (Live only), and popup opens the diagram preview. Block-level native HTML in Live reuses the button family (edit only, with its own positioning host, .vsidian-live-html). Images reuse the controls and interactions (#212): edit and popup in Live, popup only in Reading. Images inside links or table cells do not get a button group. Image buttons share an opaque rounded shadowed plate, with a separate face only on hover; graphic blocks and block-level HTML retain separate button faces. Hover uses the existing theme color over the editor background, so translucent theme colors do not let the image bleed through.",
     states:
       'Successful rendering enables the controls. They are hidden by default and shown on frame hover or keyboard focus. For images, the loaded state is selected through data-vsidian-img-state using sibling or child selectors. The frame preserves inline and standalone image layout.',
-    dom: "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
+    dom: 'Live: the frame around the fence widget; Reading: the frame around the mermaid/graphic container. Image form: the Live slot span doubles as the frame; Reading images are wrapped by an inline frame span. The group is positioned absolutely inside the frame, normally at the top right. When the image has too little room, a compact group sits outside the image, clear of the resize handle.',
     obsidian: { counterpart: 'None (Obsidian diagram blocks have no public button-group structure)' },
   },
   'diagram-popup': {

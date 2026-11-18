@@ -219,7 +219,7 @@ import {
   renderGraphicBlockInto,
 } from './graphicRenderers'
 import { addonRenderersBridge, type AddonRenderersTableChange } from './addonRenderers'
-import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome, markImageFrameSized, wrapGraphicFrame } from './graphicBlockChrome'
+import { GRAPHIC_CHROME_CLASS_NAMES, buildImageChrome, markImageFrameSized, wrapGraphicFrame } from './graphicBlockChrome'
 import {
   closeImagePopup,
   isImagePopupOpen,
@@ -12421,7 +12421,7 @@ export class WebviewSyncController {
       img.replaceWith(frame)
       frame.append(
         img,
-        buildGraphicChrome({
+        buildImageChrome(frame, {
           onPopup: () => {
             openImagePopup(rawSrc, img.alt)
           },

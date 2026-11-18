@@ -6,12 +6,14 @@
 // 驱动的调用方注入。
 import { t } from '../shared/i18n'
 import { IMAGE_CLASS_NAMES } from './imageResource'
+import { IMAGE_RESIZE_CLASS_NAMES } from './imageResize'
 
 export const GRAPHIC_CHROME_CLASS_NAMES = {
   /** 渲染容器与按钮组的定位包裹层（position:relative 宿主） */
   frame: 'vsidian-graphic-frame',
   /** 按钮组根（absolute 右上；仅在渲染成功态显示，CSS 兄弟选择器驱动） */
   chrome: 'vsidian-graphic-chrome',
+  compact: 'vsidian-graphic-chrome-compact',
   edit: 'vsidian-graphic-chrome-edit',
   popup: 'vsidian-graphic-chrome-popup',
 } as const
@@ -81,6 +83,47 @@ export function buildGraphicChrome(actions: GraphicChromeActions): HTMLElement {
     )
   }
   return chrome
+}
+
+/** 图片够大时工具栏贴右上角；放不下时，紧凑工具栏贴到图外，不盖住拖动热区。 */
+export function buildImageChrome(frame: HTMLElement, actions: GraphicChromeActions): HTMLElement {
+  // Live 重取复用 frame。pointerover 也能捕获指针下换成新图的情况。
+  frame.addEventListener('pointerover', placeImageChrome)
+  frame.addEventListener('focusin', placeImageChrome)
+  return buildGraphicChrome(actions)
+}
+
+function placeImageChrome(event: Event): void {
+  const frame = event.currentTarget as HTMLElement
+  const chrome = frame.querySelector<HTMLElement>(`:scope > .${GRAPHIC_CHROME_CLASS_NAMES.chrome}`)!
+  // 没有加载成功时 CSS 不显示按钮，无需定位。
+  if (chrome.offsetWidth === 0) return
+  chrome.classList.remove(GRAPHIC_CHROME_CLASS_NAMES.compact)
+  chrome.style.left = ''
+  chrome.style.top = ''
+
+  const image = frame.getBoundingClientRect()
+  const toolbar = chrome.getBoundingClientRect()
+  const handleTop = frame.querySelector(`:scope > .${IMAGE_RESIZE_CLASS_NAMES.handle}`)
+    ?.getBoundingClientRect().top ?? image.bottom
+  if (toolbar.left >= image.left && toolbar.bottom <= handleTop) return
+
+  chrome.classList.add(GRAPHIC_CHROME_CLASS_NAMES.compact)
+  const scroller = frame.closest<HTMLElement>('.cm-scroller, .vsidian-view-reading, .vsidian-hover-popup-scroll')
+    ?? document.documentElement
+  const bounds = scroller.getBoundingClientRect()
+  const scrollLeft = bounds.left + scroller.clientLeft
+  const gutter = scroller.querySelector(':scope > .cm-gutters')?.getBoundingClientRect().right ?? scrollLeft
+  const width = chrome.offsetWidth
+  const preferredLeft = image.width < width ? image.left + (image.width - width) / 2 : image.right - width
+  const left = Math.max(gutter, Math.min(preferredLeft, scrollLeft + scroller.clientWidth - width))
+  const bottom = Math.min(bounds.top + scroller.clientTop + scroller.clientHeight, window.innerHeight)
+  // 默认与图片底边相接；视口下沿放不下时翻到上侧，仍避开极矮图的热区。
+  const top = image.bottom + chrome.offsetHeight <= bottom
+    ? image.bottom
+    : Math.min(image.top, handleTop) - chrome.offsetHeight
+  chrome.style.left = `${left - image.left}px`
+  chrome.style.top = `${top - image.top}px`
 }
 
 /** 把既有渲染容器包进定位 frame 并挂按钮组（阅读挂载钩子用；幂等——

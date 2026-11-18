@@ -1682,21 +1682,21 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "content",
     "category": "link-image-wikilink",
     "kind": "selector",
-    "target": ".vsidian-image-resize-handle / .vsidian-image-resize-glow / .vsidian-image-resize-readout（相框右下角拖动手柄族，#636）",
+    "target": ".vsidian-image-resize-handle / .vsidian-image-resize-readout（相框右下角拖动手柄族，#636）",
     "purpose": "图片相框右下角拖动手柄（#636）：拖动改变图片显示尺寸，并把结果写回源文尺寸后缀。只在 Live 视图非排除图片上出现；链接内、表格格内与阅读视图不提供手柄。视觉为 16×16 的圆弯折角，热区 20×20，光标 nwse-resize。readout 为拖动中的实时尺寸读数（如 `320 × 180`），松手即消失。",
     "views": [
       "live"
     ],
-    "states": "悬停相框时显现，加载或失败时隐藏。拖动中，相框挂 .vsidian-image-resizing，以 --vscode-focusBorder 描 1px 实线；手柄保持可见，片段自定义的悬停装饰层隐藏。拖动结束或 Esc 中止后恢复悬停状态。尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。",
-    "dom": "手柄、glow 与 readout 都挂在相框内，与 .vsidian-graphic-chrome 同级。默认图面以小阴影呈现，不绘制光带；.vsidian-image-resize-glow 保留为悬停装饰层，仍继承相框的 --vsidian-image-resize-glow（max(24px, 短边×10%)）。旧片段若只设置过光带深度，现在可在该选择器上直接指定背景，继续引用该深度。",
-    "example": ".vsidian-image-resize-glow {\n  background: linear-gradient(to top, var(--vscode-focusBorder), transparent var(--vsidian-image-resize-glow));\n}",
+    "states": "悬停相框时显现，加载或失败时隐藏。拖动中，相框挂 .vsidian-image-resizing，以 --vscode-focusBorder 描 1px 实线；手柄保持可见。拖动结束或 Esc 中止后恢复悬停状态。尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。",
+    "dom": "手柄与 readout 都挂在相框内，与 .vsidian-graphic-chrome 同级。相框用小阴影呈现，旧光带绘制层与深度变量已移除。",
+    "example": ".vsidian-image-resize-handle::after {\n  border-color: var(--vscode-focusBorder);\n}",
     "obsidian": {
       "counterpart": "无直接对应（Obsidian 不给图片拖动改尺寸的手柄；其尺寸靠源码尾缀手写）",
       "support": "none"
     },
     "verification": [
-      "浏览器 imageResize：悬停折角、小阴影与默认无光带、旧片段装饰层绘制、拖动描边与装饰层互斥；等比和 Shift 双轴写回、一次拖动一笔 edit.request、Esc 不写文档、最小宽、排除项和 Shift 提示",
-      "单元 imageResize：computeResizeTarget（等比/百分比/双轴保留/最小宽/最大宽钳制）、glowExtension（24 保底与短边 10%）、resizeHandleLayout 与 replaceSizeSuffix 纯逻辑"
+      "浏览器 imageResize：悬停折角、小阴影与旧片段无法恢复光带、拖动描边；窄图/矮图按钮与手柄可分别点按；等比和 Shift 双轴写回、一次拖动一笔 edit.request、Esc 不写文档、最小宽、排除项和 Shift 提示",
+      "单元 imageResize：computeResizeTarget（等比/百分比/双轴保留/最小宽/最大宽钳制）、resizeHandleLayout 与 replaceSizeSuffix 纯逻辑"
     ],
     "introduced": "#636（2026-10-22）"
   },
@@ -2578,7 +2578,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "reading"
     ],
     "states": "渲染成功后才允许显示，按钮默认隐藏，悬停相框或按钮键盘聚焦时显现。图片只在 loaded 态显示，由 data-vsidian-img-state 的兄弟或子代选择器驱动；相框布局保持行内混排与独行两种形态。",
-    "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。图片形态：live 槽位 span 兼任 frame（vsidian-image 叠加）；阅读 img 经 inline frame span 包裹。按钮组挂 frame 内 absolute 右上。",
+    "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。图片形态：live 槽位 span 兼任 frame（vsidian-image 叠加）；阅读 img 经 inline frame span 包裹。按钮组挂在 frame 内绝对定位；通常贴右上角，图片空间不足时紧凑底座贴到图外，避免盖住拖动手柄。",
     "example": ".vsidian-graphic-chrome {\n  opacity: 1;\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 图表块无公开按钮组结构）",
@@ -6175,8 +6175,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   },
   "image-resize-handle": {
     "purpose": "Bottom-right image resize handle (#636). Dragging changes the displayed size and writes back to the source size suffix. It is available only on eligible Live images, not images inside links or table cells or images in Reading. The rounded elbow is 16×16 with a 20×20 hit area and a nwse-resize cursor. The live size readout disappears on release.",
-    "states": "Shown while hovering a loaded image. When dragging, .vsidian-image-resizing gives the frame a 1px --vscode-focusBorder outline; the handle stays visible and snippet decorations on the hover layer are hidden. The hover state resumes when the drag ends or Esc cancels it. Oversized source values are still constrained by max-width:100%, without rewriting them.",
-    "dom": "The handle, glow and readout are frame children alongside .vsidian-graphic-chrome. The image now has a small shadow instead of a built-in light band. .vsidian-image-resize-glow stays available as a hover decoration layer and still inherits --vsidian-image-resize-glow (max(24px, short edge × 10%)). Snippets that only changed the old band depth can now supply a background on that layer and use the same depth.",
+    "states": "Shown while hovering a loaded image. When dragging, .vsidian-image-resizing gives the frame a 1px --vscode-focusBorder outline; the handle stays visible. The hover state resumes when the drag ends or Esc cancels it. Oversized source values are still constrained by max-width:100%, without rewriting them.",
+    "dom": "The handle and readout are frame children alongside .vsidian-graphic-chrome. The image has a small shadow; the old light-band layer and depth variable have been removed.",
     "obsidian": {
       "counterpart": "No direct counterpart (Obsidian gives no drag-to-resize handle for images; sizes are hand-written as source suffixes)"
     }
@@ -6441,7 +6441,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   "graphic-chrome": {
     "purpose": "The graphic code block wrapper and its top-right button group: edit opens source editing (Live only), and popup opens the diagram preview. Block-level native HTML in Live reuses the button family (edit only, with its own positioning host, .vsidian-live-html). Images reuse the controls and interactions (#212): edit and popup in Live, popup only in Reading. Images inside links or table cells do not get a button group. Image buttons share an opaque rounded shadowed plate, with a separate face only on hover; graphic blocks and block-level HTML retain separate button faces. Hover uses the existing theme color over the editor background, so translucent theme colors do not let the image bleed through.",
     "states": "Successful rendering enables the controls. They are hidden by default and shown on frame hover or keyboard focus. For images, the loaded state is selected through data-vsidian-img-state using sibling or child selectors. The frame preserves inline and standalone image layout.",
-    "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
+    "dom": "Live: the frame around the fence widget; Reading: the frame around the mermaid/graphic container. Image form: the Live slot span doubles as the frame; Reading images are wrapped by an inline frame span. The group is positioned absolutely inside the frame, normally at the top right. When the image has too little room, a compact group sits outside the image, clear of the resize handle.",
     "obsidian": {
       "counterpart": "None (Obsidian diagram blocks have no public button-group structure)"
     }

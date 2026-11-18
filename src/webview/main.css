@@ -5093,10 +5093,29 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   height: 20px;
 }
 
+/* 放不进图面的紧凑工具栏贴到图外，整块底座可承接从图片移来的指针。 */
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome-compact {
+  right: auto;
+  padding: 2px;
+}
+
+#app .vsidian-graphic-frame.vsidian-image:hover > .vsidian-graphic-chrome-compact {
+  pointer-events: auto;
+}
+
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome-compact button {
+  width: 24px;
+  height: 24px;
+}
+
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome-compact svg {
+  width: 15px;
+  height: 15px;
+}
+
 /* ---- #636：图片相框右下角拖动手柄 ----
    20×20 透明热区经 2px 边框收出 16×16 的圆弯折角（对应 TS 的
-   IMAGE_RESIZE_HANDLE_BORDER）。right/bottom 由 JS 写入内联值。
-   glow 保留为旧 CSS 片段的悬停装饰层，默认不绘制光带。 */
+   IMAGE_RESIZE_HANDLE_BORDER）。right/bottom 由 JS 写入内联值。 */
 #app .vsidian-image-resize-handle {
   position: absolute;
   right: 0;
@@ -5128,21 +5147,8 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   filter: drop-shadow(0 0 1px var(--vscode-editor-background, Canvas));
 }
 
-#app .vsidian-image-resize-glow {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  box-sizing: border-box;
-  border-radius: 4px;
-  pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.12s ease;
-}
-
-/* 悬停显现；拖动时由拖动态规则接管，并隐藏片段可能绘制的悬停装饰。 */
-#app .vsidian-graphic-frame.vsidian-image:not(.vsidian-image-resizing):hover > .vsidian-image-resize-handle,
-#app .vsidian-graphic-frame.vsidian-image:not(.vsidian-image-resizing):hover > .vsidian-image-resize-glow {
+/* 悬停显现；拖动时由拖动态规则接管。 */
+#app .vsidian-graphic-frame.vsidian-image:not(.vsidian-image-resizing):hover > .vsidian-image-resize-handle {
   opacity: 1;
   visibility: visible;
 }
@@ -5153,21 +5159,15 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   visibility: visible;
 }
 
-/* loaded 态门控：加载中/失败态不呈现手柄与悬停装饰。 */
-#app .vsidian-image:not([data-vsidian-img-state="loaded"]) > .vsidian-image-resize-handle,
-#app .vsidian-image:not([data-vsidian-img-state="loaded"]) > .vsidian-image-resize-glow {
+/* loaded 态门控：加载中/失败态不呈现手柄。 */
+#app .vsidian-image:not([data-vsidian-img-state="loaded"]) > .vsidian-image-resize-handle {
   display: none;
 }
 
-/* 拖动中：手柄保持可见，整框异色描边替代悬停装饰。 */
+/* 拖动中：手柄保持可见，整框异色描边。 */
 #app .vsidian-image.vsidian-image-resizing {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: 2px;
-}
-
-#app .vsidian-image.vsidian-image-resizing > .vsidian-image-resize-glow {
-  opacity: 0;
-  visibility: hidden;
 }
 
 #app .vsidian-image.vsidian-image-resizing > .vsidian-image-resize-handle {

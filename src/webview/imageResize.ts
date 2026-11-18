@@ -3,7 +3,7 @@
 // 规格）、§7（Shift 提示）。
 //
 // 设计边界（为什么这样切）：
-// - 纯逻辑（computeResizeTarget / glowExtension / resizeHandleLayout /
+// - 纯逻辑（computeResizeTarget / resizeHandleLayout /
 //   planSizeSuffixRewrite / rewriteImageSourceSuffix）不依赖真实布局与
 //   DOM，单测可直驱；DOM 装配只把纯函数接到指针事件上，不重复算尺寸。
 // - 拖动期间**只改视觉**（img 内联样式），绝不碰文档；松手才一次性提交。
@@ -31,13 +31,11 @@ import { t } from '../shared/i18n'
 export const IMAGE_RESIZE_CLASS_NAMES = {
   /** 手柄本体（pointerdown 的命中面） */
   handle: 'vsidian-image-resize-handle',
-  /** 旧 CSS 片段可用的悬停装饰层（纯装饰，不接事件） */
-  glow: 'vsidian-image-resize-glow',
   /** 拖动中的尺寸读数（如 `320 × 180`） */
   readout: 'vsidian-image-resize-readout',
 } as const
 
-/** 拖动中挂在相框上的修饰类：整框异色描边，片段悬停装饰隐去 */
+/** 拖动中挂在相框上的修饰类：整框异色描边 */
 export const IMAGE_RESIZE_RESIZING_CLASS = 'vsidian-image-resizing'
 
 /** 手柄视觉边长（规格 §5.5） */
@@ -51,10 +49,6 @@ export const IMAGE_RESIZE_HANDLE_BORDER = 2
 export const IMAGE_RESIZE_MIN_WIDTH = 24
 /** 最小高度（只防 0/负值；等比缩放的小图不应被抬高） */
 export const IMAGE_RESIZE_MIN_HEIGHT = 1
-/** 光晕保底延伸距离（规格 §6.1） */
-const GLOW_MIN_EXTENSION = 24
-/** 光晕相对短边的比例（规格 §6.1） */
-const GLOW_SHORT_EDGE_RATIO = 0.1
 
 /** 拖动模式：等比（默认）与自由双轴（按住 Shift） */
 export type ResizeMode = 'proportional' | 'free'
@@ -131,24 +125,6 @@ export function computeResizeTarget(args: ComputeResizeTargetArgs): ImageSize {
   }
 
   return { width: Math.round(desired), height: null, unit: 'px' }
-}
-
-/**
- * 光晕光带深度（规格 §6.1）：`max(24px, min(宽, 高) × 10%)`。
- *
- * 取 max 不取和——相加会让大图的光带深度难以预期；基数用短边——宽图若
- * 按宽边算，982×169 的图沿底边的光带深度会到 98px、与行高失衡，短边让
- * 光带与图的视觉体量成比例。
- */
-export function glowExtension(frameWidth: number, frameHeight: number): number {
-  if (!Number.isFinite(frameWidth) || !Number.isFinite(frameHeight)) {
-    return GLOW_MIN_EXTENSION
-  }
-  const shortEdge = Math.min(frameWidth, frameHeight)
-  if (shortEdge <= 0) {
-    return GLOW_MIN_EXTENSION
-  }
-  return Math.max(GLOW_MIN_EXTENSION, shortEdge * GLOW_SHORT_EDGE_RATIO)
 }
 
 export interface ResizeHandleFrameRect {
@@ -365,12 +341,12 @@ const SHIFT_HINT_TOAST_KEY = 'imageResize.shiftHint'
  *
  * 旧装配的 ResizeObserver 观察 frame，而 frame 在资源刷新中始终在树内，
  * `!frame.isConnected` 自撤条件永不命中——不主动断开则每次刷新漏一份
- * observer 闭包（钉住旧三件套与 img）；恰逢拖动中刷新时旧 window 监听
- * 也一并卸下。三件套节点通常已随 `textContent = ''` 移除，按类名清出
+ * observer 闭包（钉住旧手柄、读数与 img）；恰逢拖动中刷新时旧 window 监听
+ * 也一并卸下。手柄与读数通常已随 `textContent = ''` 移除，按类名清出
  * 只是防御性兜底（保证重装后仅一份）。
  *
  * 拖动中刷新的收尾：监听卸下后无人再处理 pointerup、不走 cleanupDrag——
- * frame 上挂着的拖动态修饰类（异色描边/手柄常显/光晕隐去）与读数显隐必须
+ * frame 上挂着的拖动态修饰类（异色描边/手柄常显）与读数显隐必须
  * 在此同步复位，否则相框停在拖动态（R2 残余）。
  */
 function disposeResizeAttachment(frame: HTMLElement): void {
@@ -386,7 +362,6 @@ function disposeResizeAttachment(frame: HTMLElement): void {
     delete readout.dataset['visible']
   }
   for (const className of [
-    IMAGE_RESIZE_CLASS_NAMES.glow,
     IMAGE_RESIZE_CLASS_NAMES.readout,
     IMAGE_RESIZE_CLASS_NAMES.handle,
   ]) {
@@ -397,7 +372,7 @@ function disposeResizeAttachment(frame: HTMLElement): void {
 }
 
 /**
- * 在图片相框内装配拖动手柄、光晕与读数（按当前 img 幂等）。
+ * 在图片相框内装配拖动手柄与读数（按当前 img 幂等）。
  *
  * 只做 DOM 装配；「这个 frame 该不该有手柄」由调用方判定（Live 的非排除
  * 图片）。返回 true 表示装配完成或当前 img 此前已装配。
@@ -415,10 +390,6 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
   disposeResizeAttachment(frame)
   imgHolder[ATTACHED_FLAG] = true
 
-  const glow = document.createElement('span')
-  glow.className = IMAGE_RESIZE_CLASS_NAMES.glow
-  glow.setAttribute('aria-hidden', 'true')
-
   const readout = document.createElement('span')
   readout.className = IMAGE_RESIZE_CLASS_NAMES.readout
   readout.setAttribute('aria-hidden', 'true')
@@ -435,13 +406,12 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
     event.preventDefault()
   })
 
-  frame.append(glow, readout, handle)
+  frame.append(readout, handle)
 
-  /** 兼容片段的光带深度与手柄贴合位：布局就绪前 rect 为 0，先写保底值，布局
+  /** 手柄贴合位：布局就绪前 rect 为 0，先写保底值，布局
    *  到位（img load / ResizeObserver）后收敛 */
   const applyGeometry = (): void => {
     const rect = frame.getBoundingClientRect()
-    frame.style.setProperty('--vsidian-image-resize-glow', `${glowExtension(rect.width, rect.height)}px`)
     const layout = resizeHandleLayout({
       width: rect.width,
       height: rect.height,
@@ -460,7 +430,7 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
   let observer: ResizeObserver | undefined
   if (typeof ResizeObserver !== 'undefined') {
     observer = new ResizeObserver(() => {
-      // widget 退场或三件套被资源刷新清掉后 observer 必须自撤（否则闭包
+      // widget 退场或手柄被资源刷新清掉后 observer 必须自撤（否则闭包
       // 钉住整棵 DOM）；常规重装路径另有 disposeResizeAttachment 主动断开
       if (!frame.isConnected || !handle.isConnected) {
         observer?.disconnect()

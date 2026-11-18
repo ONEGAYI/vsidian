@@ -55,7 +55,7 @@
 // mount 注入、dispose 清空）。
 import type { ImageResultPayload } from './imageResource'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
-import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome } from './graphicBlockChrome'
+import { GRAPHIC_CHROME_CLASS_NAMES, buildImageChrome } from './graphicBlockChrome'
 import { openImagePopup } from './imagePopup'
 import { isImageFileExtension } from '../shared/imageRefresh'
 import { classifyLocalRefContentKind, refEmbedTargetIsImage } from '../shared/refContent'
@@ -1860,7 +1860,7 @@ function applyHoverImageContent(
   img.alt = ''
   frame.appendChild(img)
   const popupSrc = loaded.src
-  frame.appendChild(buildGraphicChrome({
+  frame.appendChild(buildImageChrome(frame, {
     onPopup: () => { openImagePopup(popupSrc, '') },
   }))
   // 挂 scrollEl 层（contentEl 由虚拟视图全权重建——updateNow 会清外来
