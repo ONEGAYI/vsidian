@@ -282,6 +282,7 @@ aside（合并模式侧区）
 | 设置页页内菜单（快捷键「更多操作」） | 局部绝对定位、圆角 8px、阴影 §1.3、z-index 6（页内局部小值） | `settingsPage.css` 快捷键菜单段 |
 | 查找面板 | 绝对定位右上、圆角 4px、widget 变量族、z-index 40 | `main.css` 查找面板段；chromeContract 探针与 `findPanel` 浏览器用例 |
 | 悬停弹窗（hover-popup） | 480px 宽、圆角 8px、阴影 §1.3、z-index 9000 | [hover-preview-embed.md](hover-preview-embed.md) |
+| 网页摘要卡片 | 沿用悬停弹窗外壳；顶栏左侧为 16px 站点图标与域名，悬停或键盘聚焦时用统一提示显示被预览链接的完整地址。右侧保留「打开」，不显示文档编辑按钮。滚动区为可选的 3:1 通栏封面、前景色半粗标题和说明色摘要；无图不留空位 | [hover-preview-embed.md](hover-preview-embed.md)「外链形态、网络与退回」；`webLinkCard` 浏览器套件 |
 | 模态（图片/图表弹窗） | 全屏 overlay z-10000 + 背板 `blur(16px) saturate(150%)` 55% 黑 | [image-popup.md](image-popup.md)、[graphic-code-block-interaction.md](graphic-code-block-interaction.md) |
 | toast（轻提示） | `--vsidian-toast-*` 公开变量（radius 8px、明暗两套阴影）。#474 形态演进（两 webview 通用）：气泡顶部倒计时条（深色左端锚定、右端向左收缩，悬停/聚焦暂停；2026-10-15 方向修正）+ 气泡内撤销按钮（次级按钮 6px 档）；pointer-events 仅对带撤销按钮的气泡放开（` :has(action)` 限定，无按钮气泡保持穿透） | toast.css 头注；styleContract toast 类目 |
 

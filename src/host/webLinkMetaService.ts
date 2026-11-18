@@ -14,7 +14,8 @@
 // - 请求头只带 UA/Accept：不带 cookie、不带文档路径/正文/身份凭据。
 //
 // 抓取结果经 webMetaExtract 非执行解析（htmlparser2）——不执行远程
-// HTML、不加载第三方缩略图、不触发任何子资源请求。
+// HTML，只额外读取页面声明的站点图标和显式开启的封面。两者均复用
+// URL、重定向与连接校验，不发送来源页或登录凭据。
 //
 // 缓存：仅内存（键 = 形态 + 归一 URL），条目/字节双上限 + TTL + LRU
 // 淘汰，失败不缓存（保留重试语义）；不持久化任何浏览历史。
@@ -37,6 +38,7 @@ import {
   assessWebFrameEmbeddability,
   checkWebLinkUrl,
   isAllowedInetAddress,
+  WEB_PREVIEW_IMAGES,
   type WebFramePrecheck,
   type WebLinkFailReason,
   type WebLinkUrlCheck,
@@ -85,6 +87,13 @@ export const WEB_LINK_LIMITS: WebLinkLimits = {
 
 /** 请求 UA：诚实标识工具身份（不伪装浏览器、不携带版本以外的信息） */
 const WEB_LINK_USER_AGENT = 'vsidian-link-preview/1.0 (+https://github.com/ONEGAYI/vsidian)'
+const WEB_HTML_ACCEPT = 'text/html,application/xhtml+xml'
+const WEB_REQUEST_ACCEPT = {
+  card: WEB_HTML_ACCEPT,
+  page: WEB_HTML_ACCEPT,
+  icon: WEB_PREVIEW_IMAGES.icon.mimeTypes.join(','),
+  cover: WEB_PREVIEW_IMAGES.cover.mimeTypes.join(','),
+}
 
 /** 提取结果（宿主内聚形态；出站载荷在 hoverDocAccess 装配层转换） */
 export interface WebLinkMeta {
@@ -94,6 +103,8 @@ export interface WebLinkMeta {
   domain: string
   title: string
   description: string
+  coverSrc?: string
+  iconSrc?: string
   /** #343（P3-11）page 形态抓取附带的 iframe 嵌入预检（card 形态缺席）：
    *  最终响应的 X-Frame-Options / frame-ancestors / 最终协议判定——
    *  embeddable=true 仅代表已知头未拒绝，不是内容可见的承诺 */
@@ -114,6 +125,8 @@ interface InFlightEntry {
   consumers: number
   controller: AbortController
   task: Promise<WebLinkMetaOutcome>
+  includeCover: boolean
+  coverController?: AbortController
 }
 
 /** 构造注入（测试用：受控服务器放行回环、时钟与限值覆盖） */
@@ -134,10 +147,19 @@ export interface WebLinkMetaServiceOptions {
 
 const BLOCK_ADDR_CODE = 'VSIDIAN_WEB_BLOCKED_ADDR'
 
-/** 单次请求的三态收敛（redirect 继续下一跳 / outcome 终态） */
-type WebLinkRequestStep =
-  | { kind: 'redirect'; location: string }
-  | { kind: 'outcome'; outcome: WebLinkMetaOutcome }
+type WebLinkResponse =
+  | { kind: 'body'; url: string; mime: string; bytes: Buffer; frame?: WebFramePrecheck }
+  | { kind: 'outcome'; outcome: Extract<WebLinkMetaOutcome, { ok: false }> }
+
+type WebLinkRequestStep = WebLinkResponse | { kind: 'redirect'; location: string }
+type WebImageKind = keyof typeof WEB_PREVIEW_IMAGES
+type WebLinkRequestMode = 'card' | 'page' | WebImageKind
+
+/** 页面声明的图片地址可能包含签名；诊断只保留资源类型和站点。 */
+function webImageLogScope(url: string, mode: WebLinkRequestMode): string | undefined {
+  if (mode === 'card' || mode === 'page') return undefined
+  return `${mode} ${new URL(url).origin}`
+}
 
 /** 网络错误归因（诊断日志细分 cause；不参与 outcome 分态判定） */
 type WebFetchErrorKind = 'dns' | 'tcp' | 'tunnel' | 'tls' | 'network'
@@ -175,6 +197,7 @@ export class WebLinkMetaService {
   private readonly warnedInvalidProxy = new Set<string>()
   private readonly cache = new Map<string, CacheEntry>()
   private readonly inflight = new Map<string, InFlightEntry>()
+  private coverGeneration = 0
   private cacheBytes = 0
   private active = 0
   private readonly queue: Array<() => void> = []
@@ -194,23 +217,29 @@ export class WebLinkMetaService {
    * （card 卡片 / #343 page 原网页——page 形态额外捕获最终响应的嵌入
    * 拒绝头组装 meta.frame，见 assessWebFrameEmbeddability）。
    */
-  fetch(url: string, signal?: AbortSignal, shape: 'card' | 'page' = 'card'): Promise<WebLinkMetaOutcome> {
+  fetch(url: string, signal?: AbortSignal, shape: 'card' | 'page' = 'card', includeCover = false): Promise<WebLinkMetaOutcome> {
     const check = this.checkUrl(url)
     if (!check.ok) {
       return Promise.resolve({ ok: false, reason: check.reason })
     }
-    const key = `${shape}\n${check.url}`
-    const cached = this.cacheGet(key)
+    const variant = includeCover ? `${shape}+cover` : shape
+    const cacheKey = `${variant}\n${check.url}`
+    const cached = this.cacheGet(cacheKey)
     if (cached !== null) {
       return Promise.resolve({ ok: true, meta: cached })
     }
+    // 撤销配图后，旧任务继续服务原消费者，但不与重新开启的请求合并。
+    const key = includeCover ? `${this.coverGeneration}\n${cacheKey}` : cacheKey
     let entry = this.inflight.get(key)
     if (entry === undefined) {
       const controller = new AbortController()
-      const pending: InFlightEntry = { consumers: 0, controller, task: Promise.resolve({ ok: false, reason: 'web-unreachable' }) }
+      const pending: InFlightEntry = {
+        consumers: 0, controller, includeCover,
+        task: Promise.resolve({ ok: false, reason: 'web-unreachable' }),
+      }
       // 任务收敛（成功写缓存之后）即移除在途条目——迟到的同 URL 请求走
       // 缓存命中而非合并到已完成的任务
-      pending.task = this.runFetch(check.url, pending, shape).finally(() => {
+      pending.task = this.runFetch(check.url, pending, shape, variant).finally(() => {
         // 取消后同键可立即有新请求；旧任务收尾不能撤掉新任务的取消登记。
         if (this.inflight.get(key) === pending) this.inflight.delete(key)
       })
@@ -255,6 +284,17 @@ export class WebLinkMetaService {
     this.clearCache()
   }
 
+  /** 停止在途配图，不中断仍在读取的页面 HTML。 */
+  cancelCovers(): void {
+    this.coverGeneration++
+    for (const entry of this.inflight.values()) {
+      if (entry.includeCover) {
+        entry.includeCover = false
+        entry.coverController?.abort()
+      }
+    }
+  }
+
   /** 显式清空缓存（保留在途） */
   clearCache(): void {
     this.cache.clear()
@@ -273,41 +313,106 @@ export class WebLinkMetaService {
 
   // ---- 底层任务（永不 reject：取消/超时/失败一律收敛为 outcome） ----
 
-  private async runFetch(startUrl: string, entry: InFlightEntry, shape: 'card' | 'page'): Promise<WebLinkMetaOutcome> {
+  private async runFetch(startUrl: string, entry: InFlightEntry, shape: 'card' | 'page', variant: string): Promise<WebLinkMetaOutcome> {
     const release = await this.acquireSlot()
+    const signal = entry.controller.signal
     let cause: 'timeout' | 'consumer' | null = null
-    entry.controller.signal.addEventListener('abort', () => {
+    signal.addEventListener('abort', () => {
       if (cause === null) {
         cause = 'consumer'
       }
     }, { once: true })
-    const timer = setTimeout(() => {
+    const onTimeout = (): void => {
       cause = 'timeout'
       entry.controller.abort()
-    }, this.limits.timeoutMs)
+    }
+    const timer = setTimeout(onTimeout, this.limits.timeoutMs)
     try {
-      let current = startUrl
-      let redirects = 0
-      for (;;) {
-        const check = this.checkUrl(current)
-        if (!check.ok) {
-          return { ok: false, reason: check.reason }
-        }
-        const step = await this.requestOnce(check.url, entry.controller.signal, () => cause, shape)
-        if (step.kind === 'redirect') {
-          redirects++
-          if (redirects > this.limits.maxRedirects) {
-            return { ok: false, reason: 'web-redirects' }
-          }
-          current = step.location
-          continue
-        }
-        return step.outcome
+      const page = await this.requestFollowingRedirects(startUrl, signal, () => cause, shape)
+      if (page.kind === 'outcome') return page.outcome
+
+      const finalUrl = new URL(page.url)
+      const { title, description, coverUrl, iconUrl } = parseWebMetaFromHtml(page.bytes.toString('utf8'))
+      const meta: WebLinkMeta = {
+        url: stripDefaultPort(finalUrl),
+        domain: finalUrl.hostname.toLowerCase(),
+        title,
+        description,
+        ...(page.frame !== undefined ? { frame: page.frame } : {}),
       }
+      // 已知可内嵌时尽快交给 iframe，既不预取卡片图片，也不拖慢网页显示。
+      if (page.frame?.embeddable !== true) {
+        if (iconUrl !== undefined) {
+          const iconSrc = await this.fetchPreviewImage(iconUrl, finalUrl, 'icon', entry, () => cause)
+          if (iconSrc !== undefined) meta.iconSrc = iconSrc
+        }
+        if (entry.includeCover && coverUrl !== undefined) {
+          const coverSrc = await this.fetchPreviewImage(coverUrl, finalUrl, 'cover', entry, () => cause)
+          if (coverSrc !== undefined && entry.includeCover) meta.coverSrc = coverSrc
+        }
+      }
+      if (!signal.aborted && (variant === shape || entry.includeCover)) {
+        this.cacheMeta(`${variant}\n${meta.url}`, meta)
+      }
+      return { ok: true, meta }
     } finally {
       clearTimeout(timer)
       release()
     }
+  }
+
+  /** 单个可选图片失败不影响文字。局部超时或关闭封面不会中止另一张图片。 */
+  private async fetchPreviewImage(
+    href: string,
+    base: URL,
+    kind: WebImageKind,
+    entry: InFlightEntry,
+    causeOf: () => 'timeout' | 'consumer' | null,
+  ): Promise<string | undefined> {
+    const parentSignal = entry.controller.signal
+    if (parentSignal.aborted) return undefined
+    let url: URL
+    try {
+      url = new URL(href, base)
+    } catch {
+      return undefined // 页面声明的地址无效，保留可用的卡片内容。
+    }
+    const controller = new AbortController()
+    if (kind === 'cover') entry.coverController = controller
+    const abort = () => controller.abort()
+    parentSignal.addEventListener('abort', abort, { once: true })
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      abort()
+    }, WEB_PREVIEW_IMAGES[kind].timeoutMs)
+    try {
+      const image = await this.requestFollowingRedirects(url.href, controller.signal,
+        () => causeOf() ?? (timedOut ? 'timeout' : controller.signal.aborted ? 'consumer' : null), kind)
+      if (image.kind === 'body' && image.bytes.length > 0 && !controller.signal.aborted) {
+        return `data:${image.mime};base64,${image.bytes.toString('base64')}`
+      }
+    } finally {
+      clearTimeout(timer)
+      parentSignal.removeEventListener('abort', abort)
+    }
+  }
+
+  private async requestFollowingRedirects(
+    startUrl: string,
+    signal: AbortSignal,
+    causeOf: () => 'timeout' | 'consumer' | null,
+    mode: WebLinkRequestMode,
+  ): Promise<WebLinkResponse> {
+    let current = startUrl
+    for (let redirects = 0; redirects <= this.limits.maxRedirects; redirects++) {
+      const check = this.checkUrl(current)
+      if (!check.ok) return { kind: 'outcome', outcome: { ok: false, reason: check.reason } }
+      const step = await this.requestOnce(check.url, signal, causeOf, mode)
+      if (step.kind !== 'redirect') return step
+      current = step.location
+    }
+    return { kind: 'outcome', outcome: { ok: false, reason: 'web-redirects' } }
   }
 
   /** 并发槽：超出上限排队等待（FIFO；等待不占超时预算） */
@@ -340,17 +445,17 @@ export class WebLinkMetaService {
     url: string,
     signal: AbortSignal,
     causeOf: () => 'timeout' | 'consumer' | null,
-    shape: 'card' | 'page',
+    mode: WebLinkRequestMode,
   ): Promise<WebLinkRequestStep> {
     const parsed = new URL(url)
     const decision = this.resolveProxyDecision(parsed.protocol)
     if (decision.mode === 'proxy' && parsed.protocol === 'https:') {
-      return this.requestViaTunnel(parsed, decision.target, signal, causeOf, shape)
+      return this.requestViaTunnel(parsed, decision.target, signal, causeOf, mode)
     }
     if (decision.mode === 'proxy') {
-      return this.requestViaProxyHttp(parsed, decision.target, signal, causeOf, shape)
+      return this.requestViaProxyHttp(parsed, decision.target, signal, causeOf, mode)
     }
-    return this.requestDirect(url, parsed, signal, causeOf, shape)
+    return this.requestDirect(url, parsed, signal, causeOf, mode)
   }
 
   /** #346：每跳请求前解析代理决策（接线侧每调用读一次 VSCode 配置——配置
@@ -375,7 +480,7 @@ export class WebLinkMetaService {
     parsed: URL,
     signal: AbortSignal,
     causeOf: () => 'timeout' | 'consumer' | null,
-    shape: 'card' | 'page',
+    mode: WebLinkRequestMode,
   ): Promise<WebLinkRequestStep> {
     const mod = parsed.protocol === 'https:' ? https : http
     return this.openRequest(url, parsed, (onResponse, onError) => {
@@ -383,14 +488,14 @@ export class WebLinkMetaService {
         method: 'GET',
         headers: {
           'user-agent': WEB_LINK_USER_AGENT,
-          accept: 'text/html,application/xhtml+xml',
+          accept: WEB_REQUEST_ACCEPT[mode],
         },
         lookup: this.lookupAdapter.bind(this) as unknown as never,
         signal,
       }, onResponse)
       req.on('error', onError)
       return req
-    }, causeOf, shape)
+    }, causeOf, mode)
   }
 
   /** #346：https 目标走 CONNECT 隧道——先建隧道（超时预算与取消经同一
@@ -402,7 +507,7 @@ export class WebLinkMetaService {
     target: ProxyTarget,
     signal: AbortSignal,
     causeOf: () => 'timeout' | 'consumer' | null,
-    shape: 'card' | 'page',
+    mode: WebLinkRequestMode,
   ): Promise<WebLinkRequestStep> {
     const url = parsed.toString()
     const host = parsed.hostname // 含 IPv6 方括号（CONNECT authority 形态）
@@ -414,7 +519,7 @@ export class WebLinkMetaService {
         rejectUnauthorized: target.rejectUnauthorized,
       }, signal)
     } catch (err) {
-      return this.requestErrorOutcome(url, err as NodeJS.ErrnoException, causeOf)
+      return this.requestErrorOutcome(url, err as NodeJS.ErrnoException, causeOf, mode)
     }
     return this.openRequest(url, parsed, (onResponse, onError) => {
       const req = https.request({
@@ -425,14 +530,14 @@ export class WebLinkMetaService {
         method: 'GET',
         headers: {
           'user-agent': WEB_LINK_USER_AGENT,
-          accept: 'text/html,application/xhtml+xml',
+          accept: WEB_REQUEST_ACCEPT[mode],
         },
         createConnection: () => socket,
         signal,
       }, onResponse)
       req.on('error', onError)
       return req
-    }, causeOf, shape)
+    }, causeOf, mode)
   }
 
   /** #346：http 目标经代理绝对形态转发（URL 准入同收 http，绝对形态是
@@ -443,7 +548,7 @@ export class WebLinkMetaService {
     target: ProxyTarget,
     signal: AbortSignal,
     causeOf: () => 'timeout' | 'consumer' | null,
-    shape: 'card' | 'page',
+    mode: WebLinkRequestMode,
   ): Promise<WebLinkRequestStep> {
     const url = parsed.toString()
     return this.openRequest(url, parsed, (onResponse, onError) => {
@@ -454,7 +559,7 @@ export class WebLinkMetaService {
         method: 'GET',
         headers: {
           'user-agent': WEB_LINK_USER_AGENT,
-          accept: 'text/html,application/xhtml+xml',
+          accept: WEB_REQUEST_ACCEPT[mode],
           host: parsed.host,
           ...(target.authorization !== undefined ? { 'proxy-authorization': target.authorization } : {}),
         },
@@ -462,7 +567,7 @@ export class WebLinkMetaService {
       }, onResponse)
       req.on('error', onError)
       return req
-    }, causeOf, shape)
+    }, causeOf, mode)
   }
 
   /** 统一请求骨架：build 产生 ClientRequest（三路分派各自的连接形态），
@@ -475,12 +580,12 @@ export class WebLinkMetaService {
       onError: (err: NodeJS.ErrnoException) => void,
     ) => http.ClientRequest,
     causeOf: () => 'timeout' | 'consumer' | null,
-    shape: 'card' | 'page',
+    mode: WebLinkRequestMode,
   ): Promise<WebLinkRequestStep> {
     return new Promise((resolve) => {
       const req = build(
-        (res) => this.handleResponse(url, parsed, req, res, resolve, causeOf, shape),
-        (err) => resolve(this.requestErrorOutcome(url, err, causeOf)),
+        (res) => this.handleResponse(url, parsed, req, res, resolve, causeOf, mode),
+        (err) => resolve(this.requestErrorOutcome(url, err, causeOf, mode)),
       )
       req.end()
     })
@@ -494,9 +599,10 @@ export class WebLinkMetaService {
     res: http.IncomingMessage,
     resolve: (step: WebLinkRequestStep) => void,
     causeOf: () => 'timeout' | 'consumer' | null,
-    shape: 'card' | 'page',
+    mode: WebLinkRequestMode,
   ): void {
     const status = res.statusCode ?? 0
+    const logTarget = webImageLogScope(url, mode) ?? url
     if (status === 301 || status === 302 || status === 303 || status === 307 || status === 308) {
       const location = res.headers.location
       res.resume() // 丢弃重定向响应体
@@ -520,32 +626,35 @@ export class WebLinkMetaService {
     if (status < 200 || status >= 300) {
       res.resume()
       req.destroy()
-      console.warn(`[vsidian] 外链抓取失败（状态码非 2xx）：${url}：HTTP ${status}`)
+      console.warn(`[vsidian] 外链抓取失败（状态码非 2xx）：${logTarget}：HTTP ${status}`)
       resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } })
       return
     }
     const contentType = res.headers['content-type'] ?? ''
-    if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+    const mime = contentType.split(';', 1)[0].trim().toLowerCase()
+    const image = mode === 'icon' || mode === 'cover' ? WEB_PREVIEW_IMAGES[mode] : undefined
+    if (image ? !image.mimeTypes.includes(mime) : !/text\/html|application\/xhtml\+xml/i.test(contentType)) {
       res.resume()
       req.destroy()
       resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-not-html' } })
       return
     }
+    const maxBytes = image?.maxBytes ?? this.limits.maxBytes
     const declared = Number(res.headers['content-length'])
-    if (Number.isFinite(declared) && declared > this.limits.maxBytes) {
+    if (Number.isFinite(declared) && declared > maxBytes) {
       res.resume()
       req.destroy()
       resolve({ kind: 'outcome', outcome: { ok: false, reason: 'web-too-large' } })
       return
     }
-    const frame = shape === 'page'
+    const frame = mode === 'page'
       ? assessWebFrameEmbeddability({
         protocol: parsed.protocol,
         xFrameOptions: res.headers['x-frame-options'],
         contentSecurityPolicy: res.headers['content-security-policy'],
       })
       : undefined
-    this.readBody(url, req, res, resolve, frame, causeOf)
+    this.readBody(url, req, res, resolve, mime, maxBytes, frame, causeOf, logTarget)
   }
 
   /** 请求/隧道错误收敛（三路共用）：outcome 分态保持既有语义，另发细分
@@ -555,12 +664,14 @@ export class WebLinkMetaService {
     url: string,
     err: NodeJS.ErrnoException,
     causeOf: () => 'timeout' | 'consumer' | null,
+    mode: WebLinkRequestMode,
   ): WebLinkRequestStep {
     if (err.code === BLOCK_ADDR_CODE) {
       return { kind: 'outcome', outcome: { ok: false, reason: 'web-invalid-address' } }
     }
+    const imageLogScope = webImageLogScope(url, mode)
     if (causeOf() === 'timeout') {
-      console.warn(`[vsidian] 外链抓取失败（超时）：${url}`)
+      console.warn(`[vsidian] 外链抓取失败（超时）：${imageLogScope ?? url}`)
       return { kind: 'outcome', outcome: { ok: false, reason: 'web-timeout' } }
     }
     if (isAbortError(err)) {
@@ -568,57 +679,49 @@ export class WebLinkMetaService {
       return { kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } }
     }
     const kind = classifyWebFetchError(err)
-    console.warn(`[vsidian] 外链抓取失败（${kind === 'dns' ? 'DNS 解析失败' : kind === 'tcp' ? 'TCP 连接失败' : kind === 'tunnel' ? '代理隧道失败' : kind === 'tls' ? 'TLS 失败' : '网络失败'}）：${url}：${err.code === PROXY_TUNNEL_ERROR_CODE ? err.message : (err.code ?? err.message)}`)
+    const detail = imageLogScope === undefined
+      ? (err.code === PROXY_TUNNEL_ERROR_CODE ? err.message : err.code ?? err.message)
+      : (err.code ?? kind)
+    console.warn(`[vsidian] 外链抓取失败（${kind === 'dns' ? 'DNS 解析失败' : kind === 'tcp' ? 'TCP 连接失败' : kind === 'tunnel' ? '代理隧道失败' : kind === 'tls' ? 'TLS 失败' : '网络失败'}）：${imageLogScope ?? url}：${detail}`)
     return { kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } }
   }
 
-  /** 流式读取响应体：累计超限即中断（web-too-large）；完成即解析元信息
-   *  （#343：page 形态的 frame 预检随最终响应组装进 meta 与缓存） */
+  /** HTML 与配图共用有界读体；仅在完整读到响应后交给各自的消费者。 */
   private readBody(
     url: string,
     req: http.ClientRequest,
     res: Readable & { statusCode?: number },
     resolve: (value: WebLinkRequestStep) => void,
+    mime: string,
+    maxBytes: number,
     frame: WebFramePrecheck | undefined,
     causeOf: () => 'timeout' | 'consumer' | null,
+    logTarget: string,
   ): void {
     const chunks: Buffer[] = []
     let total = 0
     let settled = false
-    const finish = (outcome: WebLinkMetaOutcome): void => {
+    const finish = (response: WebLinkResponse): void => {
       if (settled) {
         return
       }
       settled = true
-      resolve({ kind: 'outcome', outcome })
+      resolve(response)
     }
     res.on('data', (chunk: Buffer) => {
       total += chunk.length
-      if (total > this.limits.maxBytes) {
+      if (total > maxBytes) {
         req.destroy()
-        finish({ ok: false, reason: 'web-too-large' })
+        finish({ kind: 'outcome', outcome: { ok: false, reason: 'web-too-large' } })
         return
       }
       chunks.push(chunk)
     })
     res.on('end', () => {
-      const html = Buffer.concat(chunks).toString('utf8')
-      const { title, description } = parseWebMetaFromHtml(html)
-      const finalUrl = new URL(url)
-      finish({
-        ok: true,
-        meta: {
-          url: stripDefaultPort(finalUrl),
-          domain: finalUrl.hostname.toLowerCase(),
-          title,
-          description,
-          ...(frame !== undefined ? { frame } : {}),
-        },
-      })
-      this.cacheMeta(url, title, description, frame)
+      finish({ kind: 'body', url, mime, bytes: Buffer.concat(chunks, total), frame })
     })
     res.on('error', () => {
-      finish({ ok: false, reason: 'web-unreachable' })
+      finish({ kind: 'outcome', outcome: { ok: false, reason: 'web-unreachable' } })
     })
     res.on('aborted', () => {
       // 分态收敛（review 修复）：aborted 不再一律误标 web-too-large——
@@ -627,13 +730,12 @@ export class WebLinkMetaService {
       // 由 data 处理器先行结算）保留 web-too-large
       const cause = causeOf()
       if (cause === null) {
-        console.warn(`[vsidian] 外链抓取失败（截断）：${url}`)
+        console.warn(`[vsidian] 外链抓取失败（截断）：${logTarget}`)
       }
-      finish(cause === 'timeout'
-        ? { ok: false, reason: 'web-timeout' }
-        : cause === 'consumer'
-          ? { ok: false, reason: 'web-unreachable' }
-          : { ok: false, reason: 'web-too-large' })
+      finish({
+        kind: 'outcome',
+        outcome: { ok: false, reason: cause === 'timeout' ? 'web-timeout' : cause === 'consumer' ? 'web-unreachable' : 'web-too-large' },
+      })
     })
   }
 
@@ -665,24 +767,11 @@ export class WebLinkMetaService {
 
   // ---- 内存缓存（键 = 形态 + 归一 URL；LRU + TTL + 双上限） ----
 
-  private cacheMeta(url: string, title: string, description: string, frame?: WebFramePrecheck): void {
-    const check = this.checkUrl(url)
-    if (!check.ok) {
-      return
-    }
-    const finalUrl = new URL(check.url)
-    const meta: WebLinkMeta = {
-      url: stripDefaultPort(finalUrl),
-      domain: finalUrl.hostname.toLowerCase(),
-      title,
-      description,
-      ...(frame !== undefined ? { frame } : {}),
-    }
+  private cacheMeta(key: string, meta: WebLinkMeta): void {
     const bytes = entryBytesOf(meta)
     if (bytes > this.limits.cacheMaxBytes) {
       return // 单条超限不入缓存（仍可当场返回）
     }
-    const key = `${frame !== undefined ? 'page' : 'card'}\n${meta.url}`
     const existing = this.cache.get(key)
     if (existing !== undefined) {
       this.cache.delete(key)
@@ -718,7 +807,8 @@ export class WebLinkMetaService {
 }
 
 function entryBytesOf(meta: WebLinkMeta): number {
-  return 2 * (meta.url.length + meta.domain.length + meta.title.length + meta.description.length) + 128
+  return 2 * (meta.url.length + meta.domain.length + meta.title.length + meta.description.length +
+    (meta.coverSrc?.length ?? 0) + (meta.iconSrc?.length ?? 0)) + 128
 }
 
 function stripDefaultPort(url: URL): string {

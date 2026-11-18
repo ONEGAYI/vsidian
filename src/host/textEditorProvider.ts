@@ -17,6 +17,7 @@ import { WebLinkMetaService } from './webLinkMetaService'
 import { resolveProxyConfig, type ProxyDecision } from './proxyAgent'
 import {
   HOVER_EXTERNAL_ENABLED_KEY,
+  HOVER_EXTERNAL_COVER_KEY,
   HOVER_EXTERNAL_SHAPE_KEY,
   LINK_INSERT_PATH_TYPE_DEFAULT,
   LINK_INSERT_PATH_TYPE_KEY,
@@ -529,6 +530,8 @@ export function createTextEditorProvider(
       if (values[HOVER_EXTERNAL_ENABLED_KEY] !== true) {
         webLinkMeta.cancelAll()
         pendingWebFetches.clear()
+      } else if (values[HOVER_EXTERNAL_COVER_KEY] !== true) {
+        webLinkMeta.cancelCovers()
       }
     })
     context.subscriptions.push({ dispose: releaseSettingsWatch })
@@ -3398,7 +3401,8 @@ export function createTextEditorProvider(
               ...(webAbort !== undefined
                 ? {
                   fetchWebMeta: (url: string, signal?: AbortSignal) =>
-                    webLinkMeta.fetch(url, signal ?? webAbort.signal, externalHoverShape()),
+                    webLinkMeta.fetch(url, signal ?? webAbort.signal, externalHoverShape(),
+                      settings?.service.getSnapshot()[HOVER_EXTERNAL_COVER_KEY] === true),
                 }
                 : {}),
               // #336（P3-04）图片目标的文件资源版本（mtimeMs——图片不是

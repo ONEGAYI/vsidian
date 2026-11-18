@@ -624,6 +624,7 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       // #342（P3-10）外链预览总开关 + 形态（跳转目标提示之后、嵌入两项之前）
       zhCn['setting.hoverExternalEnabled.title'],
       zhCn['setting.hoverExternalShape.title'],
+      zhCn['setting.hoverExternalCover.title'],
       // #222/#244 迁组：embed 两项取值/范围/生效行为零迁移（仅呈现位置变化）
       zhCn['setting.embedMaxDepth.title'],
       zhCn['setting.embedMaxHeight.title'],

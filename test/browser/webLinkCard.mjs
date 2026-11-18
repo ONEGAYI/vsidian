@@ -19,10 +19,11 @@ await build({ entryPoints: [path.join(root, 'test/browser/webLinkCardFixture.ts'
   bundle: true, outfile: bundle, format: 'iife',
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]' })
 
+const LINK_URL = 'https://example.com/page?source=notes#section'
 const PARENT_DOC = [
   '# 父文档',
   '',
-  '外链 [示例站点](https://example.com/page) 与本地 [本地链接](子笔记.md)。',
+  `外链 [示例站点](${LINK_URL}) 与本地 [本地链接](子笔记.md)。`,
   '',
   '普通正文段落，不含其他链接。',
   '',
@@ -39,10 +40,20 @@ let passed = 0
 try {
   const page = await browser.newPage({ viewport: { width: 900, height: 640 } })
   const errors = []
+  const networkRequests = []
   page.on('pageerror', (error) => errors.push(error.message))
+  page.on('request', (request) => {
+    if (/^https?:/.test(request.url())) networkRequests.push(request.url())
+  })
   await page.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
   await page.addStyleTag({ content: 'html, body { margin: 0; height: 100%; }' })
   await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await page.addStyleTag({ content: `
+    body { --vscode-editor-background: #fff; --vscode-editor-foreground: #202428;
+      --vscode-descriptionForeground: #686f78; --vscode-textLink-foreground: #35618b; }
+    body.vscode-dark { --vscode-editor-background: #21252a; --vscode-editor-foreground: #e7edf3;
+      --vscode-descriptionForeground: #aeb9c4; --vscode-textLink-foreground: #92bceb; }
+  ` })
   await page.addScriptTag({ path: bundle })
   await page.evaluate((text) => window.initWebLinkDoc(text), PARENT_DOC)
   await page.locator('.cm-content .vsidian-link').first().waitFor()
@@ -73,21 +84,23 @@ try {
   assert.equal((await page.evaluate(() => window.readHoverPopup())).open, false, '关闭态不开浮层')
 
   // ---- 场景 2：开启后 Reading 悬停外链 → loading → web 卡片实际文字 ----
-  await page.evaluate(() => window.applyWebLinkSettings({ 'hover.externalEnabled': true }))
+  await page.evaluate(() => window.applyWebLinkSettings({ 'hover.externalEnabled': true, 'hover.externalCover': true }))
   await page.evaluate(() => window.setEntryMode('reading'))
-  await page.locator('.vsidian-view-reading a[href="https://example.com/page"]').waitFor()
-  const readingLink = page.locator('.vsidian-view-reading a[href="https://example.com/page"]')
+  const readingLink = page.locator(`.vsidian-view-reading a[href="${LINK_URL}"]`)
+  await readingLink.waitFor()
   await readingLink.hover()
   await page.waitForTimeout(OPEN_WAIT)
   const req2 = await lastRequest()
   assert.ok(req2, '开启后外链悬停发出 hover.request')
-  assert.equal(req2.linkHref, 'https://example.com/page', '请求携带外链 linkHref')
+  assert.equal(req2.linkHref, LINK_URL, '请求携带外链 linkHref')
   let popup = await page.evaluate(() => window.readHoverPopup())
   assert.equal(popup.open, true, '浮层打开（loading）')
   assert.ok(popup.stateText.length > 0, 'loading 态文案在场')
   await respondWeb(req2, {
     url: 'https://example.com/page', domain: 'example.com',
     title: '示例站点标题', description: '这是页面摘要文字。',
+    iconSrc: `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" rx="3" fill="teal"/><image href="https://example.invalid/extra.png" width="16" height="16"/></svg>').toString('base64')}`,
+    coverSrc: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aC1sAAAAASUVORK5CYII=',
   })
   await page.waitForTimeout(60)
   const card = await page.evaluate(() => window.readWebCard())
@@ -99,6 +112,51 @@ try {
   assert.equal(card.domainHref, 'https://example.com/page', '域名链接指向最终 URL')
   assert.equal(card.linkCount, 1, '卡片内唯一可点元素（显式安全链接）')
   assert.ok(card.cardWidth > 0 && card.cardHeight > 0, '卡片有实际尺寸')
+  const cover = page.locator('.vsidian-hover-web-cover')
+  await cover.waitFor({ state: 'visible', timeout: 1500 })
+  const title = page.locator('.vsidian-hover-web-title')
+  const desc = page.locator('.vsidian-hover-web-desc')
+  const source = page.locator('.vsidian-hover-web-domain')
+  const [coverBox, titleBox, descBox, sourceBox] = await Promise.all([cover, title, desc, source].map((el) => el.boundingBox()))
+  assert.ok(await cover.evaluate((img) => img.complete && img.naturalWidth > 0), '封面成功解码并显示')
+  assert.ok(coverBox.width >= card.cardWidth - 2 && coverBox.height >= 100, '封面通栏且有足够高度')
+  assert.ok(sourceBox.y < coverBox.y && coverBox.y + coverBox.height < titleBox.y && titleBox.y < descBox.y,
+    '从上到下依次为站点、封面、标题和摘要')
+  const siteBar = await page.locator('.vsidian-hover-popup-header').boundingBox()
+  assert.ok(sourceBox.y >= siteBar.y && sourceBox.y + sourceBox.height <= siteBar.y + siteBar.height,
+    '站点与打开入口共用一行，不重复显示原始长网址')
+  assert.equal(await page.locator('.vsidian-hover-popup-open').innerText(), zhCn['hover.webOpen'])
+  assert.equal(await page.locator('.vsidian-hover-popup-mode').isVisible(), false, '网页卡片不显示文档编辑按钮')
+  const icon = source.locator('img')
+  await icon.waitFor({ state: 'visible', timeout: 1500 })
+  assert.ok(await icon.evaluate((img) => img.complete && img.naturalWidth === 16), '站点 SVG 作为图像解码')
+  const iconBox = await icon.boundingBox()
+  assert.equal(iconBox.width, 16)
+  assert.ok(iconBox.x < sourceBox.x + sourceBox.width / 2, '图标位于域名左侧')
+  assert.equal(await page.locator('.vsidian-tooltip--shown').count(), 0, '默认不显示完整链接')
+  await source.hover()
+  const tip = page.locator('.vsidian-tooltip--shown .vsidian-tooltip-text')
+  await tip.waitFor({ state: 'visible', timeout: 2000 })
+  const renderedHref = await tip.innerText()
+  const snippet = await page.addStyleTag({ content: `
+    .vsidian-hover-web-cover { object-fit: contain; }
+    .vsidian-hover-popup-open { color: rgb(10, 110, 90); }
+  ` })
+  const coverFit = await cover.evaluate((el) => getComputedStyle(el).objectFit)
+  const openColor = await page.locator('.vsidian-hover-popup-open').evaluate((el) => getComputedStyle(el).color)
+  assert.deepEqual({ renderedHref, coverFit, openColor }, {
+    renderedHref: LINK_URL, coverFit: 'contain', openColor: 'rgb(10, 110, 90)',
+  }, '完整提示保留查询与锚点，用户片段可覆盖封面与打开按钮')
+  await snippet.evaluate((el) => el.remove())
+  assert.equal(await title.evaluate((el) => getComputedStyle(el).fontWeight), '600', '标题字重')
+  assert.equal(await desc.evaluate((el) => getComputedStyle(el).color), 'rgb(104, 111, 120)', '浅色主题中摘要取说明色')
+  await page.evaluate(() => document.body.classList.add('vscode-dark'))
+  assert.equal(await desc.evaluate((el) => getComputedStyle(el).color), 'rgb(174, 185, 196)', '暗色主题也使用其说明色')
+  await page.evaluate(() => document.body.classList.remove('vscode-dark'))
+  await page.evaluate(() => window.applyWebLinkSettings({ 'hover.externalEnabled': true, 'hover.externalCover': false }))
+  assert.equal(await cover.count(), 0, '关闭配图后当前卡片移除封面，无空白占位')
+  assert.equal(await title.innerText(), '示例站点标题', '关闭配图不撤下卡片文字')
+  assert.ok(await icon.isVisible(), '关闭配图不撤下站点图标')
   popup = await page.evaluate(() => window.readHoverPopup())
   assert.equal(popup.stateVisible, false, '内容态状态行隐藏')
   passed++; console.log('[1] 开关门控与卡片实际文字 ✓')
@@ -121,6 +179,8 @@ try {
   const card4 = await page.evaluate(() => window.readWebCard())
   assert.equal(card4.title, 'example.com', 'title 缺席以域名兜底显示')
   assert.equal(card4.descPresent, false, '无摘要时省略摘要节点（不留空行）')
+  assert.equal(await cover.count(), 0, '无图卡不渲染图片位')
+  assert.ok(await source.locator('svg').isVisible(), '无站点图标时绘制内置图标')
   await page.mouse.move(20, 600)
   await page.waitForTimeout(CLOSE_WAIT)
   passed++; console.log('[3] title 兜底与摘要省略 ✓')
@@ -164,7 +224,7 @@ try {
   await externalDeco().hover()
   await page.waitForTimeout(OPEN_WAIT)
   const req7 = await lastRequest()
-  assert.equal(req7?.linkHref, 'https://example.com/page', 'Ctrl+悬停外链发出请求（Live 放行）')
+  assert.equal(req7?.linkHref, LINK_URL, 'Ctrl+悬停外链发出请求（Live 放行）')
   await respondWeb(req7, {
     url: 'https://example.com/page', domain: 'example.com', title: 'Live 悬停标题', description: '',
   })
@@ -187,6 +247,7 @@ try {
   passed++; console.log('[7] 运行期开关关闭 ✓')
 
   assert.deepEqual(errors, [], '页面零未捕获异常')
+  assert.deepEqual(networkRequests, [], '站点 SVG 和封面不在 webview 发起网络请求')
   console.log(`webLinkCard: ${passed} 场景通过`)
 } finally {
   await browser.close()

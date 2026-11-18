@@ -522,6 +522,8 @@ describe('#244 宿主直接父来源与当前路径', () => {
             domain: 'example.com',
             title: 'A',
             description: 'd',
+            iconSrc: 'data:image/svg+xml;base64,PHN2Zy8+',
+            coverSrc: 'data:image/png;base64,AAAA',
           },
         })
       },
@@ -534,7 +536,8 @@ describe('#244 宿主直接父来源与当前路径', () => {
         reqId: i, instanceId: `hover-${i}`, occurrenceId: `web-occ-${i}`,
         sourceStart: 0, sourceEnd: 6, target: 'https://example.com/a' }, id)
       expect(out.at(-1), `第 ${i} 次外链悬停不应被预算拒绝`)
-        .toMatchObject({ kind: 'hover.result', ok: true, contentKind: 'web' })
+        .toMatchObject({ kind: 'hover.result', ok: true, contentKind: 'web',
+          web: { iconSrc: 'data:image/svg+xml;base64,PHN2Zy8+', coverSrc: 'data:image/png;base64,AAAA' } })
     }
   })
 })

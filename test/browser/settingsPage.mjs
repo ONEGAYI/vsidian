@@ -286,6 +286,7 @@ try {
       // #342（P3-10）外链预览两件：跳转目标提示之后、嵌入两项之前
       zhCn['setting.hoverExternalEnabled.title'],
       zhCn['setting.hoverExternalShape.title'],
+      zhCn['setting.hoverExternalCover.title'],
       zhCn['setting.embedMaxDepth.title'],
       zhCn['setting.embedMaxHeight.title'],
     ], '引用视图组内顺序：总开关 → 直接悬停显示 → 大纲悬停 → 跳转目标提示 → 外链开关与形态 → 嵌入展开层级 → 嵌入最大高度')
@@ -316,6 +317,17 @@ try {
     assert.equal(await targetTipBox.isChecked(), true, '再次切回开')
     assert.equal(await page.evaluate(() => window.savedSettings['hover.targetTip']), true,
       '切回开的持久化值随保存链路更新')
+    const externalBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverExternalEnabled.title'], exact: true })
+    const coverBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverExternalCover.title'], exact: true })
+    assert.equal(await coverBox.isDisabled(), true, '外链预览关闭时封面开关不可用')
+    assert.equal(await coverBox.isChecked(), false, '封面默认关闭')
+    await externalBox.check()
+    await coverBox.check()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await page.evaluate(() => window.savedSettings['hover.externalCover']), true, '封面开关写入设置')
+    await page.getByRole('button', { name: zhCn['settings.generalSection'], exact: true }).click()
+    await page.getByRole('button', { name: zhCn['settings.filesLinksSection'], exact: true }).click()
+    assert.equal(await coverBox.isChecked(), true, '重新打开文件与链接分页时回显封面开关')
     const pointerGlyph = page.locator(".vsidian-settings-group-title .vsidian-settings-generated-icon[data-icon='pointerLink']")
     assert.equal(await pointerGlyph.count(), 1, '引用视图组标题应挂 pointerLink 生图资产')
     assert.match(await pointerGlyph.evaluate(el => getComputedStyle(el).backgroundImage), /data:image\/svg\+xml/u)

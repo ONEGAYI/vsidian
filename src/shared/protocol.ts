@@ -24,6 +24,7 @@ import { isAddonSettingDefinition, isAddonSettingGroupDeclaration, isAddonSettin
 import { ADDON_DEFAULT_BINDINGS_MAX } from './addonCommands'
 import { isAddonDocNavLocate, isAddonDocNavResult, type AddonDocNavLocate, type AddonDocNavResult } from './addonNavApi'
 import type { PdfExportOptions } from './pdfExportOptions'
+import { isWebPreviewImageSrc } from './webLink'
 
 /** 工具栏导出菜单的四个入口：与命令面板四个 PDF 命令一一对应（同一实现，
  *  不新增导出语义）。currentDocument/selection 需活动文档与有效选区，
@@ -956,8 +957,8 @@ export type HostToWebview =
       /** #342（P3-10）外链卡片载荷（contentKind === 'web' 时在场，与
        *  Markdown 载荷互斥）：宿主受限抓取提取的元信息——url 为最终归一
        *  地址（重定向后）、domain/title/description 为展示面（title/
-       *  description 缺席为空串，webview 以域名兜底显示）。显示内容仅
-       *  文字与显式安全链接，不携带也不触发任何子资源。
+       *  description 缺席为空串，webview 以域名兜底显示）。封面在场时
+       *  仅携带已下载的位图数据，不触发新的网络请求。
        *  #343（P3-11）：frame 为 page 形态抓取附带的 iframe 嵌入预检
        *  （card 形态缺席）——embeddable=false 携带真实退回原因（denied =
        *  站点以 X-Frame-Options/frame-ancestors 明确拒绝；http = 最终
@@ -967,6 +968,8 @@ export type HostToWebview =
         domain: string
         title: string
         description: string
+        coverSrc?: string
+        iconSrc?: string
         frame?: { embeddable: boolean; reason?: 'denied' | 'http' }
       }
       target: HoverPreviewTargetIdentity
@@ -3850,6 +3853,8 @@ function isWebLinkMetaPayload(v: unknown): boolean {
     isString(v.domain) &&
     isString(v.title) &&
     isString(v.description) &&
+    (v.coverSrc === undefined || isWebPreviewImageSrc(v.coverSrc, 'cover')) &&
+    (v.iconSrc === undefined || isWebPreviewImageSrc(v.iconSrc, 'icon')) &&
     // #343（P3-11）frame 嵌入预检：缺席（card 形态）或形态合法——
     // embeddable=false 必带已知退回原因；embeddable=true 不携带原因
     // （语义矛盾形态整体拒绝，防伪造「可内嵌」以外的歧义状态）

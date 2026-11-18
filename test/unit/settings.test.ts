@@ -652,6 +652,14 @@ describe('引用视图设置组（#298：总开关 + liveDirect 改名 + embed �
 // ---- #342（P3-10）外链预览设置：总开关（默认关）+ 形态（默认卡片） ----
 
 describe('外链预览设置（#342）', () => {
+  it('配图开关默认关闭，依赖于外链预览且允许保存开启值', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.externalCover')
+    expect(def).toMatchObject({ type: 'boolean', default: false, dependsOn: 'hover.externalEnabled' })
+    expect(settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)['hover.externalCover']).toBe(false)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.externalCover': true })['hover.externalCover'])
+      .toBe(true)
+  })
+
   it('hover.externalEnabled 注册为布尔项，默认 false（关闭态零请求）', () => {
     const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.externalEnabled')
     expect(def).toMatchObject({ type: 'boolean', default: false })

@@ -1,6 +1,7 @@
 // #342（P3-10）外链卡片元信息提取（htmlparser2@12.0.0，精确版本锁定）：
 // 从 HTML 字节流提取 <title> 与 meta（description / og:title / og:
-// description）——纯文本级 SAX 解析，**非执行**：不运行 script、不发任何
+// description / og:image / twitter:image）与 link[rel~=icon]——纯文本级
+// SAX 解析，**非执行**：不运行 script、不发任何
 // 网络请求（img/iframe 子资源标记只是文本）、不产生 DOM 侧效应。
 //
 // 选型依据（相对 node-html-parser / cheerio）：
@@ -21,6 +22,8 @@ export const MAX_WEB_DESCRIPTION_CHARS = 500
 export interface WebMetaExtract {
   title: string
   description: string
+  coverUrl?: string
+  iconUrl?: string
 }
 
 /** 非执行提取 <title> + meta 档案：og:title/og:description 优先，title/
@@ -33,12 +36,23 @@ export function parseWebMetaFromHtml(html: string): WebMetaExtract {
   let ogTitle = ''
   let nameDescription = ''
   let ogDescription = ''
+  let ogImage = ''
+  let twitterImage = ''
+  let svgIcon = ''
+  let otherIcon = ''
 
   const parser = new Parser(
     {
       onopentag(name, attrs) {
         if (name === 'title' && !titleClosed) {
           inTitle = true
+        } else if (name === 'link' && /(?:^|\s)icon(?:\s|$)/i.test(attrs.rel ?? '')) {
+          const href = attrs.href?.trim() ?? ''
+          if (attrs.type?.toLowerCase() === 'image/svg+xml' || /\.svg(?:[?#]|$)/i.test(href)) {
+            svgIcon ||= href
+          } else {
+            otherIcon ||= href
+          }
         } else if (name === 'meta') {
           const key = (attrs['name'] ?? attrs['property'] ?? '').toLowerCase()
           const content = attrs['content'] ?? ''
@@ -51,6 +65,10 @@ export function parseWebMetaFromHtml(html: string): WebMetaExtract {
             ogDescription = content
           } else if (key === 'description' && nameDescription === '') {
             nameDescription = content
+          } else if (key === 'og:image' && ogImage === '') {
+            ogImage = content.trim()
+          } else if (key === 'twitter:image' && twitterImage === '') {
+            twitterImage = content.trim()
           }
           // http-equiv（refresh 等）与其他 meta 一律不消费：meta URL 不执行
         }
@@ -75,7 +93,9 @@ export function parseWebMetaFromHtml(html: string): WebMetaExtract {
 
   const title = clean(ogTitle !== '' ? ogTitle : tagTitle, MAX_WEB_TITLE_CHARS)
   const description = clean(ogDescription !== '' ? ogDescription : nameDescription, MAX_WEB_DESCRIPTION_CHARS)
-  return { title, description }
+  const coverUrl = ogImage || twitterImage
+  const iconUrl = svgIcon || otherIcon
+  return { title, description, ...(coverUrl !== '' ? { coverUrl } : {}), ...(iconUrl !== '' ? { iconUrl } : {}) }
 }
 
 /** 空白折叠 + 首尾剥除 + 长度截断（按 UTF-16 字符） */
