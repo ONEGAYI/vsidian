@@ -294,8 +294,9 @@ describe('WebLinkMetaService 触发与成功路径', () => {
     })
     const warn = vi.spyOn(console, 'warn')
     try {
-      await makeService().fetch(`http://127.0.0.1:${server.port}/article`, undefined, 'card', true)
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('HTTP 404'))
+      const origin = `http://127.0.0.1:${server.port}`
+      await makeService().fetch(`${origin}/article`, undefined, 'card', true)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`cover ${origin}：HTTP 404`))
       expect(warn).not.toHaveBeenCalledWith(expect.stringMatching(/private-image|signature=/))
     } finally {
       warn.mockRestore()

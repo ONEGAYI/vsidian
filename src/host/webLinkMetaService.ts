@@ -158,7 +158,7 @@ type WebLinkRequestMode = 'card' | 'page' | WebImageKind
 /** 页面声明的图片地址可能包含签名；诊断只保留资源类型和站点。 */
 function webImageLogScope(url: string, mode: WebLinkRequestMode): string | undefined {
   if (mode === 'card' || mode === 'page') return undefined
-  return `${mode === 'icon' ? '图标' : '封面'} ${new URL(url).origin}`
+  return `${mode} ${new URL(url).origin}`
 }
 
 /** 网络错误归因（诊断日志细分 cause；不参与 outcome 分态判定） */
