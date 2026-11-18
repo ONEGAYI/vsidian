@@ -61,11 +61,20 @@ const twoFrames = (page) => page.evaluate(() =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 
 /** 打开菜单并展开到三级类型页（insert → Callout） */
-async function openTypeMenu(page, pos) {
+async function openTypeMenu(page, pos, scrollToCallout = false) {
   await page.evaluate((p) => window.post({ kind: 'contextMenu.test.contextMenu', pos: p }), pos)
   await page.locator('.vsidian-context-menu button[data-vsidian-command="insert"]').hover()
   await page.waitForTimeout(60)
-  await page.locator('.vsidian-context-menu button[data-vsidian-command="calloutInsert"]').hover()
+  const callout = page.locator('.vsidian-context-menu button[data-vsidian-command="calloutInsert"]')
+  if (scrollToCallout) {
+    await callout.evaluate((btn) => btn.scrollIntoView({ block: 'nearest' }))
+    await twoFrames(page)
+  }
+  assert.ok(await callout.evaluate((btn) => {
+    const { x, y, width, height } = btn.getBoundingClientRect()
+    return btn.contains(document.elementFromPoint(x + width / 2, y + height / 2))
+  }), '二级 Callout 项必须显示在菜单外侧并可命中')
+  await callout.hover()
   await page.waitForTimeout(80)
 }
 
@@ -95,6 +104,26 @@ try {
   await twoFrames(page)
 
   await openTypeMenu(page, paraPos)
+  // 沿用发布版的后代选择器给菜单描边，从截图采样独立颜色。
+  const previewStyle = await page.addStyleTag({ content:
+    '.vsidian-context-menu .vsidian-context-menu-submenu { border-color: #ff00ff; }' })
+  const typeFace = page.locator('.vsidian-context-menu-submenu').filter({
+    has: page.locator('button[data-vsidian-command="calloutType:note"]'),
+  }).last()
+  const faceBox = await typeFace.boundingBox()
+  assert.ok(faceBox, '三级类型菜单应展开')
+  const pixel = await page.screenshot({ clip: {
+    x: Math.floor(faceBox.x + faceBox.width / 2), y: Math.round(faceBox.y), width: 1, height: 1,
+  } })
+  const rgb = await page.evaluate(async (base64) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(bitmap, 0, 0)
+    return [...ctx.getImageData(0, 0, 1, 1).data]
+  }, pixel.toString('base64'))
+  assert.deepEqual(rgb, [255, 0, 255, 255], '旧选择器设置的三级菜单边框在屏幕上真实绘制')
+  await previewStyle.evaluate((style) => style.remove())
   let structure = await page.evaluate(() => window.faceStructure())
   assert.ok(structure, '三级类型面应在场')
   assert.equal(structure.commands[0], 'calloutType:none')
@@ -360,7 +389,7 @@ try {
   await lowPage.addScriptTag({ path: output })
   await lowPage.evaluate((text) => window.initCalloutMenu(text), DOC)
   await lowPage.evaluate(() => window.locate(window.controller.getView().state.doc.length))
-  await openTypeMenu(lowPage, DOC.indexOf('开头段落正文'))
+  await openTypeMenu(lowPage, DOC.indexOf('开头段落正文'), true)
   const low = await lowPage.evaluate(() => {
     const menu = document.querySelector('.vsidian-context-menu')
     const faces = [...(menu?.querySelectorAll('[role="menu"]') ?? [])]
@@ -382,9 +411,19 @@ try {
     if (!btn) return { ok: false, why: 'btn-not-found' }
     btn.scrollIntoView({ block: 'nearest' })
     const rect = btn.getBoundingClientRect()
-    return { ok: rect.top >= 0 && rect.bottom <= window.innerHeight, rect: { top: rect.top, bottom: rect.bottom, vh: window.innerHeight } }
+    return { ok: btn.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)),
+      rect: { top: rect.top, bottom: rect.bottom, vh: window.innerHeight } }
   })
   assert.ok(lastVisible.ok, `滚动后末项（自定义输入）应在视口内可达：${JSON.stringify(lastVisible)}`)
+  const rootLastHit = await lowPage.locator(
+    '.vsidian-context-menu > .vsidian-context-menu-group:last-child > .vsidian-context-menu-host:last-child > button',
+  ).evaluate((btn) => {
+    const root = btn.closest('.vsidian-context-menu')
+    btn.scrollIntoView({ block: 'nearest' })
+    const { x, y, width, height } = btn.getBoundingClientRect()
+    return root.scrollTop > 0 && btn.contains(document.elementFromPoint(x + width / 2, y + height / 2))
+  })
+  assert.ok(rootLastHit, '低高度下顶级菜单仍可内滚到最后一项')
   await lowPage.close()
   passed++
   console.log('[Callout 菜单预览][PASS] 低高度滚动可达末项 + 分隔线呈现 + 左缘不越出')

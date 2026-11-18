@@ -1988,10 +1988,8 @@ body.vscode-high-contrast #app {
   z-index: 40;
   min-width: 220px;
   max-width: calc(100vw - 8px);
-  /* #656（T05）低高度滚动可达：顶级菜单自身溢出视口时可滚（与子菜单
-     同款视口封顶边距 16px——正常视口菜单不超高，零影响） */
+  /* #656（T05）与子菜单同款视口封顶；仅内容超高时由装配侧开启内滚。 */
   max-height: calc(100vh - 16px);
-  overflow-y: auto;
   box-sizing: border-box;
   padding: 4px;
   background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));
@@ -2327,9 +2325,9 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
-.vsidian-context-menu .vsidian-context-menu-host:hover .vsidian-context-menu-submenu,
-.vsidian-context-menu .vsidian-context-menu-host:focus-within .vsidian-context-menu-submenu,
-.vsidian-context-menu .vsidian-context-menu-host.vsidian-menu-open .vsidian-context-menu-submenu {
+.vsidian-context-menu .vsidian-context-menu-host:hover > .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host:focus-within > .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host.vsidian-menu-open > .vsidian-context-menu-submenu {
   display: block;
 }
 
@@ -2338,13 +2336,9 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='callout'] { --vsidia
   right: 100%;
 }
 
-/* #656（T05）三级类型列表（15 项）低高度滚动可达：子菜单沿视口高度封顶
-   并内滚（顶级菜单定位已有底部上翻 clamp；子菜单 top 对齐父项、无法整体
-   上翻，超过视口时必须可滚——键盘焦点跟随由浏览器滚动锚定）。对齐既有
-   定位口径的边距 8px（max-width calc(100vw - 8px) 同族取值，不发明新档） */
+/* #656（T05）低高度封顶；布局层只给超高的菜单面开启纵向滚动，避免裁掉级联子菜单。 */
 .vsidian-context-menu .vsidian-context-menu-submenu {
   max-height: calc(100vh - 16px);
-  overflow-y: auto;
 }
 
 /* 重命名行内编辑态：条目内容区被 input 替换（原文可含行内标记）。

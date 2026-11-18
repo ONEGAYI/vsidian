@@ -3795,7 +3795,7 @@
         "live"
       ],
       "states": "Live 正文右键（空行/普通文本/表格行/围栏内/图形块上均接管；frontmatter 头区与阅读态不接管，原生菜单照常）。结构敏感区（表格/围栏/图形块）写操作置灰（安全降级矩阵）。",
-      "dom": "document.body 直接子元素（视口系 fixed 定位）；子菜单嵌父项宿主内（absolute）。",
+      "dom": "document.body 直接子元素（视口系 fixed 定位）；子菜单始终嵌在父项宿主内。默认 absolute 定位；当直接父级菜单面需滚动时，改用 fixed 定位绕开裁剪。",
       "example": ".vsidian-context-menu .vsidian-context-menu-hint {\n  font-size: 11px;\n  opacity: 0.65;\n}",
       "obsidian": {
         "counterpart": "无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）",

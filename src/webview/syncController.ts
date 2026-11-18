@@ -8035,6 +8035,9 @@ export class WebviewSyncController {
       scopeRoot: this.rootEl ?? document.body,
       docScope: liveHtmlDocScopeOf(view.state) ?? 'doc',
     }) ?? undefined
+    if (menu.scrollHeight > menu.clientHeight) {
+      menu.style.overflowY = 'auto'
+    }
     const size = { w: menu.offsetWidth || 220, h: menu.offsetHeight || 260 }
     const pos = menuViewportPosition(
       { x: clientX, y: clientY },
