@@ -68,14 +68,28 @@ try {
   const frame = page.locator('.vsidian-graphic-frame.vsidian-image').first()
   const editBtn = frame.locator('.vsidian-graphic-chrome-edit')
   const popupBtn = frame.locator('.vsidian-graphic-chrome-popup')
+  const toolbarPaint = (imageFrame) => imageFrame.locator('.vsidian-graphic-chrome').evaluate((group) => {
+    const { backgroundColor, boxShadow, borderRadius } = getComputedStyle(group)
+    return { backgroundColor, boxShadow, borderRadius, width: group.getBoundingClientRect().width,
+      buttonBackgrounds: [...group.children].map((button) => getComputedStyle(button).backgroundColor) }
+  })
 
   // 1) 悬停显隐：未悬停透明，悬停后显现（opacity 计算值 = 绘制层断言）
   const idleOpacity = await editBtn.evaluate((el) => getComputedStyle(el).opacity)
   check('1 未悬停按钮透明隐藏', idleOpacity === '0', `opacity=${idleOpacity}`)
+  const idleToolbar = await toolbarPaint(frame)
+  check('1 未悬停不绘制工具栏底座', idleToolbar.boxShadow === 'none'
+    && idleToolbar.backgroundColor === 'rgba(0, 0, 0, 0)', JSON.stringify(idleToolbar))
   await frame.hover()
   await page.waitForFunction(() =>
     getComputedStyle(document.querySelector('.vsidian-graphic-frame.vsidian-image .vsidian-graphic-chrome-edit')).opacity === '1')
   check('2 悬停后按钮显现', true, 'opacity=1')
+  const liveToolbar = await toolbarPaint(frame)
+  check('2 图片的两个按钮在同一个不透明圆角阴影底座内',
+    liveToolbar.borderRadius === '8px' && liveToolbar.boxShadow !== 'none' && liveToolbar.width === 92
+      && /^rgb\(/.test(liveToolbar.backgroundColor)
+      && liveToolbar.buttonBackgrounds.join('/') === 'rgba(0, 0, 0, 0)/rgba(0, 0, 0, 0)',
+    JSON.stringify(liveToolbar))
 
   // 2) 点击吞（防误触本体）：原生点击图片中心，光标不动、widget 不退场
   const anchorBefore = await page.evaluate(() => window.controller.getView().state.selection.main.anchor)
@@ -219,6 +233,12 @@ try {
   await readingFrame.hover()
   await page.waitForFunction(() =>
     getComputedStyle(document.querySelector('.vsidian-reading-block .vsidian-graphic-frame.vsidian-image .vsidian-graphic-chrome-popup')).opacity === '1')
+  const readingToolbar = await toolbarPaint(readingFrame)
+  check('17 阅读态单按钮沿用聚合底座且图面有小阴影',
+    readingToolbar.borderRadius === '8px' && readingToolbar.boxShadow !== 'none'
+      && readingToolbar.buttonBackgrounds.join('/') === 'rgba(0, 0, 0, 0)'
+      && await readingFrame.locator('img').evaluate((img) => getComputedStyle(img).boxShadow !== 'none'),
+    JSON.stringify(readingToolbar))
   await page.locator('.vsidian-reading-block .vsidian-graphic-frame.vsidian-image .vsidian-graphic-chrome-popup').first().click()
   await page.waitForFunction(() => {
     const img = document.querySelector('.vsidian-diagram-media img')
@@ -255,7 +275,7 @@ try {
   })
   check('17b 阅读正文图片禁原生拖拽', readingGeometry.imgDraggable === false,
     `draggable=${readingGeometry.imgDraggable}`)
-  check('17c 阅读独行图按钮贴图右上（chrome 右缘贴图右缘 6px 内缩）',
+  check('17c 阅读独行图按钮贴图右上（chrome 右缘内缩 12px）',
     readingGeometry.soloGap !== null && readingGeometry.soloGap <= 0 && readingGeometry.soloGap >= -12,
     `gap=${readingGeometry.soloGap}`)
   check('17d 阅读宽幅 SVG 撑满不塌（块级基准守恒）', (readingGeometry.wideWidth ?? 0) > 400,

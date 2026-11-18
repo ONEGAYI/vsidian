@@ -5053,22 +5053,50 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   display: flex;
 }
 
-/* ---- #636：图片相框右下角拖动手柄 ----
-   手柄三件套（handle／glow／readout）由 imageResize.ts 挂在相框内，与
-   右上按钮组同级。三者的显隐沿用同一套 frame:hover 模型（不常驻——常驻
-   会让每张图右下角都挂装饰），并额外按 loaded 态门控：loading/error 态
-   没有可调尺寸语义。
+/* 阴影落在实际图面，避免独行图片的布局包裹层比图宽时阴影铺满一行。 */
+#app .vsidian-graphic-frame.vsidian-image[data-vsidian-img-state="loaded"] > img,
+#app .vsidian-graphic-frame.vsidian-image > img[data-vsidian-img-state="loaded"] {
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--vscode-editor-foreground, currentColor) 8%, transparent),
+    0 2px 4px color-mix(in srgb, var(--vscode-widget-shadow, currentColor) 85%, transparent);
+}
 
-   handle：盒 20×20 为热区，4px 透明边框 + background-clip:padding-box 把
-   实际着色收进内层 12×12（视觉 12、热区 20，视觉与热区同元素实现，避免
-   伪元素在 button 上的旧引擎兼容问题）。边框宽 4 的 TS 侧锚点是
-   IMAGE_RESIZE_HANDLE_BORDER（热区 − 2×边框 = 视觉；改任一侧须同步另一侧）。right/bottom 由 JS 按圆角同心
-   写入内联值，这里的 0 是布局就绪前的兜底。
-   glow：覆盖整个相框的描边层（border + 背景，不占布局），背景为底边与
-   右边两条向内递减的渐变光带（各自从边线起发光、向内渐淡至无，右带叠于
-   底带之上，角落交汇处视觉同亮度），不向外溢出相框、其余两边无光。光带
-   深度由 JS 依「max(24px, 短边 10%)」写入自定义属性（几何决策在纯函数
-   里，CSS 只消费）。 */
+/* 图片按钮共用一块底座；图形代码块、块级 HTML 保持原形态。 */
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome {
+  top: 12px;
+  right: 12px;
+  padding: 5px 4px;
+  border-radius: 8px;
+}
+
+#app .vsidian-graphic-frame.vsidian-image:hover > .vsidian-graphic-chrome,
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome:focus-within {
+  background: var(--vscode-editor-background, Canvas);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--vscode-editor-foreground, currentColor) 5%, transparent),
+    0 2px 4px color-mix(in srgb, var(--vscode-widget-shadow, currentColor) 50%, transparent);
+}
+
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome button {
+  width: 40px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome button:not(:hover) {
+  background: transparent;
+}
+
+#app .vsidian-graphic-frame.vsidian-image > .vsidian-graphic-chrome svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---- #636：图片相框右下角拖动手柄 ----
+   20×20 透明热区经 2px 边框收出 16×16 的圆弯折角（对应 TS 的
+   IMAGE_RESIZE_HANDLE_BORDER）。right/bottom 由 JS 写入内联值。
+   glow 保留为旧 CSS 片段的悬停装饰层，默认不绘制光带。 */
 #app .vsidian-image-resize-handle {
   position: absolute;
   right: 0;
@@ -5078,13 +5106,9 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   width: 20px;
   height: 20px;
   padding: 0;
-  border: 4px solid transparent;
+  border: 2px solid transparent;
   border-radius: 4px;
-  background:
-    repeating-linear-gradient(135deg,
-      color-mix(in srgb, var(--vscode-editor-foreground, #cccccc) 70%, transparent) 0 2px,
-      transparent 2px 5px);
-  background-clip: padding-box;
+  background: transparent;
   cursor: nwse-resize;
   touch-action: none;
   opacity: 0;
@@ -5092,32 +5116,31 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   transition: opacity 0.12s ease;
 }
 
+#app .vsidian-image-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground, currentColor));
+  border-right: 3px solid currentColor;
+  border-bottom: 3px solid currentColor;
+  border-bottom-right-radius: 6px;
+  filter: drop-shadow(0 0 1px var(--vscode-editor-background, Canvas));
+}
+
 #app .vsidian-image-resize-glow {
   position: absolute;
   inset: 0;
   z-index: 5;
   box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 55%, transparent);
   border-radius: 4px;
-  /* 底边与右边两条向内递减的渐变光带：右带叠于底带之上，角落交汇处视觉
-     同亮度；深度 = 延伸距离变量，不向外溢出相框 */
-  background:
-    linear-gradient(to top,
-      color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 60%, transparent),
-      transparent calc(var(--vsidian-image-resize-glow, 24px))),
-    linear-gradient(to left,
-      color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 60%, transparent),
-      transparent calc(var(--vsidian-image-resize-glow, 24px)));
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.12s ease;
 }
 
-/* 悬停显现（与右上按钮组同一套 frame:hover 模型）。
-   拖动中排除在外（:not）——光晕与拖动描边互斥，不靠层叠顺序决胜
-   （悬停选择器带伪类、优先级高于拖动规则，不加 :not 会让光晕在拖动中
-   照常亮起） */
+/* 悬停显现；拖动时由拖动态规则接管，并隐藏片段可能绘制的悬停装饰。 */
 #app .vsidian-graphic-frame.vsidian-image:not(.vsidian-image-resizing):hover > .vsidian-image-resize-handle,
 #app .vsidian-graphic-frame.vsidian-image:not(.vsidian-image-resizing):hover > .vsidian-image-resize-glow {
   opacity: 1;
@@ -5130,14 +5153,13 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   visibility: visible;
 }
 
-/* loaded 态门控：加载中/失败态没有尺寸语义可调，不呈现手柄与光晕 */
+/* loaded 态门控：加载中/失败态不呈现手柄与悬停装饰。 */
 #app .vsidian-image:not([data-vsidian-img-state="loaded"]) > .vsidian-image-resize-handle,
 #app .vsidian-image:not([data-vsidian-img-state="loaded"]) > .vsidian-image-resize-glow {
   display: none;
 }
 
-/* 拖动中：整框异色描边，光晕隐去——两者互斥，避免一处出现两团亮区；
-   手柄保持可见（指针移出热区后仍要看得见拖的是哪里） */
+/* 拖动中：手柄保持可见，整框异色描边替代悬停装饰。 */
 #app .vsidian-image.vsidian-image-resizing {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: 2px;

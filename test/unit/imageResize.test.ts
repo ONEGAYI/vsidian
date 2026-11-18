@@ -301,9 +301,13 @@ describe('glowExtension：光晕延伸距离', () => {
   })
 })
 
-describe('resizeHandleLayout：贴右下角内侧、与圆角同心', () => {
-  it('无圆角时贴角（right/bottom 为 0）', () => {
-    expect(resizeHandleLayout({ width: 300, height: 200 })).toEqual({ right: 0, bottom: 0 })
+describe('resizeHandleLayout：留出相框内缘，小图仍可抓取', () => {
+  it('默认热区与右边和底边各留 8px', () => {
+    expect(resizeHandleLayout({ width: 300, height: 200 })).toEqual({ right: 8, bottom: 8 })
+  })
+
+  it('窄图或矮图按各自的可用空间收起内缩', () => {
+    expect(resizeHandleLayout({ width: 24, height: 22 })).toEqual({ right: 4, bottom: 2 })
   })
 
   it('圆角半径大于热区半径时按同心偏移（中心落在弧心）', () => {
@@ -315,10 +319,10 @@ describe('resizeHandleLayout：贴右下角内侧、与圆角同心', () => {
     expect(resizeHandleLayout({ width: 300, height: 200, radius: 4 })).toEqual({ right: 0, bottom: 0 })
   })
 
-  it('几何常量：视觉 12×12、热区 20×20、透明边框 4（TS 字面量锚点）', () => {
-    expect(IMAGE_RESIZE_HANDLE_SIZE).toBe(12)
+  it('几何常量：视觉 16×16、热区 20×20、透明边框 2（TS 字面量锚点）', () => {
+    expect(IMAGE_RESIZE_HANDLE_SIZE).toBe(16)
     expect(IMAGE_RESIZE_HIT_SIZE).toBe(20)
-    expect(IMAGE_RESIZE_HANDLE_BORDER).toBe(4)
+    expect(IMAGE_RESIZE_HANDLE_BORDER).toBe(2)
   })
 
   it('几何派生：热区 − 2×边框 = 视觉（三常量联动，改任一侧即漂移暴露）', () => {
@@ -799,20 +803,20 @@ describe('main.css 手柄与光晕规则（#636 契约）', () => {
     expect(rule).toMatch(new RegExp(`width:\\s*${IMAGE_RESIZE_HIT_SIZE}px`))
     expect(rule).toMatch(new RegExp(`height:\\s*${IMAGE_RESIZE_HIT_SIZE}px`))
     expect(rule).toMatch(new RegExp(`border:\\s*${IMAGE_RESIZE_HANDLE_BORDER}px solid transparent`))
-    expect(rule).toMatch(/background-clip:\s*padding-box/)
+    const glyph = cssRule(css, '#app .vsidian-image-resize-handle::after')
+    expect(glyph).toMatch(/inset:\s*0/)
+    expect(glyph).toMatch(/pointer-events:\s*none/)
     expect(rule).toMatch(/cursor:\s*nwse-resize/)
     // 默认不常驻
     expect(rule).toMatch(/opacity:\s*0/)
     expect(rule).toMatch(/visibility:\s*hidden/)
   })
 
-  it('光晕为边线光带、不占布局（absolute + pointer-events:none + 深度变量）', () => {
+  it('旧片段的装饰层不占布局且不拦事件，默认不画光带', () => {
     const rule = cssRule(css, '#app .vsidian-image-resize-glow')
     expect(rule).toMatch(/position:\s*absolute/)
     expect(rule).toMatch(/pointer-events:\s*none/)
-    // 底边与右边两条向内递减的渐变光带：色标含深度变量（无该变量的漂移即暴露）
-    expect(rule).toMatch(/linear-gradient\(to top,[^;]*calc\(var\(--vsidian-image-resize-glow/)
-    expect(rule).toMatch(/linear-gradient\(to left,[^;]*calc\(var\(--vsidian-image-resize-glow/)
+    expect(rule).not.toMatch(/background/)
   })
 
   it('悬停显现且拖动中排除光晕（互斥不靠层叠顺序）', () => {

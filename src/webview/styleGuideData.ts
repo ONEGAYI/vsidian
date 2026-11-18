@@ -1683,19 +1683,19 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-image-resize-handle / .vsidian-image-resize-glow / .vsidian-image-resize-readout（相框右下角拖动手柄族，#636）",
-    "purpose": "图片相框右下角拖动手柄（#636）：拖动即改图片显示尺寸并把结果写回源文尺寸后缀。手柄是硬性次要编辑入口——只在 Live 视图的非排除图片上出现；链接内与表格格内沿既有排除矩阵不出现（那里的点击语义归链接跳转与单元格编辑），阅读视图不出现（只读契约）。视觉 12×12、热区 20×20（沿用侧栏拖宽句柄的热区大于视觉做法），光标 nwse-resize，贴住相框右下角内侧并与圆角同心。glow 为沿右下角两条边线的内侧光带（背景两条 linear-gradient，不占布局）——底边与右边各自从边线起发光、向内递减至无，右带叠于底带之上（角落交汇处视觉同亮度），不向外溢出相框、其余两边无光；光带深度 = max(24px, min(相框宽, 相框高) × 10%)——取 max 不取和（避免大图边界难预期）、基数用短边（宽图沿底边的光带深度会与行高失衡，短边让光带与图的视觉体量成比例）。readout 为拖动中的实时尺寸读数（形如 `320 × 180`），松手即消失。",
+    "purpose": "图片相框右下角拖动手柄（#636）：拖动改变图片显示尺寸，并把结果写回源文尺寸后缀。只在 Live 视图非排除图片上出现；链接内、表格格内与阅读视图不提供手柄。视觉为 16×16 的圆弯折角，热区 20×20，光标 nwse-resize。readout 为拖动中的实时尺寸读数（如 `320 × 180`），松手即消失。",
     "views": [
       "live"
     ],
-    "states": "悬停相框时显现（与既有 .vsidian-graphic-chrome 同一套 frame:hover 模型，不常驻——常驻会让每张图右下角都挂装饰）。拖动中：相框挂 .vsidian-image-resizing（整个外框 1px 实线异色描边，取 --vscode-focusBorder），同时 glow 完全消失——两者互斥，避免一处出现两团亮区。拖动结束或 Esc 中止后两者一并撤下。手柄在图片 error / loading 态不呈现（无尺寸语义可调）；尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。",
-    "dom": "手柄元素是相框（live 侧 span.vsidian-image 兼任 vsidian-graphic-frame）的子节点，与既有 .vsidian-graphic-chrome 按钮组同级；glow 与 readout 同为其子节点（glow 承担边线光带、readout 承担拖动读数）。glow 的光带深度经内部协调属性 --vsidian-image-resize-glow 传递：JS（glowExtension：max(24px, 短边×10%)）以内联 setProperty 写在相框元素上，CSS 于 .vsidian-image-resize-glow 的背景两条 linear-gradient 消费（光带深度，均带 24px 兜底）。该属性不设公开 variable 条目——值是运行时几何派生而非主题可定制面，glow 消费的是从相框继承的内联值——CSS 片段把同名变量声明在 .vsidian-image-resize-glow 自身即可覆盖光带深度（元素自身声明优先于从父继承的内联值）；显隐互斥态由 opacity/visibility 类规则承担，不受该属性影响。",
-    "example": "/* 拖动中：相框异色描边，光晕消失（互斥） */\n.vsidian-image.vsidian-image-resizing {\n  outline: 1px solid var(--vscode-focusBorder);\n  outline-offset: 2px;\n}\n.vsidian-image.vsidian-image-resizing .vsidian-image-resize-glow {\n  opacity: 0;\n}",
+    "states": "悬停相框时显现，加载或失败时隐藏。拖动中，相框挂 .vsidian-image-resizing，以 --vscode-focusBorder 描 1px 实线；手柄保持可见，片段自定义的悬停装饰层隐藏。拖动结束或 Esc 中止后恢复悬停状态。尺寸由 max-width:100% 兜底，拖动中的视觉钳制不改变用户手写值。",
+    "dom": "手柄、glow 与 readout 都挂在相框内，与 .vsidian-graphic-chrome 同级。默认图面以小阴影呈现，不绘制光带；.vsidian-image-resize-glow 保留为悬停装饰层，仍继承相框的 --vsidian-image-resize-glow（max(24px, 短边×10%)）。旧片段若只设置过光带深度，现在可在该选择器上直接指定背景，继续引用该深度。",
+    "example": ".vsidian-image-resize-glow {\n  background: linear-gradient(to top, var(--vscode-focusBorder), transparent var(--vsidian-image-resize-glow));\n}",
     "obsidian": {
       "counterpart": "无直接对应（Obsidian 不给图片拖动改尺寸的手柄；其尺寸靠源码尾缀手写）",
       "support": "none"
     },
     "verification": [
-      "浏览器 imageResize：悬停显现与不常驻、等比与 Shift 双轴写回形态、一次拖动一笔 edit.request、Esc 不写文档、最小宽保底、光晕延伸距离与「描边 + 光晕消失」互斥态（计算样式断言）、链接内与表格格内无手柄、拖动开始 Shift 提示 toast",
+      "浏览器 imageResize：悬停折角、小阴影与默认无光带、旧片段装饰层绘制、拖动描边与装饰层互斥；等比和 Shift 双轴写回、一次拖动一笔 edit.request、Esc 不写文档、最小宽、排除项和 Shift 提示",
       "单元 imageResize：computeResizeTarget（等比/百分比/双轴保留/最小宽/最大宽钳制）、glowExtension（24 保底与短边 10%）、resizeHandleLayout 与 replaceSizeSuffix 纯逻辑"
     ],
     "introduced": "#636（2026-10-22）"
@@ -2572,12 +2572,12 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "graphic-interact",
     "kind": "selector",
     "target": ".vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）",
-    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#567（T02）起块级原生 HTML 的 Live 宿主复用同款按钮族 DOM/CSS（仅 edit 钮——buildGraphicChrome 的 onPopup 可缺省形态；宿主 .vsidian-live-html 自有定位规则，不入 frame 类）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。按钮底色为「主题面纯色渐变层 + 编辑器底实垫」双层合成（常态 editorWidget-background、悬停 button-secondaryBackground）：主题变量可能半透明（玻璃风主题），按钮直浮图片等斑驳内容时半透明面透出内容色，垫实底后任何主题不透底；主题值为实色时渐变层全覆盖、观感与单层等同。",
+    "purpose": "图形化代码块的定位包裹层与右上角按钮组：edit 进入源码编辑（仅实时预览），popup 打开图表弹窗。块级原生 HTML 的 Live 宿主复用同一按钮族（仅 edit；宿主 .vsidian-live-html 自有定位，不入 frame 类）。图片（#212）复用按钮与交互，Live 有 edit 和 popup，阅读仅 popup；链接内与表格格内图片不挂按钮组。图片按钮组共用不透明圆角阴影底座，单个按钮悬停才着色；图表与块级 HTML 保留独立按钮底色。悬停面继续使用主题色叠加编辑器底色的双层合成，避免半透明主题透出图面。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。图片形态：loaded 态显示（data-vsidian-img-state 兄弟/子代选择器驱动），frame.vsidian-image 取行内布局（不破坏行内混排）。",
+    "states": "渲染成功后才允许显示，按钮默认隐藏，悬停相框或按钮键盘聚焦时显现。图片只在 loaded 态显示，由 data-vsidian-img-state 的兄弟或子代选择器驱动；相框布局保持行内混排与独行两种形态。",
     "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。图片形态：live 槽位 span 兼任 frame（vsidian-image 叠加）；阅读 img 经 inline frame span 包裹。按钮组挂 frame 内 absolute 右上。",
     "example": ".vsidian-graphic-chrome {\n  opacity: 1;\n}",
     "obsidian": {
@@ -2588,7 +2588,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons",
       "浏览器 graphicPopup：悬停显隐（透明度两态）",
       "集成「界面域样式契约」（#133）：chromeSelectors[\"graphic-chrome\"] 探针命中",
-      "单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项；悬停按钮底色垫实底（computed backgroundColor 不透明 + 渐变面在场）"
+      "单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项；双模式聚合底座、悬停按钮不透出图片色（计算样式）"
     ],
     "introduced": "#111（2026-09-26）"
   },
@@ -6174,9 +6174,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "image-resize-handle": {
-    "purpose": "Drag handle at the bottom-right corner of the image frame (#636): dragging changes the displayed image size and writes the result back into the source size suffix. The handle is a deliberate secondary editing affordance — it appears only on non-excluded images in Live view; images inside links and table cells follow the existing exclusion matrix (click semantics there belong to link navigation and cell editing), and Reading view has no handle (read-only contract). Visual 12×12 with a 20×20 hit area (the same hit-area-larger-than-visual approach as the sidebar width handle), cursor nwse-resize, inset at the bottom-right corner and concentric with the frame corner radius. glow is an inner light band along the two edges meeting at the bottom-right corner (a background of two linear-gradients, no layout cost) — the bottom and right edges each light up from the edge line and fade inward to nothing, the right band layering over the bottom band (the corner junction reads as one brightness), with no spill outside the frame and no light on the other two edges; band depth = max(24px, min(frame width, frame height) × 10%) — max, not sum (so large-image boundaries stay predictable), based on the short edge (on a wide image the bottom-edge band depth would dwarf the line height; the short edge keeps the band proportional to the image). readout is the live size readout during dragging (e.g. `320 × 180`), disappearing on release.",
-    "states": "Revealed while hovering the frame (the same frame:hover model as the existing .vsidian-graphic-chrome; never persistent — persistence would hang a decoration off every image corner). While dragging: the frame carries .vsidian-image-resizing (the whole outline takes a 1px solid contrast stroke, --vscode-focusBorder) and glow disappears entirely — the two are mutually exclusive so one corner never shows two bright regions. Both are removed when the drag ends or is aborted with Esc. The handle is absent in the error/loading image states (no size semantics to adjust); oversized hand-written values are still clamped by max-width:100%, and the drag-time visual clamp never rewrites the user value.",
-    "dom": "The handle element is a child of the frame (in live view the span.vsidian-image doubles as vsidian-graphic-frame), a sibling of the existing .vsidian-graphic-chrome group; glow and readout are its children (glow carries the edge light bands, readout the drag-time numbers). the glow band depth travels through the internal coordination property --vsidian-image-resize-glow: JS (glowExtension: max(24px, short edge x 10%)) writes it inline via setProperty on the frame element, and CSS consumes it in the background of .vsidian-image-resize-glow as two linear-gradient color stops (band depth, both with a 24px fallback). No public variable entry exists for it — the value is a runtime geometric derivation, not a themeable surface, and glow consumes the inline value inherited from the frame — a snippet overrides the glow band depth by declaring the same property on .vsidian-image-resize-glow itself (a declaration on the element itself wins over the inline value inherited from its parent); visibility and mutual exclusion are carried by opacity/visibility class rules and are unaffected by this property.",
+    "purpose": "Bottom-right image resize handle (#636). Dragging changes the displayed size and writes back to the source size suffix. It is available only on eligible Live images, not images inside links or table cells or images in Reading. The rounded elbow is 16×16 with a 20×20 hit area and a nwse-resize cursor. The live size readout disappears on release.",
+    "states": "Shown while hovering a loaded image. When dragging, .vsidian-image-resizing gives the frame a 1px --vscode-focusBorder outline; the handle stays visible and snippet decorations on the hover layer are hidden. The hover state resumes when the drag ends or Esc cancels it. Oversized source values are still constrained by max-width:100%, without rewriting them.",
+    "dom": "The handle, glow and readout are frame children alongside .vsidian-graphic-chrome. The image now has a small shadow instead of a built-in light band. .vsidian-image-resize-glow stays available as a hover decoration layer and still inherits --vsidian-image-resize-glow (max(24px, short edge × 10%)). Snippets that only changed the old band depth can now supply a background on that layer and use the same depth.",
     "obsidian": {
       "counterpart": "No direct counterpart (Obsidian gives no drag-to-resize handle for images; sizes are hand-written as source suffixes)"
     }
@@ -6439,8 +6439,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "graphic-chrome": {
-    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); Since #567 (T02) the live host of block-level native HTML reuses the same button family DOM/CSS (edit only — the buildGraphicChrome form where onPopup may be omitted; the host .vsidian-live-html carries its own positioning rules and is not part of the frame class). Images inside links or table grids do not carry it (explicitly out of scope). The button background is a two-layer composite (a solid-color gradient layer of the theme face + a solid editor-background underlay; editorWidget-background at rest, button-secondaryBackground on hover): theme variables may be translucent (glass-style themes), and with the buttons floating directly over mottled content such as images a translucent face lets the content color bleed through; the solid underlay keeps the face opaque under any theme, while solid theme values are fully covered by the gradient layer with no visual change.",
-    "states": "The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side. Image form: shown in the loaded state (driven by sibling/descendant selectors on data-vsidian-img-state); frame.vsidian-image takes an inline layout (inline mixed flow is not broken).",
+    "purpose": "The graphic code block wrapper and its top-right button group: edit opens source editing (Live only), and popup opens the diagram preview. Block-level native HTML in Live reuses the button family (edit only, with its own positioning host, .vsidian-live-html). Images reuse the controls and interactions (#212): edit and popup in Live, popup only in Reading. Images inside links or table cells do not get a button group. Image buttons share an opaque rounded shadowed plate, with a separate face only on hover; graphic blocks and block-level HTML retain separate button faces. Hover uses the existing theme color over the editor background, so translucent theme colors do not let the image bleed through.",
+    "states": "Successful rendering enables the controls. They are hidden by default and shown on frame hover or keyboard focus. For images, the loaded state is selected through data-vsidian-img-state using sibling or child selectors. The frame preserves inline and standalone image layout.",
     "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
     "obsidian": {
       "counterpart": "None (Obsidian diagram blocks have no public button-group structure)"

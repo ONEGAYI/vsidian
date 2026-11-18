@@ -31,7 +31,7 @@
 | `999px` | pill：拨动开关、筛选签、键位捕获框、各类徽章 |
 | `10px` | 设置页二级组卡片（`vsidian-settings-group`）、frontmatter Popover |
 | `9px` | 侧栏导航条目 |
-| `8px` | 搜索框（设置页/快捷键页）、callout、悬停弹窗、toast（变量化）、富文本粘贴对话框、设置页页内菜单 |
+| `8px` | 搜索框（设置页/快捷键页）、callout、悬停弹窗、toast（变量化）、富文本粘贴对话框、设置页页内菜单、图片相框与图上按钮组底座 |
 | `6px` | 按钮、键位牌、图标钮、悬停提示卡、双链联想浮层、附加组件面板 |
 | `5px` | 右键菜单族（正文右键/大纲菜单/子菜单/快速操作标题菜单） |
 | `4px` | 反链排序菜单、查找面板、tooltip 键位徽章 |
@@ -44,6 +44,7 @@
 
 | 层级 | 取值 |
 | --- | --- |
+| 图片相框／图上按钮组 | `0 2px 4px`，阴影色取主题 widget shadow；相框加一圈低对比边线，按钮组阴影更淡 |
 | 菜单 / 联想 / tooltip | `0 2px 8px rgba(0,0,0,.25–.28)` 或 `var(--vscode-widget-shadow)` |
 | 快速操作标题菜单 | `0 3px 10px var(--vscode-widget-shadow)` |
 | 设置页页内菜单（快捷键「更多操作」） | `0 4px 14px rgba(0,0,0,.22)` |
@@ -293,6 +294,8 @@ aside（合并模式侧区）
 T05（#544）组件引用请求复用悬停弹窗模式：位置由有效触发区域与 hoverPopupGeometry 决定，仍为单页单浮窗；只读路径隐藏内部编辑/保存入口，不新增浮层样式档位。绘制与旧选择器命中由 `addonRefViews` 浏览器套件及宿主 `paint.hoverPopup` 断言覆盖。
 
 **内容流内悬停辨识框（#567/T02）**：块级原生 HTML 的 Live 渲染宿主（`.vsidian-live-html`，非浮层——内容流内块）悬停呈现 1px `--vscode-focusBorder` outline（§1.1 焦点强调档，offset 2px、圆角 6px 档）；右上角编辑按钮**复用图形块按钮族**（`.vsidian-graphic-chrome` 的尺寸/底色/悬停透明度规则随类名命中，DOM 经 buildGraphicChrome 的仅 edit 形态，#567 起 onPopup 可缺省）——不发明新按钮档位，按钮组定位由宿主自身 position:relative 承担（不入 graphic-frame 类，探针计数不混）。悬停词走 `data-tooltip`（html.blockTooltip 词条）。绘制层断言在 `liveHtml` 浏览器套件（outline 非透明 + 按钮透明度两态）。
+
+**图片相框与图上按钮组**：已加载图片以 8px 圆角、细边线和贴边小阴影区分图面与页面；悬停时右上角由一个 8px 圆角阴影底座承载操作（按钮 40×32px、图标 20px，按钮之间不分底色，悬停单个按钮才着色）。Live 右下角使用圆弯折角手柄，图面不绘制光带。图形代码块与块级 HTML 仍沿用原按钮形态。见 [image-popup.md](image-popup.md)、[image-resize.md](image-resize.md)；绘制层由 `imagePopup`、`imageResize` 浏览器套件覆盖。
 
 **表格边沿与活动格光标（2026-10-23）**：当前 EditorView 内绝对定位，边沿宽 2px、色取 `--vscode-focusBorder`，中央光标高 1em、宽 2px、色取 `--vscode-editorCursor-foreground`（回落正文前景），以正文背景色隔开边沿。格内独立输入面绘制同宽光标，原生光标让位；格区在场时光标全部隐藏。均无圆角、无全局 z-index，不新增主题档位。`tableInput` 浏览器测试检查实绘色与中央位置，`tableCaret` 检查格内真实绘制位置，CSS 契约钉住主题变量与让位范围。
 

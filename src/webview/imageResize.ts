@@ -31,23 +31,23 @@ import { t } from '../shared/i18n'
 export const IMAGE_RESIZE_CLASS_NAMES = {
   /** 手柄本体（pointerdown 的命中面） */
   handle: 'vsidian-image-resize-handle',
-  /** 右下角边线光带光晕（纯装饰，不接事件） */
+  /** 旧 CSS 片段可用的悬停装饰层（纯装饰，不接事件） */
   glow: 'vsidian-image-resize-glow',
   /** 拖动中的尺寸读数（如 `320 × 180`） */
   readout: 'vsidian-image-resize-readout',
 } as const
 
-/** 拖动中挂在相框上的修饰类：整框异色描边，且光晕隐去（互斥） */
+/** 拖动中挂在相框上的修饰类：整框异色描边，片段悬停装饰隐去 */
 export const IMAGE_RESIZE_RESIZING_CLASS = 'vsidian-image-resizing'
 
 /** 手柄视觉边长（规格 §5.5） */
-export const IMAGE_RESIZE_HANDLE_SIZE = 12
+export const IMAGE_RESIZE_HANDLE_SIZE = 16
 /** 手柄热区边长（热区大于视觉，便于抓取） */
 export const IMAGE_RESIZE_HIT_SIZE = 20
 /** 手柄热区收出视觉方块的透明边框宽（CSS .vsidian-image-resize-handle 的 border 同源值：
- *  热区 20 − 2×4 = 视觉 12；CSS 侧注释与本常量互为锚点，改任一侧须同步另一侧） */
-export const IMAGE_RESIZE_HANDLE_BORDER = 4
-/** 最小宽度（规格 §5.4：再小抓不住，与光晕保底同档） */
+ *  热区 20 − 2×2 = 视觉 16；CSS 侧注释与本常量互为锚点，改任一侧须同步另一侧） */
+export const IMAGE_RESIZE_HANDLE_BORDER = 2
+/** 最小宽度（规格 §5.4：再小不便抓取） */
 export const IMAGE_RESIZE_MIN_WIDTH = 24
 /** 最小高度（只防 0/负值；等比缩放的小图不应被抬高） */
 export const IMAGE_RESIZE_MIN_HEIGHT = 1
@@ -154,25 +154,21 @@ export function glowExtension(frameWidth: number, frameHeight: number): number {
 export interface ResizeHandleFrameRect {
   width: number
   height: number
-  /** 相框圆角半径（px）；缺省 0（当前图片相框无圆角） */
+  /** 可选的相框圆角半径（px）；未指定时按图片默认留白定位 */
   radius?: number
 }
 
 /**
- * 手柄相对相框的定位（贴右下角内侧，并让热区中心落在圆角弧心上）。
- *
- * 同心推导：弧心距两条边都是 radius，热区半径是 HIT/2；把热区盒的右/下
- * 偏移取 `radius - HIT/2`，热区中心即与弧心重合。半径小于热区半径时钳到
- * 0——负偏移会让手柄探出相框外侧。
+ * 默认将热区内缩 8px，折角外沿距相框 10px；窄图、矮图优先保住热区。
+ * 调用方指定圆角时，沿用按弧心定位（圆角半径减半个热区）的约定。
  */
 export function resizeHandleLayout(frameRect: ResizeHandleFrameRect): { right: number; bottom: number } {
-  const radius = Number.isFinite(frameRect.radius) ? Math.max(0, frameRect.radius ?? 0) : 0
-  const halfHit = IMAGE_RESIZE_HIT_SIZE / 2
-  // 相框本身小于热区时偏移也不能把手柄推出框外
-  const width = Number.isFinite(frameRect.width) ? frameRect.width : 0
-  const limit = Math.max(0, width - IMAGE_RESIZE_HIT_SIZE)
-  const offset = Math.min(Math.max(0, radius - halfHit), limit)
-  return { right: offset, bottom: offset }
+  const { width, height, radius } = frameRect
+  const offset = radius === undefined ? 8 : Math.max(0, positiveOr(radius, 0) - IMAGE_RESIZE_HIT_SIZE / 2)
+  return {
+    right: Math.min(offset, Math.max(0, positiveOr(width, 0) - IMAGE_RESIZE_HIT_SIZE)),
+    bottom: Math.min(offset, Math.max(0, height - IMAGE_RESIZE_HIT_SIZE)),
+  }
 }
 
 /** 尾缀改写计划：`text` 替换 inner 的 [from, to) 段 */
@@ -441,7 +437,7 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
 
   frame.append(glow, readout, handle)
 
-  /** 光晕延伸距离与手柄贴合位：布局就绪前 rect 为 0，先写保底值，布局
+  /** 兼容片段的光带深度与手柄贴合位：布局就绪前 rect 为 0，先写保底值，布局
    *  到位（img load / ResizeObserver）后收敛 */
   const applyGeometry = (): void => {
     const rect = frame.getBoundingClientRect()
@@ -449,7 +445,7 @@ export function attachResizeHandle(frame: HTMLElement, opts: AttachResizeHandleO
     const layout = resizeHandleLayout({
       width: rect.width,
       height: rect.height,
-      radius: opts.cornerRadius ?? 0,
+      ...(opts.cornerRadius !== undefined ? { radius: opts.cornerRadius } : {}),
     })
     handle.style.right = `${layout.right}px`
     handle.style.bottom = `${layout.bottom}px`

@@ -9,8 +9,8 @@
 //   D5 一次拖动 = 一笔 edit.request（宿主撤销一步）
 //   D6 Esc 中止不写文档
 //   D7 最小宽 24 保底
-//   D8 光晕延伸距离 = max(24, 短边 × 10%)（计算样式断言：保底档 + 短边 10% 档）
-//   D9 按住态：相框异色描边 + 光晕消失（互斥；描边与光晕两侧均有计算样式断言）
+//   D8 默认用相框小阴影与圆弯折角，不绘制光带；旧片段仍能给悬停层绘制光带
+//   D9 按住态：相框异色描边 + 悬停装饰层隐藏（互斥）
 //   D10 表格格内与链接内图片均无手柄（沿既有排除矩阵；链接内先证图片仍渲染）
 //   D11 拖动开始弹 Shift 提示 toast（正反两断言：首拖未按 Shift 弹、已按住不弹）
 import path from 'node:path'
@@ -79,10 +79,16 @@ try {
     const handle = document.querySelector('.vsidian-image-resize-handle')
     if (!handle) return null
     const style = getComputedStyle(handle)
+    const glyph = getComputedStyle(handle, '::after')
     const rect = handle.getBoundingClientRect()
+    const frame = handle.parentElement.getBoundingClientRect()
     const visible = style.display !== 'none' && style.visibility !== 'hidden'
       && Number.parseFloat(style.opacity) > 0 && rect.width > 0 && rect.height > 0
     return { visible, width: rect.width, height: rect.height, cursor: style.cursor,
+      glyph: [glyph.content, glyph.borderTopWidth, glyph.borderLeftWidth,
+        glyph.borderRightWidth, glyph.borderBottomWidth, glyph.borderBottomRightRadius],
+      inset: [frame.right - rect.right + Number.parseFloat(style.borderRightWidth),
+        frame.bottom - rect.bottom + Number.parseFloat(style.borderBottomWidth)],
       left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
   })
 
@@ -98,38 +104,43 @@ try {
   check('D1 悬停相框后手柄可见', afterHover !== null && afterHover.visible,
     `visible=${afterHover?.visible} size=${afterHover?.width}×${afterHover?.height}`)
   check('D1 手柄光标 nwse-resize', afterHover?.cursor === 'nwse-resize', `cursor=${afterHover?.cursor}`)
+  check('D1 右下手柄为圆弯折角，保留 20×20 热区',
+    afterHover.width === 20 && afterHover.height === 20
+      && afterHover.glyph.join('/') === '""/0px/0px/3px/3px/6px'
+      && afterHover.inset.every((gap) => near(gap, 10, 0.5)),
+    JSON.stringify({ glyph: afterHover.glyph, inset: afterHover.inset }))
 
-  // ---- D8：光晕光带深度（计算样式断言：保底档 + 短边 10% 档） ----
+  // ---- D8：默认相框无光带；已发布的选择器和继承几何仍可供片段绘制 ----
   const glowState = () => page.evaluate(() => {
     const frame = document.querySelector('.cm-content .vsidian-image')
     const glow = document.querySelector('.vsidian-image-resize-glow')
-    if (!frame || !glow) return null
-    const rect = frame.getBoundingClientRect()
+    const style = getComputedStyle(glow)
     return {
-      value: Number.parseFloat(getComputedStyle(frame).getPropertyValue('--vsidian-image-resize-glow')),
-      frameW: rect.width,
-      frameH: rect.height,
-      backgroundImage: getComputedStyle(glow).backgroundImage,
+      value: style.getPropertyValue('--vsidian-image-resize-glow'),
+      backgroundImage: style.backgroundImage,
+      border: style.borderRightWidth,
+      shadow: getComputedStyle(frame.querySelector('img')).boxShadow,
+      visible: style.visibility === 'visible',
     }
   })
-  // 保底档：固有 200×100（短边 100 → 10% = 10 < 24 → 保底 24px）
-  const glowFloor = await glowState()
-  check('D8 小图光晕在场且深度走 24px 保底',
-    glowFloor !== null && Number.isFinite(glowFloor.value) && near(glowFloor.value, 24, 2),
-    `glow=${glowFloor?.value}px bg=${glowFloor?.backgroundImage?.slice(0, 100)}`)
-  // 形态：边线光带为双 linear-gradient（底边 to top + 右边 to left）
-  const bgTop = (glowFloor?.backgroundImage.match(/to top/g) ?? []).length
-  const bgLeft = (glowFloor?.backgroundImage.match(/to left/g) ?? []).length
-  check('D8 光晕形态为双 linear-gradient（底边 to top + 右边 to left）',
-    bgTop >= 1 && bgLeft >= 1, `toTop=${bgTop} toLeft=${bgLeft}`)
-  // 短边 10% 档：|600 → 600×300（短边 300 → 30 > 24），期望按实测相框短边推导
+  const defaultFrame = await glowState()
+  check('D8 图片用小阴影浮起，悬停不在图面画光带或框线',
+    defaultFrame.shadow !== 'none' && defaultFrame.backgroundImage === 'none'
+      && defaultFrame.border === '0px' && defaultFrame.value === '24px', JSON.stringify(defaultFrame))
+  const legacyStyle = await page.addStyleTag({ content: `
+    .vsidian-image-resize-glow {
+      background-image: linear-gradient(to top, red, transparent var(--vsidian-image-resize-glow));
+    }
+  ` })
+  // 重挂成 600×300 的图片后，旧选择器仍命中新的悬停层、继承短边 10% 的深度。
   await load('![[img.png|600]]')
+  await page.locator('.cm-content .vsidian-graphic-frame.vsidian-image').hover()
   const glowRatio = await glowState()
-  const shortEdge = glowRatio ? Math.min(glowRatio.frameW, glowRatio.frameH) : 0
-  const expectedGlow = Math.max(24, shortEdge * 0.1)
-  check('D8 大图光带深度 = max(24, 短边 × 10%)',
-    glowRatio !== null && shortEdge > 240 && near(glowRatio.value, expectedGlow, 2),
-    `glow=${glowRatio?.value}px 短边=${shortEdge.toFixed(1)} 期望≈${expectedGlow.toFixed(1)}`)
+  check('D8 旧片段在重挂后的相框仍能绘制自定义光带',
+    glowRatio.visible && glowRatio.value === '30px'
+      && glowRatio.backgroundImage.includes('rgb(255, 0, 0)')
+      && glowRatio.backgroundImage.includes('30px'), JSON.stringify(glowRatio))
+  await legacyStyle.evaluate((el) => el.remove())
 
   // ---- D2：等比拖动 ----
   await load('![[img.png|100]]')
@@ -156,7 +167,7 @@ try {
     `h=${duringDrag.height.toFixed(1)} expected≈${(duringDrag.width / 2).toFixed(1)}`)
   check('D9 按住时相框异色描边', duringDrag.resizing && duringDrag.frameOutline !== '0px',
     `resizing=${duringDrag.resizing} outline=${duringDrag.frameOutline}`)
-  // 光带 opacity 带 0.12s 过渡，拖动开始后等待其归零再断言（即时采样在 CI 慢机上
+  // 兼容悬停层的 opacity 带 0.12s 过渡，拖动开始后等待其归零再断言（即时采样在 CI 慢机上
   // 会落在过渡尾部拿到 0.0004 残值误报）
   let glowGone = true
   try {
@@ -165,7 +176,7 @@ try {
       return g != null && getComputedStyle(g).opacity === '0'
     }, undefined, { timeout: 2000 })
   } catch { glowGone = false }
-  check('D9 拖动中光晕消失（互斥）', glowGone, '拖动中光带 opacity 未在 2s 内过渡到 0')
+  check('D9 拖动中悬停装饰层隐藏（互斥）', glowGone, '拖动中装饰层 opacity 应过渡到 0')
   check('D2 拖动中有尺寸读数', duringDrag.readout !== null && /\d+\s*×\s*\d+/.test(duringDrag.readout),
     `readout=${JSON.stringify(duringDrag.readout)}`)
   await page.mouse.up()
