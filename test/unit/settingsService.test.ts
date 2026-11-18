@@ -43,7 +43,7 @@ function makeStorage(writes: Array<{ key: string; value: unknown }> = []): Setti
 }
 
 describe('快照读取', () => {
-it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Live 直接悬停——含悬停总开关、跳转目标提示与块内表格渲染 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + 分词引擎内置）', () => {
+  it('生产注册表：返回完整的默认设置快照', () => {
     const svc = new SettingsService(makeStorage(), PRODUCTION_SETTING_DEFINITIONS)
     expect(svc.getSnapshot()).toEqual({
       'general.language': 'auto',
@@ -100,6 +100,7 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       // #342（P3-10）外链预览两件：总开关默认关（关闭态零请求）、形态默认卡片
       'hover.externalEnabled': false,
       'hover.externalShape': 'card',
+      'hover.externalCover': false,
       // #239 中文分词三件：引擎默认内置（Intl.Segmenter）、下载源默认
       // jsdelivr、自定义源基址默认空；#630 local 源路径默认空
       'editor.wordSegmentEngine': 'builtin',
