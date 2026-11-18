@@ -18,13 +18,13 @@
 //   不重挂 widget；组合在片段外 → widget 与组合节点不同 DOM 区域）——
 //   与 liveInstance 组合门控族无交叉，无需额外冻结（推断依据：
 //   selectionTouchesRange 在组合期内恒命中已显形区间）。
-import { Facet, RangeSet, StateField, type ChangeSet, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
-import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
+import { Facet, RangeSet, StateField, type ChangeSet, type EditorState, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
+import { BlockWrapper, Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import { ViewPlugin, ViewUpdate } from '@codemirror/view'
 import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
-import { isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree, type HtmlBlockSpan } from '../shared/htmlBlock'
+import { classifyHtmlDivBlock, htmlDivWrappersOf, isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree, type HtmlBlockSpan, type HtmlDivBlock, type HtmlDivWrapper } from '../shared/htmlBlock'
 import { htmlBlockRenderHtml } from './htmlSanitize'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
 import { DocumentStyleBinding, type DocStyleResourcePort } from './docStyleLoader'
@@ -78,22 +78,22 @@ export const liveHtmlDecoCacheLimit = 64
 /** 一个 Live HTML 块（LF 全文 offset，end 不含；source 为源文全量） */
 export interface LiveHtmlSpan extends HtmlBlockSpan {
   source: string
+  div: HtmlDivBlock
 }
 
 /** 树窗口内顶层 HTMLBlock 扫描（表构建/增量重建共用） */
-function scanHtmlSpans(doc: Text, tree: Tree, from: number, to: number): LiveHtmlSpan[] {
-  const spans = topLevelHtmlBlockSpansOfTree(tree)
-    .filter((s) => s.to > from && s.from < to)
-  return spans.map((s) => ({ from: s.from, to: s.to, source: doc.sliceString(s.from, s.to) }))
-}
-
-/** 全树扫描（文档装载/resync 的全量路径） */
-function scanAllHtmlSpans(doc: Text, tree: Tree | null): LiveHtmlSpan[] {
-  if (!tree) {
-    return []
-  }
-  return topLevelHtmlBlockSpansOfTree(tree)
-    .map((s) => ({ from: s.from, to: s.to, source: doc.sliceString(s.from, s.to) }))
+function scanHtmlSpans(
+  doc: Text, tree: Tree | null, from = 0, to = doc.length, previous?: readonly LiveHtmlSpan[],
+): LiveHtmlSpan[] {
+  if (!tree) return []
+  const spans = topLevelHtmlBlockSpansOfTree(tree).filter((span) => span.to > from && span.from < to)
+  if (spans.length === 0) return []
+  const known = previous && new Map(previous.map((span) => [span.source, span.div]))
+  return spans.map((span) => {
+    const source = doc.sliceString(span.from, span.to)
+    const div = known?.get(source)
+    return { ...span, source, div: div === undefined ? classifyHtmlDivBlock(source) : div }
+  })
 }
 
 /**
@@ -190,9 +190,9 @@ export function rebuildHtmlSpans(
     return prev as LiveHtmlSpan[]
   }
   const mapped = prev.map((s) => ({
+    ...s,
     from: changes.mapPos(s.from, 1),
     to: changes.mapPos(s.to, -1),
-    source: s.source,
   }))
   for (const m of mapped) {
     if (m.to + 1 >= seedFrom && m.from <= seedTo + 1) {
@@ -207,7 +207,7 @@ export function rebuildHtmlSpans(
   }
   if (prevTree != null && tree !== prevTree && !topLevelStructureStable(changes, prevTree, tree)) {
     // 块级重分类（围栏开闭的传播影响）：窗口策略不安全——全量重扫
-    return scanAllHtmlSpans(doc, tree)
+    return scanHtmlSpans(doc, tree, 0, doc.length, prev)
   }
   const out: LiveHtmlSpan[] = []
   for (const m of mapped) {
@@ -218,7 +218,7 @@ export function rebuildHtmlSpans(
       out.push(m) // 窗口外保留（映射语义：未受变更影响的块）
     }
   }
-  out.push(...scanHtmlSpans(doc, tree, Math.max(0, seedFrom), Math.min(doc.length, seedTo)))
+  out.push(...scanHtmlSpans(doc, tree, Math.max(0, seedFrom), Math.min(doc.length, seedTo), prev))
   out.sort((a, b) => a.from - b.from)
   return out
 }
@@ -227,23 +227,45 @@ export function rebuildHtmlSpans(
  *  重建；纯选区移动零成本。树取自 liveDecorationsField（装配序在其后） */
 export const liveHtmlSpansField = StateField.define<readonly LiveHtmlSpan[]>({
   create(state) {
-    return scanAllHtmlSpans(state.doc, state.field(liveDecorationsField, false)?.tree ?? null)
+    return scanHtmlSpans(state.doc, state.field(liveDecorationsField, false)?.tree ?? null)
   },
   update(value, tr) {
-    const treeChanged =
-      tr.startState.field(liveDecorationsField, false) !== tr.state.field(liveDecorationsField, false)
-    if (!tr.docChanged && !treeChanged) {
-      return value
+    const prevTree = tr.startState.field(liveDecorationsField, false)?.tree ?? null
+    const tree = tr.state.field(liveDecorationsField, false)?.tree ?? null
+    if (!tr.docChanged) {
+      // 装饰状态会随光标变动；只有实际语法树推进时才重扫块表。
+      return tree === prevTree ? value : scanHtmlSpans(tr.state.doc, tree, 0, tr.state.doc.length, value)
     }
-    if (!tr.docChanged && treeChanged) {
-      // 树推进（解析追上文档）：全树重扫对齐（低频路径——resync/装载）
-      return scanAllHtmlSpans(tr.state.doc, tr.state.field(liveDecorationsField, false)?.tree ?? null)
-    }
-    return rebuildHtmlSpans(tr.state.doc, tr, value,
-      tr.state.field(liveDecorationsField, false)?.tree ?? null,
-      tr.startState.field(liveDecorationsField, false)?.tree ?? null)
+    return rebuildHtmlSpans(tr.state.doc, tr, value, tree, prevTree)
   },
 })
+
+function divWrappersIn(state: EditorState): ReadonlyMap<number, HtmlDivWrapper> {
+  const from = state.field(liveDecorationsField, false)?.fm?.end ?? 0
+  return htmlDivWrappersOf(state.field(liveHtmlSpansField).filter((span) => span.from >= from))
+}
+
+const liveHtmlDivs = StateField.define<ReadonlyMap<number, HtmlDivWrapper>>({
+  create: divWrappersIn,
+  update(value, tr) {
+    return tr.startState.field(liveHtmlSpansField) === tr.state.field(liveHtmlSpansField)
+      ? value : divWrappersIn(tr.state)
+  },
+  provide: (field) => EditorView.blockWrappers.compute([field, 'doc'], (state) => {
+    const ranges: Array<Range<BlockWrapper>> = []
+    for (const [pos, wrapper] of state.field(field)) {
+      if (pos === wrapper.open && wrapper.align !== undefined) {
+        ranges.push(BlockWrapper.create({ tagName: 'div', attributes: { align: wrapper.align } }).range(
+          state.doc.lineAt(pos).to + 1,
+          state.doc.lineAt(wrapper.close).from,
+        ))
+      }
+    }
+    return BlockWrapper.set(ranges, true)
+  }),
+})
+
+const hideHtmlDivTag = Decoration.replace({})
 
 /** 文档身份标记（T01 探针 b2 隔离基座）：根正文注入 'doc'，嵌入内部
  *  Live 的目标身份键随 T04 装载器接线；缺省不挂标记 */
@@ -294,6 +316,7 @@ export function buildLiveHtmlDecorationRanges(
   fm: { end: number } | null,
   docScope: string | null,
   hits: readonly HitRange[] = [],
+  divs?: ReadonlyMap<number, HtmlDivWrapper>,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const span of spans) {
@@ -306,7 +329,8 @@ export function buildLiveHtmlDecorationRanges(
     const touched = selectionTouchesRange(selection, span.from, span.to) ||
       hitIntersectsRange(hits, span.from, span.to)
     if (!touched) {
-      out.push(liveHtmlWidgetDeco(span.source, span.from, span.to, docScope).range(span.from, span.to))
+      const deco = divs?.has(span.from) ? hideHtmlDivTag : liveHtmlWidgetDeco(span.source, span.from, span.to, docScope)
+      out.push(deco.range(span.from, span.to))
     }
   }
   return out
@@ -474,6 +498,7 @@ export const liveHtmlDecorations = StateField.define<DecorationSet>({
         deco.fm,
         state.facet(liveHtmlDocScopeFacet),
         hitRangesOf(state),
+        state.field(liveHtmlDivs, false),
       ),
       true,
     )
@@ -499,6 +524,7 @@ export const liveHtmlDecorations = StateField.define<DecorationSet>({
         deco.fm,
         tr.state.facet(liveHtmlDocScopeFacet),
         hitRangesOf(tr.state),
+        tr.state.field(liveHtmlDivs, false),
       ),
       true,
     )
@@ -569,6 +595,7 @@ export function revealHtmlSourceAtCursor(view: EditorView): boolean {
  *  liveEmbed 之后同组；docScope 由视图装配层经 liveHtmlDocScope 注入） */
 export const liveHtml: Extension = [
   liveHtmlSpansField,
+  liveHtmlDivs,
   liveHtmlDecorations,
   EditorView.domEventHandlers({ mousedown: htmlWidgetMousedown }),
 ]

@@ -167,7 +167,7 @@ function rangeIndices(w: MountWindow): number[] {
 
 /**
  * 源 offset → 块索引：与 readingBlocks.blockForOffset 同语义（floor）——
- * 落在块内返回该块；缝隙返回前一块；越界 clamp 到末块；空序列 null。
+ * 落在块内返回该块；缝隙返回前一块；越界取最近的首块或末块；空序列 null。
  * 虚拟化下目标块可能未挂载（屏外）：此映射不依赖 DOM，供标题跳转定位。
  */
 export function blockIndexForOffset(
@@ -189,7 +189,7 @@ export function blockIndexForOffset(
       break
     }
   }
-  return result ?? blocks.length - 1
+  return result ?? 0
 }
 
 /**

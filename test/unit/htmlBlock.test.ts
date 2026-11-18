@@ -6,11 +6,12 @@
 // 嵌套范围」）。边界矩阵覆盖：嵌套、空行终止、未闭合、代码上下文排除、
 // 注释基线差异（Reading 是解析前字符串级剥离——隐性既定差异，按基线
 // 钉住不随手统一）、类型 7 与段落打断、容器（引用/列表）内降级为源码。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { Text } from '@codemirror/state'
 import { docInput, markdownTreeParser } from '../../src/shared/markdownDoc'
-import { isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree } from '../../src/shared/htmlBlock'
+import { classifyHtmlDivBlock, htmlDivWrappersOf, isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree } from '../../src/shared/htmlBlock'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
+import { renderReadingBlocks } from '../../src/webview/readingView'
 import { visitRange } from '../../src/shared/markdownDoc'
 import type { SyntaxNode } from '@lezer/common'
 import type { Tree } from '@lezer/common'
@@ -117,6 +118,85 @@ describe('isPureStyleHtmlBlock：纯 <style> 块判定（Q6A——Live 源码常
 
   it('未闭合 style 不命中（保守：按普通 html 块走渲染降级路径）', () => {
     expect(isPureStyleHtmlBlock('<style>a{}')).toBe(false)
+  })
+})
+
+describe('空行分隔的 div 包裹', () => {
+  it('只消费顶层配对标记，内层对齐覆盖外层，围栏里的闭标签不参与配对', () => {
+    const text = [
+      '<DIV ALIGN = center>', '', '# Heading', '', '<div align="right">', '', 'Nested', '',
+      '```html', '</div>', '```', '', '</DIV>', '', '<div>', '', 'Inherited', '', '</div>', '',
+      '/after nested/', '', '</div>', '', 'Outside',
+    ].join('\n')
+    const container = document.createElement('div')
+    renderReadingBlocks(container, text)
+    const blocks = [...container.children].map((block) => [block.textContent!.trim(), block.getAttribute('align')])
+    expect(blocks).toEqual([
+      ['Heading', 'center'], ['Nested', 'right'], ['</div>', 'right'], ['Inherited', 'center'],
+      ['/after nested/', 'center'], ['Outside', null],
+    ])
+  })
+
+  it('未闭合的外壳不改变后文，完整原生 div 块继续走 HTML 渲染', () => {
+    const text = '<div align="center">\n\n# Outside\n\n<div align="right">Native</div>'
+    const container = document.createElement('div')
+    renderReadingBlocks(container, text)
+    expect(container.querySelector('h1')!.parentElement!.hasAttribute('align')).toBe(false)
+    expect(container.querySelector('div[align="right"]')!.textContent).toBe('Native')
+  })
+
+  it('完整的多行原生 div 内块不打断外壳；不从残缺原生块抢闭标签', () => {
+    const wrap = (inner: string) => `<div align="center">\n\n${inner}\n\n# Heading\n\n</div>`
+    const container = document.createElement('div')
+    renderReadingBlocks(container, wrap('<div>\n  <p>Native</p>\n</div>'))
+    expect(container.querySelector('h1')!.parentElement!.getAttribute('align')).toBe('center')
+    expect(container.querySelector('.vsidian-reading-html > div > p')!.textContent).toBe('Native')
+
+    for (const inner of ['<section><div>Native', '<div id=', '<div>Native<!-- </div>']) {
+      renderReadingBlocks(container, wrap(inner))
+      expect(container.querySelector('h1')!.parentElement!.hasAttribute('align'), inner).toBe(false)
+      const fallbacks = [...container.querySelectorAll('.vsidian-html-source-fallback')]
+      expect(fallbacks.at(-1)?.textContent?.trim(), inner).toBe('</div>')
+    }
+  })
+
+  it.each([
+    '<div>甲</div>\n<div>乙</div>',
+    '<div>甲</div>\n<!-- <div> -->\n<div>乙</div>',
+    '<div\n title="<div>"><textarea><div></textarea>甲</div>\n<div>乙</div>',
+    '<div><svg><title/></svg></div>\n<div>乙</div>',
+  ])('完整的兄弟原生元素保留外壳配对：%j', (inner) => {
+    const text = `<div align="center">\n\n${inner}\n\n# Heading\n\n</div>`
+    const spans = lezerHtmlSpans(text)
+    expect(htmlDivWrappersOf(spans.map(({ from, to }) => ({ from, div: classifyHtmlDivBlock(text.slice(from, to)) }))).size).toBe(2)
+    const blocks = splitReadingBlocks(text)
+    expect(blocks.find((block) => block.kind === 'heading')?.htmlAlign).toBe('center')
+    expect(blocks.filter((block) => block.kind === 'html').map((block) => block.html).join('')).toContain('<div>乙</div>')
+  })
+
+  it('剥离注释产生的空行不让原本不独立的标签参与阅读配对', () => {
+    const text = '<div align="center">\n<!-- between -->\n# Heading\n\n</div>'
+    const spans = lezerHtmlSpans(text)
+    expect(htmlDivWrappersOf(spans.map(({ from, to }) => ({ from, div: classifyHtmlDivBlock(text.slice(from, to)) }))).size).toBe(0)
+    const blocks = splitReadingBlocks(text)
+    expect(blocks.find((block) => block.kind === 'heading')?.htmlAlign).toBeUndefined()
+    expect(blocks.at(-1)?.html).toContain('&lt;/div&gt;')
+  })
+
+  it.each(['</div>\u00a0', '</div\f>'])('阅读预筛不漏掉可配对的闭标签空白：%j', (close) => {
+    const text = `<div align="center">\n\n# Heading\n\n${close}`
+    expect(splitReadingBlocks(text).find((block) => block.kind === 'heading')?.htmlAlign).toBe('center')
+  })
+
+  it('只有完整的原生块和普通正文时，不为外壳额外解析原文树', () => {
+    const parse = vi.spyOn(markdownTreeParser, 'parse')
+    try {
+      const blocks = splitReadingBlocks('<div class="native">\n<p>Intro</p>\n</div>\n\n# Heading')
+      expect(blocks.map((block) => block.kind)).toEqual(['html', 'heading'])
+      expect(parse).not.toHaveBeenCalled()
+    } finally {
+      parse.mockRestore()
+    }
   })
 })
 

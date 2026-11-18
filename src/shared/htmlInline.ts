@@ -88,8 +88,8 @@ export const HTML_VOID_TAG_NAMES: ReadonlySet<string> = new Set([
 const TAG_NAME_RE = /^[A-Za-z][A-Za-z0-9-]*/
 /** 属性名（HTML 语法：字母/下划线/冒号开头） */
 const ATTR_NAME_RE = /^[A-Za-z_:][A-Za-z0-9_.:-]*/
-/** 标签与属性之间的空白（不含换行——单行成型边界） */
-const ATTR_WS_RE = /[ \t]*/
+/** HTML 标签内的空白；行内调用方以行尾为扫描上界。 */
+const ATTR_WS_RE = /[ \t\n\r\f]*/
 /** 声明产物的名字（HTML 语法：大写字母序列） */
 const DECL_NAME_RE = /^<![A-Z]+/
 /** 需要扩窗的相关字符（`<` 或反引号——跨行状态与片段成型的唯一入口） */
@@ -166,7 +166,7 @@ export function matchHtmlTagAt(
         }
         i = closeQuote + 1
       } else {
-        const valueMatch = /^[^ \t\n"'=<>`]+/.exec(src.slice(j, limit))
+        const valueMatch = /^[^ \t\n\r\f"'=<>`]+/.exec(src.slice(j, limit))
         if (valueMatch === null) {
           return null
         }
@@ -241,7 +241,7 @@ export function matchInlineHtmlFragmentAt(src: string, pos: number): number | nu
  * 扫描继续——与 markdown-it 该处规则失败后的继续语义一致）。limit 为
  * 容器末端（这些 token 与 code span 一样可跨行）。
  */
-function matchRawHtmlNonElementAt(src: string, pos: number, limit: number): number | null {
+export function matchRawHtmlNonElementAt(src: string, pos: number, limit: number): number | null {
   if (pos + 1 >= limit || src[pos] !== '<') {
     return null
   }

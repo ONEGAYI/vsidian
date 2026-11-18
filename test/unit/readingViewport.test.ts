@@ -20,7 +20,7 @@ import {
   recalibrate,
   type MountWindow,
 } from '../../src/webview/readingViewport'
-import { splitReadingBlocks, type ReadingBlock } from '../../src/webview/readingBlocks'
+import { blockForOffset, splitReadingBlocks, type ReadingBlock } from '../../src/webview/readingBlocks'
 
 /** 生成 n 个单行段落块（空行分隔），每块源区间已知 */
 function paragraphBlocks(n: number): { text: string; blocks: ReadingBlock[] } {
@@ -186,10 +186,13 @@ describe('blockIndexForOffset：源 offset → 块索引（floor 语义）', () 
     expect(blockIndexForOffset(blocks, gap)).toBe(1)
   })
 
-  it('越界 clamp：超过末块返回末索引；空序列返回 null', () => {
+  it('越界 clamp：首块前返回首索引，超过末块返回末索引；空序列返回 null', () => {
     const { text, blocks } = paragraphBlocks(3)
     expect(blockIndexForOffset(blocks, text.length + 100)).toBe(blocks.length - 1)
     expect(blockIndexForOffset(blocks, 0)).toBe(0)
+    const afterBlank = splitReadingBlocks('\n\nFirst\n\nLast')
+    expect(blockIndexForOffset(afterBlank, 0)).toBe(0)
+    expect(blockForOffset(afterBlank, 0)).toBe(afterBlank[0])
     expect(blockIndexForOffset([], 0)).toBeNull()
   })
 })

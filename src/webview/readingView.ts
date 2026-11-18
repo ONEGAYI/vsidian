@@ -139,6 +139,7 @@ function blockClassNames(block: ReadingBlock): string[] {
 export function createReadingBlockElement(block: ReadingBlock, text: string, docScope?: string): HTMLElement {
   const el = document.createElement('div')
   el.className = blockClassNames(block).join(' ')
+  if (block.htmlAlign !== undefined) el.setAttribute('align', block.htmlAlign)
   el.dataset['vsidianSrcStart'] = String(block.start)
   el.dataset['vsidianSrcEnd'] = String(block.end)
   if (docScope !== undefined) {
