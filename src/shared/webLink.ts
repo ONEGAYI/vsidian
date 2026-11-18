@@ -22,6 +22,27 @@ export type WebLinkFailReason = Extract<
   'web-disabled' | 'web-invalid-address' | 'web-timeout' | 'web-too-large' | 'web-not-html' | 'web-redirects' | 'web-unreachable'
 >
 
+/** 站点图标与封面的请求、消息校验共享格式和大小边界。 */
+export const WEB_PREVIEW_IMAGES: Record<'icon' | 'cover', {
+  mimeTypes: readonly string[]
+  maxBytes: number
+  timeoutMs: number
+}> = {
+  icon: { mimeTypes: ['image/svg+xml', 'image/png', 'image/x-icon', 'image/vnd.microsoft.icon'], maxBytes: 32 * 1024, timeoutMs: 600 },
+  cover: { mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/avif'], maxBytes: 512 * 1024, timeoutMs: 1_500 },
+}
+
+export function isWebPreviewImageSrc(value: unknown, kind: keyof typeof WEB_PREVIEW_IMAGES): value is string {
+  if (typeof value !== 'string') return false
+  const { maxBytes, mimeTypes } = WEB_PREVIEW_IMAGES[kind]
+  const comma = value.indexOf(',')
+  if (!mimeTypes.some((mime) => value.slice(0, comma) === `data:${mime};base64`)) return false
+  const data = value.slice(comma + 1)
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
+  return data.length > 0 && data.length / 4 * 3 - padding <= maxBytes &&
+    data.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(data)
+}
+
 // ---- #343（P3-11）原网页形态 iframe 嵌入预检（纯逻辑，宿主抓取层消费） ----
 
 /** 预检拒绝原因：denied = 站点以 X-Frame-Options / frame-ancestors 明确

@@ -5610,41 +5610,94 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 /* ---- #342（P3-10）外链卡片内容视图（web 通道；样式契约 hover-popup 条目
    子结构追加）：宿主受限抓取的元信息——标题/摘要纯文字（textContent 赋
    值，无 HTML 注入面）+ 域名安全链接（唯一可点元素，点击经 link.activate
-   外开浏览器）。挂在浮层 Reading 容器内（正文留白 10/14 已有，卡片只做
-   行距组织）；错误/加载态沿用既有状态行 ---- */
+   外开浏览器）。站点链接保留在卡片 DOM，定位到共享标题条左侧，与右侧
+   打开入口同一行；封面、标题和摘要正常随滚动区滚动。 ---- */
 
-#app > .vsidian-hover-popup .vsidian-hover-web-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 4px 2px;
+:where(#app > .vsidian-hover-popup:has(.vsidian-hover-web-card)) {
+  --_vsidian-web-card-header-size: 40px;
 }
 
-/* 标题：主题前景色与内容字体加粗强调（无标题时由 JS 以域名兜底填充） */
-#app > .vsidian-hover-popup .vsidian-hover-web-title {
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-open-label),
+:where(#app > .vsidian-hover-popup:has(.vsidian-hover-web-card) .vsidian-hover-popup-title),
+#app > .vsidian-hover-popup:has(.vsidian-hover-web-card) .vsidian-hover-popup-mode,
+#app > .vsidian-hover-popup:has(.vsidian-hover-web-card) .vsidian-hover-popup-scroll > .vsidian-view-reading {
+  display: none;
+}
+
+:where(#app > .vsidian-hover-popup:has(.vsidian-hover-web-card) .vsidian-hover-web-open-label) {
+  display: inline;
+}
+
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-card) {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-block: 0 16px;
+}
+
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-cover) {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 1;
+  object-fit: cover;
+}
+
+/* 标题：主题前景色加粗强调（无标题时由 JS 以域名兜底填充） */
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-title) {
+  margin: 16px 16px 0;
+  font-size: 1.2em;
   font-weight: 600;
+  line-height: 1.35;
   color: var(--vscode-editor-foreground, inherit);
   overflow-wrap: anywhere;
 }
 
 /* 摘要：描述色次级文字（长 URL/长词不断溢——anywhere 折行） */
-#app > .vsidian-hover-popup .vsidian-hover-web-desc {
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-desc) {
+  margin: 6px 16px 0;
   color: var(--vscode-descriptionForeground, inherit);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 /* 域名链接：主题链接色 + hover/focus 下划线（显式安全链接的可见可点性） */
-#app > .vsidian-hover-popup .vsidian-hover-web-domain {
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-domain) {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-inline-size: calc(100% - 112px);
+  height: calc(var(--_vsidian-web-card-header-size) - 1px);
   color: var(--vscode-textLink-foreground, #3794ff);
   text-decoration: none;
   font-size: 0.9em;
   overflow-wrap: anywhere;
-  align-self: flex-start;
 }
 
-#app > .vsidian-hover-popup .vsidian-hover-web-domain:hover,
-#app > .vsidian-hover-popup .vsidian-hover-web-domain:focus-visible {
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-icon) {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-icon > :is(img, svg)) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-domain-name) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-domain:hover),
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-domain:focus-visible) {
   text-decoration: underline;
 }
 
@@ -5815,7 +5868,8 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 
 /* 自动退回原因行（卡片内）：主题错误色——与浮层错误分态同源的可见性
    保障（明暗/高对比主题下错误色由宿主主题定义，实际可读） */
-#app > .vsidian-hover-popup .vsidian-hover-web-reason {
+:where(#app > .vsidian-hover-popup .vsidian-hover-web-reason) {
+  margin: 8px 16px 0;
   color: var(--vscode-errorForeground, #f14c4c);
   font-size: 0.85em;
   line-height: 1.5;
@@ -5927,7 +5981,7 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 /* 顶部栏：文件名居左、打开入口居右（#217 验收反馈：去底色融入白底，
    保留下分隔线区分文件名与内容；验收跟进：悬停浮层同款 header 并列，
    浮层选择器置首、嵌入既有选择器置尾保持契约 endsWith 匹配） */
-#app > .vsidian-hover-popup .vsidian-hover-popup-header,
+:where(#app > .vsidian-hover-popup .vsidian-hover-popup-header),
 #app .vsidian-embed-card .vsidian-embed-card-header {
   display: flex;
   align-items: center;
@@ -5946,7 +6000,7 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 }
 
 /* 右上角跳转目标文档入口：图标按钮（沿用现有 Vsidian 打开行为） */
-#app > .vsidian-hover-popup .vsidian-hover-popup-open,
+:where(#app > .vsidian-hover-popup .vsidian-hover-popup-open),
 #app .vsidian-embed-card .vsidian-embed-card-open {
   display: inline-flex;
   align-items: center;
@@ -5961,6 +6015,20 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   background: transparent;
   color: var(--vscode-icon-foreground, inherit);
   cursor: pointer;
+}
+
+/* 卡片状态在共享默认值之后，二者都不压过用户的裸类片段。 */
+:where(#app > .vsidian-hover-popup:has(.vsidian-hover-web-card) .vsidian-hover-popup-header) {
+  box-sizing: border-box;
+  min-height: var(--_vsidian-web-card-header-size);
+  padding-inline: 16px;
+}
+
+:where(#app > .vsidian-hover-popup:has(.vsidian-hover-web-card) .vsidian-hover-popup-open) {
+  width: auto;
+  gap: 4px;
+  padding-inline: 4px;
+  color: var(--vscode-editor-foreground);
 }
 
 #app > .vsidian-hover-popup .vsidian-hover-popup-open:hover,

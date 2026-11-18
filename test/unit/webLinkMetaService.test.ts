@@ -8,7 +8,7 @@
 // 换址用例用 localhost 主机名 + 生产矩阵（lookup 层拦截、服务器零连接），
 // 私网矩阵本身在 webLinkUrl.test 已钉。
 import http from 'node:http'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { WebLinkMetaService, WEB_LINK_LIMITS } from '../../src/host/webLinkMetaService'
 import { canonicalWebLinkUrl, checkWebLinkUrl, type WebLinkUrlCheck } from '../../src/shared/webLink'
 
@@ -161,6 +161,145 @@ describe('WebLinkMetaService 触发与成功路径', () => {
   it('服务构造后零请求（不自动预抓；打开文档/扫描链接/滚动不触发）', () => {
     makeService()
     expect(ctx.hits.length).toBe(0)
+  })
+
+  it('不打开封面也能展示网页声明的站点图标，优先 SVG', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle r="8" cx="8" cy="8"/></svg>'
+    const server = await startServer((req, res) => {
+      if (req.url === '/article') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+          .end('<link rel="shortcut icon" href="/favicon.ico"><link rel="icon" type="image/svg+xml" href="./site.svg"><meta property="og:image" content="/cover">')
+      } else {
+        res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(svg)
+      }
+    })
+    const result = await makeService().fetch(`http://127.0.0.1:${server.port}/article`)
+    expect(result).toMatchObject({ ok: true, meta: { iconSrc: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` } })
+    expect(result).not.toHaveProperty('meta.coverSrc')
+    expect(server.hits).toEqual(['/article', '/site.svg'])
+  })
+
+  it('封面需单独开启：只取网页声明的配图，经重定向后以内联图片返回，不串入文字缓存', async () => {
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aC1sAAAAASUVORK5CYII='
+    const server = await startServer((req, res) => {
+      if (req.url === '/article') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end('<title>Article</title><meta property="og:image" content="./cover"><img src="/other">')
+      } else if (req.url === '/cover') {
+        expect(req.headers.cookie).toBeUndefined()
+        expect(req.headers.referer).toBeUndefined()
+        res.writeHead(302, { location: '/cover.png' }).end()
+      } else {
+        res.writeHead(200, { 'content-type': 'image/png' }).end(Buffer.from(png, 'base64'))
+      }
+    })
+    const pageUrl = `http://127.0.0.1:${server.port}/article`
+    const service = makeService()
+    expect(await service.fetch(pageUrl)).toMatchObject({ ok: true, meta: { title: 'Article' } })
+    expect(server.hits).toEqual(['/article'])
+    const withCover = await service.fetch(pageUrl, undefined, 'card', true)
+    expect(withCover).toMatchObject({ ok: true, meta: { title: 'Article', coverSrc: `data:image/png;base64,${png}` } })
+    expect(server.hits).toEqual(['/article', '/article', '/cover', '/cover.png'])
+    expect(await service.fetch(pageUrl, undefined, 'card', true)).toEqual(withCover)
+    expect(await service.fetch(pageUrl)).not.toHaveProperty('meta.coverSrc')
+    expect(server.hits).toHaveLength(4)
+  })
+
+  it.each(['/denied', '/wrong-type', '/oversize', '/empty', '/timeout'])('配图请求 %s 失败时保留标题和摘要', async (coverPath) => {
+    const server = await startServer((req, res) => {
+      if (req.url === '/article') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end(`<title>Article</title><meta name="description" content="Summary"><meta name="twitter:image" content="${coverPath}">`)
+      } else if (req.url === '/denied') {
+        res.writeHead(302, { location: 'http://192.168.1.8/cover.png' }).end()
+      } else if (req.url === '/wrong-type') {
+        res.writeHead(200, { 'content-type': 'image/svg+xml' }).end('<svg/>')
+      } else if (req.url === '/oversize') {
+        res.writeHead(200, { 'content-type': 'image/png', 'content-length': '800000' }).end()
+      } else if (req.url === '/empty') {
+        res.writeHead(200, { 'content-type': 'image/png' }).end()
+      }
+    })
+    const service = makeService({ timeoutMs: 250 })
+    const result = await service.fetch(`http://127.0.0.1:${server.port}/article`, undefined, 'card', true)
+    expect(server.hits).toEqual(['/article', coverPath])
+    expect(result).toMatchObject({ ok: true, meta: { title: 'Article', description: 'Summary' } })
+    expect(result).not.toHaveProperty('meta.coverSrc')
+  })
+
+  it('关闭封面中断在途图片请求，卡片仍返回已读到的文字', async () => {
+    let startCover!: () => void
+    let closeCover!: () => void
+    const coverStarted = new Promise<void>((resolve) => { startCover = resolve })
+    const coverClosed = new Promise<void>((resolve) => { closeCover = resolve })
+    const server = await startServer((req, res) => {
+      if (req.url === '/article') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+          .end('<title>Article</title><meta property="og:image" content="/cover">')
+      } else {
+        res.on('close', closeCover)
+        res.writeHead(200, { 'content-type': 'image/png' }).write('partial')
+        startCover()
+      }
+    })
+    const service = makeService()
+    const pending = service.fetch(`http://127.0.0.1:${server.port}/article`, undefined, 'card', true)
+    await coverStarted
+    service.cancelCovers()
+    const result = await pending
+    await coverClosed
+    expect(result).toMatchObject({ ok: true, meta: { title: 'Article' } })
+    expect(result).not.toHaveProperty('meta.coverSrc')
+  })
+
+  it('关闭再开启封面时，同地址的新悬停不复用已停止配图的旧请求', async () => {
+    let respondFirst!: () => void
+    let firstStarted!: () => void
+    const started = new Promise<void>((resolve) => { firstStarted = resolve })
+    let articleCount = 0
+    const server = await startServer((req, res) => {
+      if (req.url === '/article') {
+        const respond = () => res.writeHead(200, { 'content-type': 'text/html' })
+          .end('<title>Article</title><meta property="og:image" content="/cover">')
+        if (++articleCount === 1) {
+          respondFirst = respond
+          firstStarted()
+        } else {
+          respond()
+        }
+      } else {
+        res.writeHead(200, { 'content-type': 'image/png' }).end('preview')
+      }
+    })
+    const service = makeService()
+    const page = `http://127.0.0.1:${server.port}/article`
+    const first = service.fetch(page, undefined, 'card', true)
+    await started
+    service.cancelCovers()
+    const next = service.fetch(page, undefined, 'card', true)
+    respondFirst()
+    expect(await first).not.toHaveProperty('meta.coverSrc')
+    expect(await next).toMatchObject({ ok: true, meta: { coverSrc: 'data:image/png;base64,cHJldmlldw==' } })
+    expect(server.hits).toEqual(['/article', '/article', '/cover'])
+  })
+
+  it('配图失败日志不记录页面声明地址中的私有路径或查询串', async () => {
+    const server = await startServer((req, res) => {
+      if (req.url === '/article') {
+        res.writeHead(200, { 'content-type': 'text/html' })
+          .end('<meta property="og:image" content="/asset/private-image?signature=demo">')
+      } else {
+        res.writeHead(404).end()
+      }
+    })
+    const warn = vi.spyOn(console, 'warn')
+    try {
+      await makeService().fetch(`http://127.0.0.1:${server.port}/article`, undefined, 'card', true)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('HTTP 404'))
+      expect(warn).not.toHaveBeenCalledWith(expect.stringMatching(/private-image|signature=/))
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('成功提取 title/description 与最终域名', async () => {
@@ -336,6 +475,12 @@ beforeAll(async () => {
       }
       res.writeHead(200, headers)
       res.end(PAGE)
+    } else if (u === '/page-with-images' || u === '/denied-with-images') {
+      const headers: Record<string, string> = { 'content-type': 'text/html' }
+      if (u === '/denied-with-images') headers['x-frame-options'] = 'DENY'
+      res.writeHead(200, headers).end('<title>Article</title><link rel="icon" href="/icon.svg"><meta property="og:image" content="/cover.png">')
+    } else if (u === '/icon.svg' || u === '/cover.png') {
+      res.writeHead(200, { 'content-type': u === '/icon.svg' ? 'image/svg+xml' : 'image/png' }).end('test')
     } else if (u === '/xfo-deny') {
       res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' })
       res.end(PAGE)
@@ -370,6 +515,18 @@ beforeAll(async () => {
 })
 
 describe('WebLinkMetaService page 形态嵌入预检（#343）', () => {
+  it('原网页只做嵌入预检，确定退回卡片后才读取卡片图片', async () => {
+    const before = tls.hits.length
+    const service = makeService()
+    const page = await service.fetch(tls.tlsUrl('/page-with-images'), undefined, 'page', true)
+    expect(page).toMatchObject({ ok: true, meta: { frame: { embeddable: true } } })
+    expect(tls.hits.slice(before)).toEqual(['/page-with-images'])
+    const denied = await service.fetch(tls.tlsUrl('/denied-with-images'), undefined, 'page', true)
+    expect(denied).toMatchObject({ ok: true, meta: { frame: { embeddable: false },
+      iconSrc: 'data:image/svg+xml;base64,dGVzdA==', coverSrc: 'data:image/png;base64,dGVzdA==' } })
+    expect(tls.hits.slice(before + 1)).toEqual(['/denied-with-images', '/icon.svg', '/cover.png'])
+  })
+
   it('无拒绝头的 https 页面 → embeddable=true（已知头未拒绝）', async () => {
     const service = makeService()
     const outcome = await service.fetch(tls.tlsUrl('/ok'), undefined, 'page')
@@ -669,7 +826,6 @@ describe('WebLinkMetaService 默认参数契约（报告参数表的钉子）', 
 // 人工待验第 7 条。
 import net from 'node:net'
 import type { Duplex } from 'node:stream'
-import { vi } from 'vitest'
 import type { ProxyDecision, ProxyTarget } from '../../src/host/proxyAgent'
 
 interface ProxyConnectRecord {

@@ -82,7 +82,7 @@ import type { RefWebContent } from '../shared/refContent'
 // #337（P3-05）PDF 悬停渲染视图
 import { PdfHoverView, pdfErrorText, type PdfRenderProbe } from './pdfRender'
 // #343（P3-11）外链原网页浮层设置联动键
-import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type SettingsPayload } from '../shared/settings'
+import { HOVER_EXTERNAL_COVER_KEY, HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type SettingsPayload } from '../shared/settings'
 // #299 跳转目标提示联动：浮层打开路径收起提示（「浮层开则提示关」，
 // 含悬停中补按 Ctrl 的立即消失——不进互斥锁的行为面表达）
 import { closeTargetTip } from './targetTip'
@@ -350,6 +350,7 @@ interface HoverPopupState {
    *  RefContentInstance/watch/租约链路）。#343（P3-11）：frame 预检
    *  embeddable 时 webView 在场（原网页 iframe 视图；退回后置 null） */
   webMeta: RefWebContent | null
+  webCoverSuppressed: boolean
   /** #337 PDF 形态在场标记（openPopup 按扩展名预判；只读内容无 P2-06
    *  根会话——Live chrome 不显示） */
   pdfForm: boolean
@@ -985,6 +986,10 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   openBtn.setAttribute('aria-label', openLabel)
   openBtn.setAttribute('data-tooltip', openLabel)
   openBtn.innerHTML = OPEN_ICON
+  const webOpenLabel = document.createElement('span')
+  webOpenLabel.className = 'vsidian-hover-web-open-label'
+  webOpenLabel.textContent = t('hover.webOpen')
+  openBtn.prepend(webOpenLabel)
   headerActions.appendChild(saveBtn)
   headerActions.appendChild(webFallbackBtn)
   headerActions.appendChild(modeBtn)
@@ -1135,6 +1140,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     display: 'loading',
     note: '',
     webMeta: null,
+    webCoverSuppressed: false,
     webView: null,
     webFallbackBtn,
     webPageSuppressed: false,
@@ -1725,11 +1731,12 @@ function mountWebCard(state: HoverPopupState, reason?: 'denied' | 'http'): void 
   if (meta === null) {
     return
   }
-  const card = buildWebCardEl(meta)
+  const card = buildWebCardEl(meta, !state.webCoverSuppressed, state.spec.linkHref ?? meta.url)
   if (reason !== undefined) {
     appendWebCardFallbackReason(card, reason)
   }
   state.scrollEl.appendChild(card)
+  position(state)
 }
 
 /** #343（P3-11）手动退回卡片：销毁 iframe 视图换卡片呈现。只动当前
@@ -1738,7 +1745,6 @@ function mountWebCard(state: HoverPopupState, reason?: 'denied' | 'http'): void 
 function fallbackToWebCard(state: HoverPopupState): void {
   teardownWebView(state)
   mountWebCard(state)
-  position(state)
   armJointDomainRecheck(state)
 }
 
@@ -1798,6 +1804,11 @@ export function notifyHoverExternalSettings(values: SettingsPayload): void {
   }
   const enabledOff = values[HOVER_EXTERNAL_ENABLED_KEY] === false
   const shapeToCard = values[HOVER_EXTERNAL_SHAPE_KEY] === 'card'
+  const coverOff = values[HOVER_EXTERNAL_COVER_KEY] === false
+  if (enabledOff || coverOff) {
+    state.webCoverSuppressed = true
+    state.scrollEl.querySelector(`.${WEB_CARD_CLASS_NAMES.cover}`)?.remove()
+  }
   if (enabledOff || shapeToCard) {
     // 装载中（webView 尚未装配）同样置抑制——迟到的 page 形态载荷就地
     // 退卡片，不在设置已变更后挂出 iframe

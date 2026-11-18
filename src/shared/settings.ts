@@ -419,6 +419,9 @@ export const HOVER_EXTERNAL_ENABLED_KEY = 'hover.externalEnabled'
 /** 默认 false：外链抓取是显式开启的联网能力（P3-U10 用户自控） */
 export const HOVER_EXTERNAL_ENABLED_DEFAULT = false
 
+/** 网页声明的封面会额外请求图片地址；独立选择加入。 */
+export const HOVER_EXTERNAL_COVER_KEY = 'hover.externalCover'
+
 /**
  * #342（P3-10）「外链预览形态」：card = 标题摘要域名卡片；page = 原网页
  * 浮层（#343/P3-11 起真实生效——宿主抓取附带 X-Frame-Options /
@@ -819,6 +822,14 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
       card: 'setting.hoverExternalShapeCard',
       page: 'setting.hoverExternalShapePage',
     },
+  },
+  {
+    key: HOVER_EXTERNAL_COVER_KEY,
+    type: 'boolean',
+    default: false,
+    titleKey: 'setting.hoverExternalCover.title',
+    descriptionKey: 'setting.hoverExternalCover.description',
+    dependsOn: HOVER_EXTERNAL_ENABLED_KEY,
   },
   {
     // #244 嵌入展开层级（embed.* 域 → 设置页「文件与链接」分页「引用视图」组：

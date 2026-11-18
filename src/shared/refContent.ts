@@ -171,6 +171,10 @@ export interface RefWebContent {
   domain: string
   title: string
   description: string
+  /** 已经宿主抓取的位图数据 URL；不包含可再次联网的图片地址。 */
+  coverSrc?: string
+  /** 网页声明的站点图标数据 URL，只在 img 中使用。 */
+  iconSrc?: string
   /** #343 page 形态 iframe 嵌入预检（宿主最终响应判定；判据见
    *  shared/webLink 的 assessWebFrameEmbeddability） */
   frame?: WebFramePrecheck

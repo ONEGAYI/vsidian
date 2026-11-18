@@ -718,7 +718,7 @@ describe('跳转目标提示消息协议（#299：hover.target.resolve / hover.t
 // ---- #342（P3-10）web 载荷与取消通道 ----
 
 describe('#342 web 载荷校验（hover.result 成功形态）', () => {
-  const validWebResult = (): Record<string, unknown> => ({
+  const validWebResult = () => ({
     ...validResultOk(),
     contentKind: 'web',
     // web 形态的 Markdown 专属字段为占位值（target 空身份 / version 0 /
@@ -735,9 +735,26 @@ describe('#342 web 载荷校验（hover.result 成功形态）', () => {
     expect(isHostToWebview(validWebResult())).toBe(true)
   })
 
-  it('contentKind=web 缺 web 载荷拒绝（类型与载荷不匹配）', () => {
+  it('封面只接受有界的内联位图，不接受远程地址或 SVG', () => {
     const msg = validWebResult()
-    delete msg.web
+    const withCover = (coverSrc: string) => ({ ...msg, web: { ...msg.web, coverSrc } })
+    expect(isHostToWebview(withCover('data:image/png;base64,dGVzdA=='))).toBe(true)
+    for (const invalid of ['https://example.com/tracker.png', 'data:image/svg+xml;base64,AAAA',
+      'data:image/png;base64,', 'data:image/png;base64,****', `data:image/png;base64,${'AAAA'.repeat(200000)}`]) {
+      expect(isHostToWebview(withCover(invalid))).toBe(false)
+    }
+  })
+
+  it('站点图标允许内联 SVG，但不允许直接使用远程地址', () => {
+    const msg = validWebResult()
+    const withIcon = (iconSrc: string) => ({ ...msg, web: { ...msg.web, iconSrc } })
+    expect(isHostToWebview(withIcon('data:image/svg+xml;base64,PHN2Zy8+'))).toBe(true)
+    expect(isHostToWebview(withIcon('https://example.com/site.svg'))).toBe(false)
+    expect(isHostToWebview(withIcon(`data:image/svg+xml;base64,${'AAAA'.repeat(11_000)}`))).toBe(false)
+  })
+
+  it('contentKind=web 缺 web 载荷拒绝（类型与载荷不匹配）', () => {
+    const { web: _web, ...msg } = validWebResult()
     expect(isHostToWebview(msg)).toBe(false)
   })
 

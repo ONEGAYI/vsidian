@@ -7,11 +7,13 @@ import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/sync
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { isHostToWebview } from '../../src/shared/protocol'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
+import { installTooltipCard } from '../../src/webview/tooltipCard'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
 
 bootLocaleFromDocument()
+installTooltipCard()
 
 /** 出站消息观测（hover.request / hover.cancel 载荷断言 + link.activate 回归） */
 const sent: WebviewToHost[] = []
