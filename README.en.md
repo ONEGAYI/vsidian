@@ -1,134 +1,130 @@
+<div align="center">
+
+<img src="media/vsidian-icon-256.png" width="96" alt="Vsidian">
+
 # Vsidian
 
-English | **[中文](https://github.com/ONEGAYI/vsidian/blob/main/README.md)**
+**Write Markdown like Obsidian, without leaving VS Code**
 
-Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After installing, opening a `.md` file enters live preview directly: the document renders as you read it, moving the cursor onto a heading, link, or formula reveals its source, and the rendering restores once you move on. A reading mode and the native source editor are one click away at any time.
+[![VS Marketplace](https://vsmarketplacebadges.dev/version-short/onegayi.vsidian.svg?label=VS%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian)
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.82.3%2B-0596FB)](https://code.visualstudio.com/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2EA043)](https://github.com/ONEGAYI/vsidian/blob/main/LICENSE)
 
-- **Both views render only the viewport**: scrolling and editing stay responsive on large documents.
-- **Obsidian editing habits**: wikilinks and block-reference jumps, hover preview and document embeds (edit embedded notes in place), backlink and outgoing-link panels, reference updates on rename, grid table editing, task checkboxes, frontmatter property tables, image paste with automatic saving, heading-section folding, and a unified context menu (with dedicated clusters for tables, graphic blocks, and links) — familiar operations in familiar places.
-- **Public styling surface**: a built-in CSS snippet system plus a documented style contract browsed offline and exportable as JSON, with Obsidian-name selectors and CSS variables accepted directly.
+[Install](#install) · [Feature guide](https://github.com/ONEGAYI/vsidian/blob/main/docs/features.md) · [Changelog](https://github.com/ONEGAYI/vsidian/blob/main/CHANGELOG.md) · [中文](https://github.com/ONEGAYI/vsidian/blob/main/README.md)
 
-## Installation
+</div>
 
-**Marketplace (recommended)**: search for **Vsidian** in the Extensions view of VS Code (1.82+), or open the [Marketplace page](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian); reload after installing.
+![Vsidian live preview in VS Code, with a rendered note and its outline](docs/images/readme/hero-en.png)
 
-**Manual VSIX**: download `vsidian-*.vsix` from [GitHub Releases](https://github.com/ONEGAYI/vsidian/releases), then Command Palette → "Extensions: Install from VSIX…", pick the file and reload. For Remote SSH, install the same VSIX in the remote extension host.
+Open a `.md` file and start editing the formatted page. Move the cursor onto a heading, link, or equation to reveal its Markdown. Move away and it renders again.
 
-## Feature overview
+Preview and edit one note from inside another, or export a document with equations and diagrams to PDF. It all happens in VS Code. Your files stay plain text, so saving, undo, and Git work as usual.
 
-### Editing & formatting
+## Live preview
 
-| Feature | Description |
-| --- | --- |
-| Three view states | Cycle live preview, reading, and the source editor; the last mode and scroll position are remembered across windows |
-| Default editor guard | Prompts when another extension takes over as the default `.md` editor and restores Vsidian in one click; the "General" settings group shows the current default editor live |
-| Unified context menu | Right-click anywhere in the live preview body for link, formatting, and clipboard clusters, with cascading submenus, icons, and shortcut hints |
-| Text formatting | Command palette and quick-action bar cover bold, italic, highlight, headings, inline code, and more; every action is rebindable |
-| Heading folding | Hover a heading and click the arrow to fold its section away (folded sections show a `⋯` placeholder); five fold actions are rebindable, and fold state survives undo, external edits, and view switches |
-| Rich / plain text paste | Ctrl+V converts supported HTML formatting to Markdown, asking first and undoing text and formatting separately by default; Ctrl+Shift+V keeps original text and Markdown markers; see [paste details](docs/features.md#富文本粘贴与撤销) (Chinese) |
-| Multi-cursor editing | Alt+click and Ctrl+Alt+Up/Down add cursors; type and format across selections in parallel, Esc collapses back to one cursor (toggle in settings) |
-| Select next occurrence | Ctrl+D adds each next match as a selection; Ctrl+Shift+L selects all occurrences |
-| Chinese word-wise motion | Ctrl+arrows step through Chinese text word by word; optional jieba engine (downloaded on demand, offline install from a local path supported) falls back to the built-in segmenter |
-| Find & replace | Case, whole-word, and regex toggles; find in selection; Ctrl+H expands the replace bar; reading mode highlights matches per character |
-| Go to line | Ctrl+G jumps to a source line number in the current note (live preview and reading mode; folded sections expand first) |
-| Keybindings | Every action rebinds in one place (chords supported) with conflict detection, clear, and reset to defaults |
+![Typing bold text and a wikilink in live preview, then moving the cursor away to render it](docs/images/readme/live-preview-en.gif)
 
-### Structured content
+- **Switch views**: edit in live preview, read without editing, or open the native source editor. Vsidian remembers your last mode and scroll position across windows.
+- **Render what’s on screen**: live preview and reading mode render content around the viewport instead of drawing the whole document at once.
+- **Keep familiar editing controls**: use multiple cursors, select the next match with `Ctrl+D`, find and replace with regex, or jump to a line with `Ctrl+G`.
+- **Write in Chinese or English**: the interface supports both languages. In Chinese text, `Ctrl+arrow` moves by word, with an optional jieba segmenter.
 
-| Feature | Description |
-| --- | --- |
-| Table editing | Well-formed tables render as an editable grid: in-cell editing, rectangular selection and copy, row/column add, delete and reorder, content-proportional column widths with a font-aware readability floor for short columns, and whole-table height optimization once the caret leaves; arrow keys can stop at either table edge to insert or remove adjacent blank lines; tables inside quotes and lists are supported too |
-| Lists & quotes | Enter continues structure, Backspace peels it off in layers, Tab indents whole lines; nested lists and quotes fully supported |
-| Callouts | Obsidian-style callouts (`> [!note] Title`): 13 built-in types and their aliases render with their own background, icon, and title in live preview and reading view, with rich titles and multi-level nesting; `+` / `-` markers fold per instance, auto-expanding when search, links, or the outline jump into a folded callout; right-click to create, convert, or retype, with a type menu showing live color previews; Obsidian CSS variables (`--callout-color`, etc.) and `--callout-icon` custom icons restyle the look; hover previews, embeds, and PDF export render callouts too |
-| Frontmatter properties | The YAML head renders as a read-only table card; a popover adds, edits, and removes properties, one undo per action |
+> **100,000 lines, 8.9 MB**: opening the test note and completing the first edit took 671 ms. Subsequent keystrokes averaged 16.7 ms. The 1,000-, 10,000-, and 100,000-line samples each mounted 75 content DOM nodes at the top of the file.
+>
+> <sub>September 2026 benchmark on a Ryzen 7 9700X with VS Code 1.86.2. See the [performance report](https://github.com/ONEGAYI/vsidian/blob/main/docs/perf/2026-09-mvp-performance-summary.md) for the test method.</sub>
 
-### Links & images
+## Wikilinks and references
 
-| Feature | Description |
-| --- | --- |
-| Wikilinks & anchors | Five `[[wikilink]]` forms; `#heading` and `#^block-id` jumps land on the target, with a highlight flash on arrival |
-| Line-number links | Clicking `[jump](note.md:103)` lands on line 103 in the Vsidian panel for Markdown targets, or reveals that line in the native editor for code/config files (`file.ts:103` works the same). Out-of-range line numbers open the target and report honestly instead of silently clamping; mixing a line number with an anchor (`note.md:20#heading`) is reported as an invalid location |
-| Short-name & absolute-path wikilinks | When a short name misses in the same folder, it resolves to the only same-name note in the source's workspace root (ambiguity stays unresolved with a hint); explicit absolute-path wikilinks (Windows drive or server paths) cross workspace roots and reach targets outside the workspace — jumps, hover, embeds, backlinks, and rename updates all covered |
-| Wikilink completion | Typing `[[]]` pops up file candidates (every common file type — images, PDFs, and more); `#` / `^` then list the target's headings and blocks; the inserted path picks shortest / relative (default) / absolute per the "Internal link type" setting; works in table cells and embedded editors too |
-| Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
-| Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable, and the link format can be a Markdown link (default) or a `![[…]]` wikilink embed (path keeps spaces verbatim) |
-| Image wikilink embeds | `![[image.png]]` embeds images that behave identically to plain Markdown image links — loading, failure hints, auto refresh, and the popup viewer are the same; hovering a wikilink that points to an image shows the image itself in the popup |
-| Image size suffixes | `![[img.png|width]]`, `|widthxheight`, `|N%`, and `![alt|width](url)` set the display size across every rendering surface and PDF export; drag the corner handle in live preview to resize |
-| Image popup | Hover an image for its button group; the full-screen popup zooms, pans, refreshes, and exports the original; clicking the image no longer jumps to source |
-| Embedded refresh | Images replaced or deleted on disk reload automatically or show a not-found state; the toolbar button refreshes images and diagrams on demand; shortcut bindable (unbound by default) |
-| External link previews | Hover an http(s) link to show a card with its title, summary, and domain (off by default; restricted fetch that never sends note content or credentials); the "Live page" shape renders the page itself in a sandboxed view, with a one-click fallback to the card |
-| Search reveal | After a workspace-search result opens a note, the command "Reveal selected search result" moves the cursor to the match (unbound by default; no auto-reveal due to a VSCode API gap) |
+**Follow a reference without losing your place.**
 
-### References & backlinks
+![Wikilink suggestions, hover preview, an embedded note, and backlinks](docs/images/readme/links-en.png)
 
-| Feature | Description |
-| --- | --- |
-| Hover document preview | Ctrl+hover a link to preview the target: notes show the full text, a section, or a block reference, editable and savable inside the popup; text files render read-only with native VS Code coloring; PDFs browse by page with selectable text and zoom. Available in live preview, reading, and the link panels; direct-hover and master toggles in settings |
-| Jump target tip | When hovering shows no preview popup, a brief pause reveals a small badge with the target path and anchor; works in both views and the link panels, toggle in settings |
-| Document embeds | `![[note]]` mounts a card where the target note can be edited and saved in place, leaving the parent untouched; `![[file.ts]]` and `![[file.pdf]]` embed text and PDF read-only, with `#line=N` / `#range=B-E` anchors; the cursor reveals the reference source for editing; inline, list, quote, and table-cell positions all render, with recursive expansion (three levels by default) |
-| Backlink panel | The sidebar shows which documents reference the current note: context cards grouped by source with the matched link highlighted, sortable and searchable, click to jump to the reference |
-| Outgoing links panel | The sidebar lists every link in the current note (wikilinks, links, images, reference definitions); click lands on the link's actual anchor, broken links dim |
-| Reference updates on rename | Renaming or moving files and folders inside VS Code rewrites wikilinks, links, and image references to the new locations (a short name is kept when it still resolves uniquely; a target leaving its workspace root keeps its identity via an explicit absolute path); one undo reverts the whole rewrite |
+- **Type `[[`** to find notes, images, or PDFs. Add `#` or `^` to choose a heading or block in the target note.
+- **Ctrl-hover to peek** at a note, section, or block and edit the note right in the popup. Code previews use VS Code syntax colors, and PDFs can be browsed by page.
+- **Embed a note with `![[Note]]`**. Edits in the card save to the linked note without changing the surrounding document.
+- **Find backlinks and outgoing links** in the sidebar. Click a result to jump to the reference.
+- **Rename or move a file in VS Code** and Vsidian can update the workspace links and image references that point to it.
 
-### Code blocks & diagrams
+## Tables, callouts, equations, and diagrams
 
-| Feature | Description |
-| --- | --- |
-| Code block cards | Fences collapse into cards with a language badge, line numbers, copy, fold, and a reading-view wrap toggle; syntax colors follow the VS Code theme |
-| Diagrams & math | Mermaid diagrams and KaTeX math render in both views; diagrams zoom in a full-screen popup and export as SVG/PNG. Diagram themes are chosen on the Appearance → Themes page—install an add-on that provides themes (such as Vsidian Codex Bridge) to pick Codex and more |
+**Edit a table as a grid. See equations and diagrams on the page.**
 
-See the [fenced-language list](docs/specs/code-block-card.md#语法高亮) for supported languages and aliases, including Tcl, VHDL, project configuration languages, C#, Kotlin, Swift, Dart, SPICE, Makefile, PHP, GraphQL, and distinct PostgreSQL/MySQL/SQLite and JSONC/JSON5 dialects. Main content and Markdown hover/embed views share the highlighting engine.
+![A table selection, callout type previews, a code card, and a rendered equation and diagram](docs/images/readme/blocks-en.png)
 
-### Export
+- **Tables**: type into cells, drag to select and copy a rectangle, and add, delete, or reorder rows and columns. This works inside lists and quotes too.
+- **Callouts**: type `> [!note]` or preview the colors of 13 built-in types in the context menu. Callouts can fold or nest and render in hover previews, embeds, and PDF exports.
+- **Math and diagrams**: KaTeX and Mermaid render in both views. Zoom diagrams in a full-screen viewer or export them as SVG or PNG.
+- **Code cards**: get line numbers, a language badge, copy and fold buttons, and syntax colors from the VS Code theme.
+- **Native HTML**: both views render supported inline and block HTML, including document styles, `<details>`, media, iframes, SVG, and MathML. Scripts and unsafe attributes are removed.
+- **Frontmatter**: view YAML as a property table and add, change, or remove properties in a popover.
 
-| Feature | Description |
-| --- | --- |
-| PDF export | Four entry points — current document, selection, batch, and merged — from the command palette and toolbar; the export window shows a real PDF preview at print size (zoomable, manual refresh) with paper, margins, scale, header/footer, page numbers, and heading bookmarks; body text renders identically to reading view, with tables, math, diagrams, and embeds included; works in Remote SSH sessions too (PDFs generate and save on your local machine). See [the PDF export guide](docs/features.md#pdf-导出) (Chinese) |
+## PDF export
 
-### Outline
+**See the actual PDF pages before you save.**
 
-| Feature | Description |
-| --- | --- |
-| Outline panel | Headings stay in sync; click to jump, drag to reorder whole sections, search, and fold with a depth slider |
+![PDF export window with a page preview and print settings](docs/images/readme/pdf-export-en.png)
 
-### Appearance & customization
+- Export the current document or selection, export several files separately, or merge them into one PDF.
+- Preview pages at print size and adjust paper, margins, scale, headers and footers, page numbers, and heading bookmarks.
+- The export uses the reading view’s layout, including tables, math, diagrams, and embeds.
+- In Remote SSH sessions, PDFs are generated and saved on your local machine.
 
-| Feature | Description |
-| --- | --- |
-| CSS snippets | The "Appearance" page in Vsidian settings manages user-folder `.css` snippets with per-file toggles, nested `@import`, and HTTPS remote styles and fonts |
-| Style reference | The "Appearance" page browses the public style contract offline with search; the contract JSON exports for AI assistants and external tools |
-| Readable line width | One slider constrains the body column in both views; 0 fills the available width, the column centers and yields to the outline panel |
-| Interface language | English and 简体中文 switch instantly, following the VS Code display language by default |
+## Appearance and shortcuts
 
-### Add-ons
+**Restyle the editor with CSS snippets, including supported Obsidian variables.**
 
-| Feature | Description |
-| --- | --- |
-| Add-on system | VS Code extensions that declare an add-on identity are discovered and registered by Vsidian automatically; they can contribute settings pages, input behaviors, code-block renderers, paste-conversion rules, read-only reference views (popups and embed mounts), themes, commands and keybindings, context-menu items, toolbar buttons, and panels |
-| Management & diagnostics | Vsidian settings offer per-add-on toggles, settings editing, input-behavior ordering and per-item disabling, failure reasons, and manual retry; a failing add-on has its contributions withdrawn without affecting others or built-in features |
-| Code-block renderer takeover | Add-ons may replace the rendering of languages they declare (Mermaid included); users can switch per language or back to built-in, and disabling or failure falls back to built-in rendering |
-| Developer API | The API reference, semantic catalog, and developer guide live in `docs/addons/` in the repository, with changes tracked in `CHANGELOG-API.md`; the stable API ships as of 1.1.0 with compatibility commitments |
+![The same note before and after applying a CSS snippet, beside snippet settings and the style reference](docs/images/readme/styling-en.png)
 
-The complete behavior, boundaries, and settings of each feature are documented in [docs/features.md](https://github.com/ONEGAYI/vsidian/blob/main/docs/features.md) (in Chinese).
+- **CSS snippets**: choose a folder in Appearance settings and toggle snippets one at a time. Snippets support `@import`, HTTPS stylesheets, and web fonts.
+- **Obsidian CSS**: selectors and variables marked as directly compatible in the style reference work under their original names.
+- **Style reference**: search the public styling reference offline or export it as JSON for other tools.
+- **Keybindings**: rebind actions in one place, including two-step chords. Check conflicts, clear bindings, or reset them to the defaults.
+
+## Add-ons
+
+A VS Code extension can declare itself a Vsidian add-on. Vsidian discovers it on install. Add-ons can provide settings pages, input behaviors, code-block renderers, paste converters, themes, commands, menus, toolbar buttons, and panels. If an add-on fails, Vsidian withdraws its contributions without disabling built-in features or other add-ons.
+
+See the [add-on developer guide](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md). The stable API has carried compatibility commitments since 1.1.0.
+
+## More features
+
+| Editing | Links and images | Interface |
+| --- | --- | --- |
+| Fold sections by heading | Save pasted images to a chosen folder | Search the outline or drag to reorder sections |
+| Convert rich text to Markdown and undo in steps | Drag a corner to resize an image | Context menu for the live preview body |
+| Paste original text with `Ctrl+Shift+V` | Zoom, pan, and save originals in the image viewer | Adjust readable line width |
+| Check off tasks | Optional web-link preview cards | Show the link destination on hover |
+| Continue lists and quotes with `Enter`, indent with `Tab` | Copy a block link like `[[Note#^id]]` | Restore Vsidian as the default Markdown editor |
+| Apply formatting from the quick-action bar | Jump to a line with `[text](note.md:103)` | Refresh images and diagrams from the toolbar |
+
+See the [feature guide](https://github.com/ONEGAYI/vsidian/blob/main/docs/features.md) for full behavior and settings (in Chinese).
+
+## Install
+
+**Marketplace**: in VS Code 1.82.3 or later, search for **Vsidian** in Extensions or visit the [Marketplace page](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian). Reload the window after installation.
+
+**Manual VSIX**: download `vsidian-*.vsix` from [GitHub Releases](https://github.com/ONEGAYI/vsidian/releases), run **Extensions: Install from VSIX…** in the Command Palette, and reload. For Remote SSH, install the same VSIX in the remote extension host.
+
+Now open a `.md` file to enter live preview.
 
 ## Known limitations
 
-- No support for Obsidian Canvas, whiteboards, or note formats other than Markdown; Obsidian plugins themselves are not compatible — Vsidian has its own add-on system (see above).
-- The CSP allows any https image source (a design trade-off for remote image hosting; in theory usable as a tracking pixel).
-- Very long code blocks skip syntax coloring and fall back to a plain-text card.
-- External entries (workspace search, problems panel, etc.) open a note without revealing the match — a VSCode public API gap (tracking vscode#289785); use the command "Reveal selected search result" to locate it manually.
+- Vsidian supports Markdown. Obsidian Canvas, whiteboards, other note formats, and Obsidian plugins aren’t supported; Vsidian has its own add-on system.
+- Remote images can load from any HTTPS source, so an image can serve as a tracking pixel.
+- Very long code blocks fall back to plain text without syntax highlighting.
+- Opening a note from workspace search or the Problems panel doesn’t jump to the matching location. Use **Reveal selected search result** to jump manually ([VS Code issue #289785](https://github.com/microsoft/vscode/issues/289785)).
 
-## Building from source
+## Build from source
 
 ```bash
-npm install             # install pinned dependencies
-npm run compile         # esbuild bundles + tsc type check
-npm run test:unit       # unit tests (no VS Code host required)
-npm run test:browser    # Playwright browser regression (first run: npx playwright install chromium)
-npm run test:integration # real-host integration tests
-npm run release:check   # package the VSIX and run pre-release checks
+npm install              # install pinned dependencies
+npm run compile          # bundle with esbuild and type-check with tsc
+npm run test:unit        # unit tests, no VS Code host required
+npm run test:browser     # Playwright (first run: npx playwright install chromium)
+npm run test:integration # integration tests in a VS Code host
+npm run release:check    # package and check the VSIX
 ```
 
-On Windows, integration tests launch the real VS Code host on a separate desktop by default, without disturbing the current one; the foreground mode for unattended environments and shard settings are documented in the launchers under `test/integration/`. Release conventions live in the in-repo skills (`.agents/skills/release/` and `.agents/skills/style-contract/`).
+On Windows, integration tests launch VS Code on a separate desktop by default. See the launchers under `test/integration/` for foreground and sharded runs. The in-repo skills describe the [release process](https://github.com/ONEGAYI/vsidian/tree/main/.agents/skills/release) and [styling compatibility checks](https://github.com/ONEGAYI/vsidian/tree/main/.agents/skills/style-contract).
 
-Please report issues at [Issues](https://github.com/ONEGAYI/vsidian/issues); see [CHANGELOG](https://github.com/ONEGAYI/vsidian/blob/main/CHANGELOG.md) for version history.
+Report a problem in [Issues](https://github.com/ONEGAYI/vsidian/issues) or browse the [version history](https://github.com/ONEGAYI/vsidian/blob/main/CHANGELOG.md).
