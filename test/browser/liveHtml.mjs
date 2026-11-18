@@ -362,6 +362,77 @@ try {
   passed++
   console.log('[LiveHTML][PASS] 文档 <style> 裸标签覆盖默认边框（Live/Reading 双态，可覆盖性）')
 
+  // README 页首的结构，不依赖 README 文案或外网资源。
+  const readmeHeader = [
+    '<div align="center">', '', '<img src="logo.png" width="96" alt="Logo">', '',
+    '# Vsidian', '', '**Markdown tagline**', '', '[![Badge](badge.svg)](https://example.test/)', '',
+    '<div>Native first</div>', '<div>Native second</div>', '',
+    '[Install](#install)', '', '</div>', '', 'Outside the wrapper.',
+  ].join('\n') + Array.from({ length: 80 }, (_, i) => `\n\nParagraph ${i + 1}.`).join('')
+  const closeTag = readmeHeader.indexOf('\n</div>') + 1
+  await page.evaluate((text) => {
+    window.setLiveHtmlMode('live')
+    window.initLiveHtmlDoc(text)
+    // Live 光标在开标签后的空行；进入虚拟化 Reading 不应跳到文尾。
+    window.setLiveHtmlCursor(text.indexOf('\n\n') + 1)
+  }, readmeHeader)
+  for (const [mode, selector] of [['live', '.cm-content'], ['reading', '.vsidian-view-reading']]) {
+    await page.evaluate((mode) => window.setLiveHtmlMode(mode), mode)
+    const content = page.locator(selector)
+    const heading = content.getByText('Vsidian', { exact: true })
+    await heading.waitFor({ state: 'visible', timeout: 3000 })
+    if (mode === 'reading') {
+      await content.evaluate((el) => { el.scrollTop = el.scrollHeight })
+      await heading.waitFor({ state: 'detached', timeout: 3000 })
+      await content.evaluate((el) => { el.scrollTop = 0 })
+      await heading.waitFor({ state: 'visible', timeout: 3000 })
+    }
+    const painted = await content.evaluate((root) => {
+      const centerDelta = (label) => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (node.textContent !== label) continue
+          const range = document.createRange()
+          range.selectNode(node)
+          const text = range.getBoundingClientRect()
+          const line = node.parentElement.closest('.cm-line, .vsidian-reading-block').getBoundingClientRect()
+          if (text.width > 0) return Math.abs(text.left + text.width / 2 - (line.left + line.width / 2))
+        }
+        return Infinity
+      }
+      return { title: centerDelta('Vsidian'), outside: centerDelta('Outside the wrapper.'), text: root.innerText }
+    })
+    assert.ok(painted.title < 2, `${mode} README 标题实绘居中（偏移 ${painted.title}px）`)
+    assert.ok(Number.isFinite(painted.outside) && painted.outside > 20, `${mode} 外壳后的正文可见且不居中`)
+    assert.ok(!painted.text.includes('</div>') && !painted.text.includes('<div align="center">'),
+      `${mode} 首尾标签不在渲染态露出`)
+  }
+  await page.evaluate((pos) => {
+    window.setLiveHtmlMode('live')
+    window.setLiveHtmlCursor(pos)
+  }, closeTag + 2)
+  assert.equal(await linePainted('</div>'), true, '光标进入闭标签显示源文')
+  await page.evaluate((pos) => {
+    window.setLiveHtmlCursor(pos)
+    window.focusLiveHtml()
+  }, closeTag + '</div>'.length)
+  const title = page.locator('.cm-content .cm-line').filter({ hasText: /^Vsidian$/ })
+  await page.keyboard.press('Backspace')
+  assert.doesNotMatch(await title.evaluate((line) => getComputedStyle(line).textAlign), /center/,
+    '损坏闭标签即时解除对齐')
+  await page.keyboard.type('>')
+  assert.match(await title.evaluate((line) => getComputedStyle(line).textAlign), /center/,
+    '修好闭标签即时恢复对齐')
+  await page.evaluate((pos) => {
+    window.setLiveHtmlCursor(pos)
+    window.focusLiveHtml()
+  }, readmeHeader.indexOf('# Vsidian') + '# Vsidian'.length)
+  await page.keyboard.type('!')
+  assert.equal(await page.evaluate(() => window.liveHtmlDocText()), readmeHeader.replace('# Vsidian', '# Vsidian!'),
+    '真实键入只修改标题，HTML 标签及正文源文不变')
+  passed++
+  console.log('[LiveHTML][PASS] README 空行分隔的居中外壳：双模式绘制、局部显形与 Live 键入')
+
   // ---- 收尾：页面错误收集 ----
   assert.deepEqual(errors, [], '无页面错误（脚本不执行、装饰切换无异常）')
   passed++

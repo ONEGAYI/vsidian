@@ -19,6 +19,7 @@ import {
 } from '../../src/webview/liveHtml'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { isPureStyleHtmlBlock } from '../../src/shared/htmlBlock'
+import * as htmlLex from '../../src/shared/htmlInline'
 
 function buildState(text: string, selection: EditorSelection) {
   return EditorState.create({
@@ -77,6 +78,21 @@ const HTML_TO = HTML_FROM + TABLE_BLOCK.length
 const STYLE_FROM = DOC.indexOf('<style>')
 
 describe('Live HTML 块表（Lezer HTMLBlock 派生）', () => {
+  it('光标移动复用块表；外部键入不重新词法扫描未变的原生内块', () => {
+    const text = 'Outside\n\n<div align="center">\n\n<table><tr><td><div>Native</div></td></tr></table>\n\n# Heading\n\n</div>'
+    const state = buildState(text, EditorSelection.single(2))
+    const lexer = vi.spyOn(htmlLex, 'matchHtmlTagAt')
+    try {
+      const moved = state.update({ selection: { anchor: 3 } }).state
+      expect(moved.field(liveHtmlSpansField)).toBe(state.field(liveHtmlSpansField))
+      const edited = moved.update({ changes: { from: 2, to: 3, insert: 'X' } }).state
+      expect(edited.field(liveHtmlSpansField)).toHaveLength(3)
+      expect(edited.facet(EditorView.blockWrappers).some((ranges) => typeof ranges !== 'function' && ranges.size === 1)).toBe(true)
+      expect(lexer).not.toHaveBeenCalled()
+    } finally {
+      lexer.mockRestore()
+    }
+  })
   it('顶层 html 块进入表（from/to 为源文精确区间）', () => {
     const spans = buildState(DOC, EditorSelection.single(0)).field(liveHtmlSpansField)
     const table = spans.find((s) => s.from === HTML_FROM)

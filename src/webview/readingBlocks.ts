@@ -20,8 +20,8 @@
 //   单位（#7「超大单块」限制的缓解；细分后仍按 #7 机制挂载/回收）
 // - 未支持语法（脚注 [^1]、定义列表等）由 markdown-it 按普通段落文本
 //   渲染——保留原文的局部源码降级，不触发整篇改写
-import { frontmatterRange } from '../shared/markdownDoc'
-import { isPureStyleHtmlBlock } from '../shared/htmlBlock'
+import { frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
+import { classifyHtmlDivBlock, htmlDivWrappersOf, isPureStyleHtmlBlock, standaloneHtmlDivTag, topLevelHtmlBlockSpansOfTree } from '../shared/htmlBlock'
 import { htmlBlockRenderHtml } from './htmlSanitize'
 import { maskCodeSpanPipes, quoteTableRowsDegraded } from '../shared/tableCells'
 import { stripHtmlComments } from './htmlComment'
@@ -72,6 +72,8 @@ export interface ReadingBlock {
   end: number
   /** 该块的内部 HTML（markdown-it 渲染产物或转义源码；进 DOM 前再净化） */
   html: string
+  /** 配对的独立 div 外壳向内容块传递的对齐属性。块仍是独立的虚拟化单位。 */
+  htmlAlign?: string
   /** heading 专用：1-6 */
   level?: 1 | 2 | 3 | 4 | 5 | 6
   /** 块内子锚点（升序；列表块为各 li 的源 start）：锚点映射按最细粒度
@@ -356,6 +358,38 @@ function splitBody(
     }
     i += 1
   }
+  // 已有阅读块提供廉价预筛；仅存在可能的首尾端点时，再以原文树确认边界。
+  const htmlStarts = new Set<number>()
+  let seenOpen = false
+  let hasPairCandidate = false
+  for (const block of blocks) {
+    if (block.kind !== 'html') continue
+    const tag = standaloneHtmlDivTag(text.slice(block.start, block.end))
+    if (tag === null) continue
+    htmlStarts.add(block.start)
+    if (tag === 'close') hasPairCandidate ||= seenOpen
+    else if (tag.align !== null) seenOpen = true
+  }
+  if (hasPairCandidate) {
+    const divWrappers = htmlDivWrappersOf(topLevelHtmlBlockSpansOfTree(markdownTreeParser.parse(text))
+      .filter(({ from }) => from >= bodyStart)
+      .map(({ from, to }) => ({
+        from: text.lastIndexOf('\n', from - 1) + 1,
+        div: classifyHtmlDivBlock(text.slice(from, to)),
+      })))
+    const alignments: Array<string | undefined> = []
+    blocks = blocks.filter((block) => {
+      const wrapper = divWrappers.get(block.start)
+      if (wrapper && htmlStarts.has(wrapper.open) && htmlStarts.has(wrapper.close)) {
+        if (block.start === wrapper.open) alignments.push(wrapper.align ?? alignments.at(-1))
+        else alignments.pop()
+        return false
+      }
+      const align = alignments.at(-1)
+      if (align !== undefined) block.htmlAlign = align
+      return true
+    })
+  }
   const references = new Set(Object.keys(env.references ?? {}))
   if (references.size) for (const block of blocks) block.references = references
   const definitions = tokens.filter(token => token.type === 'reference_definition' && token.map).map(token => ({
@@ -531,7 +565,7 @@ function pushBlock(
  * 源 offset → 块身份（#6 语义保持）：
  * - offset 落在块区间内返回该块
  * - 落在块间缝隙（换行/空行）返回其前最近的内容块（floor 语义）
- * - 超出末块 end 返回末块；空列表返回 null
+ * - 超出块序列范围取最近的首块或末块；空列表返回 null
  */
 export function blockForOffset(
   blocks: ReadingBlock[],
@@ -551,5 +585,5 @@ export function blockForOffset(
       break // 已到 offset 之前的缝隙
     }
   }
-  return result ?? blocks[blocks.length - 1]!
+  return result ?? blocks[0]!
 }
