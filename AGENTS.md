@@ -135,6 +135,8 @@ vsidian/
 │   │   ├── outlinks-panel-reference.png    # 出链面板形态参考图
 │   │   └── vsidian-addon-api.md            # 附加组件接口与装载技术方案
 │   ├── features.md # README 功能与设置详解下沉页
+│   ├── images/     # 文档图片
+│   │   └── readme/ # 中英 README 展示图
 │   ├── perf/…      # 性能实测数据与测量工具说明
 │   ├── research/   # 技术调研报告
 │   │   ├── 597-plan3-probe.md                     # #597 键入路径形态归一验证报告
