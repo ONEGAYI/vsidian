@@ -106,7 +106,9 @@ try {
     window.updateKeys({ quote: ['ctrl+shift+q'] })
   }, quoteText)
   await page.locator('.cm-content').focus()
-  await page.keyboard.press('Control+a')
+  await page.keyboard.press('Control+Home')
+  await page.keyboard.press('ArrowRight')
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowRight')
   await page.keyboard.press('Control+Shift+q')
   assert.equal((await page.evaluate(() => window.keyState())).text, '> 第一行\n>\n> 第三行')
   const quoteBars = await page.locator('.cm-content > .cm-line').evaluateAll(

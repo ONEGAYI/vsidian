@@ -36,6 +36,18 @@ describe('格式命令生产链路', () => {
     ] })
   })
 
+  it.each([[1, 8], [8, 1]])('引用往返保留跨空行的行中选区（%i → %i）', (anchor, head) => {
+    const text = 'ABCD\n\nEFGH'
+    const { controller, view } = setup(text)
+    view.dispatch({ selection: { anchor, head } })
+    controller.handleHostMessage({ kind: 'format.command', op: 'quote' })
+    expect(view.state.doc.toString()).toBe('> ABCD\n>\n> EFGH')
+    controller.handleHostMessage({ kind: 'format.command', op: 'quote' })
+    expect(view.state.doc.toString()).toBe(text)
+    expect(view.state.selection.main).toMatchObject({ anchor, head })
+    controller.dispose()
+  })
+
   it('无选区围栏两态切换：包裹后光标在开围栏内侧，再按取消，三按复原', () => {
     const cases = [
       ['bold', '**word**'], ['italic', '*word*'],
@@ -291,6 +303,18 @@ describe('格式命令生产链路', () => {
     expect(ranges).toHaveLength(2)
     expect(ranges[0]!.head).toBe(2)
     expect(ranges[1]!.head).toBe(9)
+    controller.dispose()
+  })
+
+  it('多选区插入链接时，扩词不改写被拒绝的跨段选区', () => {
+    const { controller, view } = setup('AA\n\nword rest')
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.range(0, 6), EditorSelection.cursor(7), EditorSelection.range(9, 13),
+    ], 2) })
+    controller.handleHostMessage({ kind: 'format.command', op: 'link' })
+    expect(view.state.doc.toString()).toBe('AA\n\nword [rest]()')
+    expect(view.state.selection.ranges[0]).toMatchObject({ from: 0, to: 6 })
+    expect(view.state.selection.ranges[1]).toMatchObject({ from: 7, to: 7 })
     controller.dispose()
   })
 

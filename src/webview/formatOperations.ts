@@ -518,11 +518,15 @@ function linePlan(text: string, op: FormatOperationId, range: FormatSelection): 
       if (!outer && gapStart >= 0) {
         for (let i = gapStart; i < index; i++) {
           const blank = rows[i]!
-          lines.push({ from: blank.from, to: blank.to, insert: blank.line ? '> ' + blank.line : '>' })
+          lines.push({ from: blank.from, to: blank.from, insert: blank.line ? '> ' : '>' })
         }
       }
-      const insert = outer ? outer[1]! + row.line.slice(outer[0].length) : '> ' + row.line
-      lines.push({ from: row.from, to: row.to, insert })
+      // 只改前缀，让选区端点继续跟随原来的正文，不被整行替换映射到行首。
+      if (outer) {
+        lines.push({ from: row.from + outer[1]!.length, to: row.from + outer[0].length, insert: '' })
+      } else {
+        lines.push({ from: row.from, to: row.from, insert: '> ' })
+      }
       gapStart = outer ? -1 : index + 1
     }
   } else {
@@ -933,8 +937,8 @@ export interface MultiFormatPlan {
  *  边界：变更与已收集区间**严格重叠**（from < 占用区 to）的 range 丢弃
  *  其变更（同一行内独立计划的重写区间可能交叠，无从可靠合并——保守
  *  跳过，产物选区退化为原 range 映射）；端点相接（前 to === 后 from）
- *  不算重叠。格区 region 与多 range 互斥（region 状态机维持单选区），
- *  本函数不接收 region。 */
+ *  不算重叠。不支持行内插入的选区也不允许被其他 range 的扩词改写。
+ *  格区 region 与多 range 互斥（region 状态机维持单选区），本函数不接收 region。 */
 export function planFormatOperationRanges(
   text: string, op: FormatOperationId, ranges: readonly FormatSelection[],
   action: FormatAction = 'toggle',
@@ -954,14 +958,14 @@ export function planFormatOperationRanges(
   let deltaBefore = 0
   const order = ranges.map((range, index) => ({ range, index }))
     .sort((a, b) => a.range.from - b.range.from)
+  const rejected = ranges.filter((range) => inlineInsertSelectionWarning(text, op, range))
   for (const { range, index } of order) {
     if (planOnlyIndex !== undefined && index !== planOnlyIndex) continue
     const plan = planFormatOperation(text, op, range, null, action)
     if (!plan || !plan.changes.length) continue
     const from = Math.min(...plan.changes.map((change) => change.from))
     const to = Math.max(...plan.changes.map((change) => change.to))
-    if (from < usedTo) {
-      // 与已收集区间重叠：丢弃本 range 变更（保守），选区保持 null
+    if (from < usedTo || rejected.some((other) => from < other.to && to > other.from)) {
       continue
     }
     changes.push(...plan.changes)
