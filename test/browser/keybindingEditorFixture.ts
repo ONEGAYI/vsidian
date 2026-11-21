@@ -1,8 +1,11 @@
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { EditorView } from '@codemirror/view'
 import type { WebviewToHost } from '../../src/shared/protocol'
+import { installLocale } from '../../src/shared/i18n'
+import { en } from '../../src/shared/locales/en'
 import '../../src/webview/main.css'
 
+installLocale('en', en)
 const messages: unknown[] = []
 let forwarded = 0
 /** #638 宿主输入框模拟：设定用户「提交」的行号（1-based，null = 取消） */

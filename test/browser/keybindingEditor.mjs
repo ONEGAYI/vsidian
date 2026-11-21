@@ -100,6 +100,47 @@ try {
     await page.keyboard.press('Control+i')
     assert.equal((await page.evaluate(() => window.keyState())).text, '> - ## 正文')
   }
+  const quoteText = '第一行\n\n第三行'
+  await page.evaluate((text) => {
+    window.initKeys(text)
+    window.updateKeys({ quote: ['ctrl+shift+q'] })
+  }, quoteText)
+  await page.locator('.cm-content').focus()
+  await page.keyboard.press('Control+Home')
+  await page.keyboard.press('ArrowRight')
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowRight')
+  await page.keyboard.press('Control+Shift+q')
+  assert.equal((await page.evaluate(() => window.keyState())).text, '> 第一行\n>\n> 第三行')
+  const quoteBars = await page.locator('.cm-content > .cm-line').evaluateAll(
+    (lines) => lines.map((line) => getComputedStyle(line).boxShadow))
+  assert.equal(quoteBars.length, 3)
+  assert.notEqual(quoteBars[0], 'none')
+  assert.equal(quoteBars[1], quoteBars[0], '中间空行的引用竖条应与正文行一致')
+  assert.equal(quoteBars[2], quoteBars[0])
+  await page.keyboard.press('Control+Shift+q')
+  assert.equal((await page.evaluate(() => window.keyState())).text, quoteText, '再次切换应恢复原文及空行')
+  await page.keyboard.press('Control+Shift+q')
+  for (const [op, hint] of [
+    ['link', 'Links cannot span paragraphs. Select text within one paragraph.'],
+    ['inlineMath', 'Inline math cannot span paragraphs. Use a math block instead.'],
+  ]) {
+    await page.evaluate(op => window.updateKeys({ [op]: ['ctrl+shift+q'] }), op)
+    const before = await page.evaluate(() => window.keyState())
+    await page.keyboard.press('Control+Shift+q')
+    const after = await page.evaluate(() => window.keyState())
+    assert.equal(after.text, before.text, `${op} 不应改写刚形成的跨段引用选区`)
+    assert.equal(after.cursor, before.cursor)
+    assert.equal(after.messages.filter(message => message.kind === 'edit.request').length,
+      before.messages.filter(message => message.kind === 'edit.request').length)
+    await page.getByText(hint, { exact: true }).waitFor({ state: 'visible' })
+  }
+  await page.evaluate(() => window.setMode('reading'))
+  const quote = page.locator('.vsidian-view-reading blockquote')
+  await quote.first().waitFor({ state: 'visible' })
+  assert.equal(await quote.count(), 1, '阅读模式应把三行渲染成一个引用块')
+  assert.deepEqual(await quote.locator('p').allTextContents(), ['第一行', '第三行'])
+  await page.evaluate(() => window.setMode('live'))
+
   // #638 跳转到行：真实 Ctrl+G 被面板消费（不透传宿主），提交行号后落位行首；
   // 取消不移动；显式清空后旧键释放回 window 层
   const gotoDoc = '第一行\n第二行\n第三行\n'
@@ -126,6 +167,30 @@ try {
   await page.keyboard.press('Control+g')
   gotoState = await page.evaluate(() => window.keyState())
   assert.equal(gotoState.forwarded, forwardedBeforeGoto + 1, '显式清空后 Ctrl+G 应释放回 window 层')
+
+  for (const [op, text, hint] of [
+    ['link', 'First\n\nSecond', 'Links cannot span paragraphs. Select text within one paragraph.'],
+    ['wikilink', 'First\nSecond', 'Wikilinks cannot span lines. Select text on one line.'],
+    ['inlineMath', 'a+b\n \t\nc+d', 'Inline math cannot span paragraphs. Use a math block instead.'],
+  ]) {
+    await page.evaluate(({ op, text }) => {
+      window.initKeys(text)
+      window.updateKeys({ [op]: ['ctrl+shift+q'] })
+    }, { op, text })
+    await page.locator('.cm-content').focus()
+    await page.keyboard.press('Control+a')
+    const before = await page.evaluate(() => window.keyState())
+    await page.keyboard.press('Control+Shift+q')
+    const after = await page.evaluate(() => window.keyState())
+    assert.equal(after.text, text, `${op} 不应写入无效的行内标记`)
+    assert.equal(after.messages.filter(message => message.kind === 'edit.request').length,
+      before.messages.filter(message => message.kind === 'edit.request').length)
+    const toast = page.getByText(hint, { exact: true })
+    await toast.waitFor({ state: 'visible' })
+    assert.equal(await toast.getAttribute('data-severity'), 'warning')
+    await page.keyboard.press('Backspace')
+    assert.equal((await page.evaluate(() => window.keyState())).text, '', '提示不抢焦点或收起选区')
+  }
   await page.close()
-  console.log('[编辑器快捷键][PASS] 原生键盘默认/清空释放/改绑/两段键与 window 转发隔离；含行内代码的整段粗体/斜体/删除线/高亮往返与绘制；Ctrl+G 跳转到行的消费/落位/取消/清空释放')
+  console.log('[编辑器快捷键][PASS] 原生键盘绑定与转发；行内格式往返与绘制；跨空行引用块；跳转到行；不能成形的行内插入提示')
 } finally { await browser.close() }

@@ -1,5 +1,6 @@
 import type { SyntaxNode } from '@lezer/common'
 import type { FormatOperationId } from '../shared/formatOperations'
+import type { MessageKey } from '../shared/locales/en'
 import { markdownTreeParser } from '../shared/markdownDoc'
 import { lineContainerPrefixLength, parseLinePrefix, prefixLength } from '../shared/listPrefix'
 import { containerPrefixLen, parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
@@ -454,10 +455,9 @@ function linePlan(text: string, op: FormatOperationId, range: FormatSelection): 
   // 空行插入前缀的产物光标（#393）：仅单光标形态给出（`## |`、`- |`）；
   // 跨行选区不携带独立选区，光标经变更映射——与既有行级操作口径一致
   let emptyPrefixAnchor: number | null = null
-  // 先收集选区行再整体决策（#512/#513）：空行是块分隔符，选区含真实行
-  // 时空行一律跳过不加前缀；无选区或选区全空行时仅首个空行（选区起点
-  // 所在行）插入前缀——插入产物（如 `- `）trim 非空，再按一次经真实行
-  // 取消路径还原，两态闭环不另设空行取消分支
+  // 先收集选区行再整体决策（#512/#513）：标题和列表跳过空行；引用
+  // 在相邻两条添加引用的正文行之间保留空行。无选区或选区全空行时
+  // 仅首个空行插入前缀，再按一次经非空行的取消路径还原。
   interface RowPlan { from: number; to: number; line: string; blank: boolean }
   const rows: RowPlan[] = []
   // 选区起点所在行行首：from=0 时 lastIndexOf 的 fromIndex=-1 会被按 0
@@ -509,13 +509,25 @@ function linePlan(text: string, op: FormatOperationId, range: FormatSelection): 
       }
     }
   } else if (op === 'quote') {
-    // 引用是外层容器：只增删一层 >，保留列表、标题与它们的缩进。引用
-    // 前缀是块归属的粘合剂，部分选区统一剥除会截断引用块——保持逐行
-    // 独立切换，不参与列表族两态统一（#513 拷问决策）
-    for (const p of parsed) {
-      const outer = /^(\s*)> ?/u.exec(p.row.line)
-      const next = outer ? outer[1]! + p.row.line.slice(outer[0].length) : '> ' + p.row.line
-      if (next !== p.row.line) lines.push({ from: p.row.from, to: p.row.to, insert: next })
+    // 保持逐行增删外层引用（#513）。只有空行两侧都在添加引用时，
+    // 才补上空的引用标记，让两段正文留在同一块内。
+    let gapStart = -1
+    for (const [index, row] of rows.entries()) {
+      if (row.blank) continue
+      const outer = /^(\s*)> ?/u.exec(row.line)
+      if (!outer && gapStart >= 0) {
+        for (let i = gapStart; i < index; i++) {
+          const blank = rows[i]!
+          lines.push({ from: blank.from, to: blank.from, insert: blank.line ? '> ' : '>' })
+        }
+      }
+      // 只改前缀，让选区端点继续跟随原来的正文，不被整行替换映射到行首。
+      if (outer) {
+        lines.push({ from: row.from + outer[1]!.length, to: row.from + outer[0].length, insert: '' })
+      } else {
+        lines.push({ from: row.from, to: row.from, insert: '> ' })
+      }
+      gapStart = outer ? -1 : index + 1
     }
   } else {
     // 列表族统一两态（#513）：选区真实行全部已是同类列表项即全部取消，
@@ -780,6 +792,34 @@ function htmlCommentPlan(text: string, range: FormatSelection,
 }
 
 
+/** 对会被换行拆开的行内插入，规划与界面提示共用同一判定。 */
+export function inlineInsertSelectionWarning(
+  text: string, op: FormatOperationId, range: FormatSelection, root?: SyntaxNode,
+): MessageKey | null {
+  if (op !== 'link' && op !== 'wikilink' && op !== 'inlineMath') return null
+  const value = text.slice(range.from, range.to)
+  let end = value.indexOf('\n')
+  if (end < 0) return null
+  if (op === 'wikilink') return 'toast.wikilinkSelectionLineBreak'
+
+  while (end !== -1) {
+    const from = end + 1
+    end = value.indexOf('\n', from)
+    if (end < 0) break
+    const line = value.slice(from, end)
+    const quote = parseLinePrefix(line)?.quote ?? ''
+    if (!/^[ \t]*$/u.test(line.slice(quote.length))) continue
+    if (quote) {
+      // 仅正文引用的空行分段；字面 `>` 或代码围栏里的引用前缀不分段。
+      root ??= markdownTreeParser.parse(text).topNode
+      const marker = root.resolveInner(range.from + from + quote.lastIndexOf('>'), 1)
+      if (marker.name !== 'QuoteMark' || marker.parent?.name !== 'Blockquote') continue
+    }
+    return op === 'link' ? 'toast.linkSelectionParagraphBreak' : 'toast.inlineMathSelectionParagraphBreak'
+  }
+  return null
+}
+
 export function planFormatOperation(
   text: string, op: FormatOperationId, range: FormatSelection, region?: TableRegion | null,
   action: FormatAction = 'toggle',
@@ -847,6 +887,7 @@ export function planFormatOperation(
   if (op.startsWith('heading') || op === 'bulletList' || op === 'orderedList' ||
       op === 'taskList' || op === 'quote') return linePlan(text, op, range)
   if (op === 'link' || op === 'inlineMath' || op === 'wikilink') {
+    if (inlineInsertSelectionWarning(text, op, range, root)) return null
     let { from, to } = range
     if (from !== to) {
       const lineFrom = text.lastIndexOf('\n', from - 1) + 1
@@ -913,8 +954,8 @@ export interface MultiFormatPlan {
  *  边界：变更与已收集区间**严格重叠**（from < 占用区 to）的 range 丢弃
  *  其变更（同一行内独立计划的重写区间可能交叠，无从可靠合并——保守
  *  跳过，产物选区退化为原 range 映射）；端点相接（前 to === 后 from）
- *  不算重叠。格区 region 与多 range 互斥（region 状态机维持单选区），
- *  本函数不接收 region。 */
+ *  不算重叠。不支持行内插入的选区也不允许被其他 range 的扩词改写。
+ *  格区 region 与多 range 互斥（region 状态机维持单选区），本函数不接收 region。 */
 export function planFormatOperationRanges(
   text: string, op: FormatOperationId, ranges: readonly FormatSelection[],
   action: FormatAction = 'toggle',
@@ -934,14 +975,14 @@ export function planFormatOperationRanges(
   let deltaBefore = 0
   const order = ranges.map((range, index) => ({ range, index }))
     .sort((a, b) => a.range.from - b.range.from)
+  const rejected = ranges.filter((range) => inlineInsertSelectionWarning(text, op, range))
   for (const { range, index } of order) {
     if (planOnlyIndex !== undefined && index !== planOnlyIndex) continue
     const plan = planFormatOperation(text, op, range, null, action)
     if (!plan || !plan.changes.length) continue
     const from = Math.min(...plan.changes.map((change) => change.from))
     const to = Math.max(...plan.changes.map((change) => change.to))
-    if (from < usedTo) {
-      // 与已收集区间重叠：丢弃本 range 变更（保守），选区保持 null
+    if (from < usedTo || rejected.some((other) => from < other.to && to > other.from)) {
       continue
     }
     changes.push(...plan.changes)

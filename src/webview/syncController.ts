@@ -34,7 +34,7 @@
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
 import { Annotation, EditorSelection, EditorState, type Extension, type Text } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from './formatOperations'
+import { inlineInsertSelectionWarning, isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
@@ -5349,6 +5349,17 @@ export class WebviewSyncController {
     if (!view || !this.targetEditable(view, resolved?.embed ?? null)) return
     const selection = view.state.selection
     const region = view.state.field(tableRegionField, false)
+    const text = view.state.doc.toString()
+    // 格区按单元格执行，不检查用来定位格区的主选区。
+    if (!region) {
+      for (const range of selection.ranges) {
+        const warning = inlineInsertSelectionWarning(text, op, range)
+        if (warning) {
+          this.toast?.show(t(warning), 'warning', 'format-inline-selection')
+          break
+        }
+      }
+    }
     // 多选区（#240，多光标设置开时可达；格区 region 与多 range 互斥）：
     // 行内包裹类逐 range 应用；结构性操作（标题/列表/引用/围栏/分割线/
     // HTML 注释）退化主 range（planOnlyIndex 指向主 range，其余 range
@@ -5356,9 +5367,8 @@ export class WebviewSyncController {
     if (!region && selection.ranges.length > 1) {
       const ranges = selection.ranges.map((range) => ({ from: range.from, to: range.to }))
       const plan = isInlineFormatOp(op)
-        ? planFormatOperationRanges(view.state.doc.toString(), op, ranges)
-        : planFormatOperationRanges(view.state.doc.toString(), op, ranges,
-          'toggle', selection.mainIndex)
+        ? planFormatOperationRanges(text, op, ranges)
+        : planFormatOperationRanges(text, op, ranges, 'toggle', selection.mainIndex)
       if (plan) {
         const changeSet = view.state.changes(plan.changes)
         const nextRanges = ranges.map((_, index) => {
@@ -5382,8 +5392,7 @@ export class WebviewSyncController {
       return
     }
     const range = selection.main
-    const plan = planFormatOperation(view.state.doc.toString(), op,
-      { from: range.from, to: range.to }, region)
+    const plan = planFormatOperation(text, op, range, region)
     if (plan?.changes.length) {
       view.dispatch({ changes: plan.changes,
         ...(plan.selection ? { selection: plan.selection } : {}) })

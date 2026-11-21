@@ -271,6 +271,37 @@ describe('格式操作的文本契约', () => {
     }
   })
 
+  it.each([
+    ['link', '甲\n\n乙'], ['link', '甲\n \t\n乙'],
+    ['wikilink', '甲\n乙'], ['wikilink', '甲\n\n乙'],
+    ['inlineMath', 'a+b\n\nc+d'], ['inlineMath', 'a+b\n  \nc+d'],
+  ] as const)('%s 不包裹不能成形的选区 %j', (op, text) => {
+    expect(planFormatOperation(text, op, { from: 0, to: text.length })).toBeNull()
+  })
+
+  it('普通链接和行内公式保留同段软换行的包裹行为', () => {
+    const text = 'A+B\nC+D'
+    expect(apply(text, 'link', 0, text.length).text).toBe('[A+B\nC+D]()')
+    expect(apply(text, 'inlineMath', 0, text.length).text).toBe('$A+B\nC+D$')
+  })
+
+  it('引用段间空行含嵌套标记和空白仍分段；同段软换行及字面 > 不分段', () => {
+    const nested = '> > A+B\n> > \t\n> > C+D'
+    const soft = '> A+B\n> C+D'
+    const literal = 'A+B\n    >\nC+D'
+    expect(planFormatOperation(nested, 'link', { from: 4, to: nested.length })).toBeNull()
+    expect(planFormatOperation(nested, 'inlineMath', { from: 4, to: nested.length })).toBeNull()
+    expect(apply(soft, 'link', 2, soft.length).text).toBe('> [A+B\n> C+D]()')
+    expect(apply(soft, 'inlineMath', 2, soft.length).text).toBe('> $A+B\n> C+D$')
+    expect(apply(literal, 'link', 0, literal.length).text).toBe('[A+B\n    >\nC+D]()')
+  })
+
+  it('多选区插入链接只跳过跨段选区，同段选区仍然写入', () => {
+    const text = '甲\n\n乙 丙'
+    expect(planFormatOperationRanges(text, 'link', [{ from: 0, to: 4 }, { from: 5, to: 6 }]))
+      .toEqual({ changes: [{ from: 5, to: 6, insert: '[丙]()' }], selections: [null, { anchor: 9 }] })
+  })
+
   it('空行按标题操作插入 mark 并把光标置于空格后（#393）', () => {
     expect(apply('', 'heading2', 0)).toEqual({ text: '## ', selection: { anchor: 3 } })
     expect(apply('正文\n\n正文', 'heading3', 3)).toEqual({ text: '正文\n### \n正文', selection: { anchor: 7 } })
@@ -301,7 +332,7 @@ describe('格式操作的文本契约', () => {
     expect(apply('  - ', 'bulletList', 4).text).toBe('  ')
   })
 
-  it('跨行选区空行跳过不加前缀，空行原样保留（#512 修订 #393 泛化口径）', () => {
+  it('标题和列表跳过空行，引用保留选区边缘空行（#512）', () => {
     expect(apply('正文\n\n尾', 'heading2', 0, 4)).toEqual({ text: '## 正文\n\n尾' })
     expect(apply('正文\n\n尾', 'bulletList', 0, 4)).toEqual({ text: '- 正文\n\n尾' })
     expect(apply('正文\n\n尾', 'quote', 0, 4)).toEqual({ text: '> 正文\n\n尾' })
@@ -309,10 +340,19 @@ describe('格式操作的文本契约', () => {
     expect(apply('正文\n   \n尾', 'bulletList', 0, 7)).toEqual({ text: '- 正文\n   \n尾' })
   })
 
+  it.each([
+    ['首行\n\n末行', '> 首行\n>\n> 末行'],
+    ['首行\n\n  \n末行', '> 首行\n>\n>   \n> 末行'],
+  ])('添加引用时保留选区内部空行，再次切换恢复原文：%j', (text, quoted) => {
+    expect(apply(text, 'quote', 0, text.length).text).toBe(quoted)
+    expect(apply(quoted, 'quote', 0, quoted.length).text).toBe(text)
+  })
+
   it('选区全空行或无选区空行：仅首个空行插入前缀（#512）', () => {
     // 空行选区（`\n\n` 两换行）仅选区起点所在行插入，其余空行不动
     expect(apply('\n\n', 'bulletList', 0, 2)).toEqual({ text: '- \n\n' })
     expect(apply('\n\n', 'heading2', 0, 2)).toEqual({ text: '## \n\n' })
+    expect(apply('\n\n', 'quote', 0, 2)).toEqual({ text: '> \n\n' })
     // 单光标空行保持 #393 产物光标（前缀之后）
     expect(apply('', 'bulletList', 0)).toEqual({ text: '- ', selection: { anchor: 2 } })
     expect(apply('', 'orderedList', 0)).toEqual({ text: '1. ', selection: { anchor: 3 } })
@@ -320,10 +360,14 @@ describe('格式操作的文本契约', () => {
     expect(apply('\n\n', 'headingNone', 0, 2)).toEqual({ text: '\n\n', selection: null })
   })
 
-  it('含空行选区的取消仅作用于真实行，两态对称（#512）', () => {
+  it('取消列表或引用时，未标记的空行不变（#512）', () => {
     expect(apply('- 正文\n\n尾', 'bulletList', 0, 5)).toEqual({ text: '正文\n\n尾' })
-    // 引用取消同样只摘真实行；空行跳过
     expect(apply('> 正文\n\n尾', 'quote', 0, 5)).toEqual({ text: '正文\n\n尾' })
+  })
+
+  it('普通行与已有引用混选时逐行切换，不标记二者之间的空行', () => {
+    const text = '首行\n\n> 末行'
+    expect(apply(text, 'quote', 0, text.length).text).toBe('> 首行\n\n末行')
   })
 
   it('orderedList 多行递增：承接空行上溯、段落打断、分隔符与前导零沿用（#513）', () => {
