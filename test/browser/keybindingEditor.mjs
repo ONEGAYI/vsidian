@@ -120,6 +120,20 @@ try {
   await page.keyboard.press('Control+Shift+q')
   assert.equal((await page.evaluate(() => window.keyState())).text, quoteText, '再次切换应恢复原文及空行')
   await page.keyboard.press('Control+Shift+q')
+  for (const [op, hint] of [
+    ['link', 'Links cannot span paragraphs. Select text within one paragraph.'],
+    ['inlineMath', 'Inline math cannot span paragraphs. Use a math block instead.'],
+  ]) {
+    await page.evaluate(op => window.updateKeys({ [op]: ['ctrl+shift+q'] }), op)
+    const before = await page.evaluate(() => window.keyState())
+    await page.keyboard.press('Control+Shift+q')
+    const after = await page.evaluate(() => window.keyState())
+    assert.equal(after.text, before.text, `${op} 不应改写刚形成的跨段引用选区`)
+    assert.equal(after.cursor, before.cursor)
+    assert.equal(after.messages.filter(message => message.kind === 'edit.request').length,
+      before.messages.filter(message => message.kind === 'edit.request').length)
+    await page.getByText(hint, { exact: true }).waitFor({ state: 'visible' })
+  }
   await page.evaluate(() => window.setMode('reading'))
   const quote = page.locator('.vsidian-view-reading blockquote')
   await quote.first().waitFor({ state: 'visible' })

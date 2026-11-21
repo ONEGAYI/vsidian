@@ -285,6 +285,17 @@ describe('格式操作的文本契约', () => {
     expect(apply(text, 'inlineMath', 0, text.length).text).toBe('$A+B\nC+D$')
   })
 
+  it('引用段间空行含嵌套标记和空白仍分段；同段软换行及字面 > 不分段', () => {
+    const nested = '> > A+B\n> > \t\n> > C+D'
+    const soft = '> A+B\n> C+D'
+    const literal = 'A+B\n    >\nC+D'
+    expect(planFormatOperation(nested, 'link', { from: 4, to: nested.length })).toBeNull()
+    expect(planFormatOperation(nested, 'inlineMath', { from: 4, to: nested.length })).toBeNull()
+    expect(apply(soft, 'link', 2, soft.length).text).toBe('> [A+B\n> C+D]()')
+    expect(apply(soft, 'inlineMath', 2, soft.length).text).toBe('> $A+B\n> C+D$')
+    expect(apply(literal, 'link', 0, literal.length).text).toBe('[A+B\n    >\nC+D]()')
+  })
+
   it('多选区插入链接只跳过跨段选区，同段选区仍然写入', () => {
     const text = '甲\n\n乙 丙'
     expect(planFormatOperationRanges(text, 'link', [{ from: 0, to: 4 }, { from: 5, to: 6 }]))

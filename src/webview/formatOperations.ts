@@ -794,13 +794,30 @@ function htmlCommentPlan(text: string, range: FormatSelection,
 
 /** 对会被换行拆开的行内插入，规划与界面提示共用同一判定。 */
 export function inlineInsertSelectionWarning(
-  text: string, op: FormatOperationId, range: FormatSelection,
+  text: string, op: FormatOperationId, range: FormatSelection, root?: SyntaxNode,
 ): MessageKey | null {
   if (op !== 'link' && op !== 'wikilink' && op !== 'inlineMath') return null
   const value = text.slice(range.from, range.to)
-  if (op === 'wikilink') return value.includes('\n') ? 'toast.wikilinkSelectionLineBreak' : null
-  if (!/\n[ \t]*\n/u.test(value)) return null
-  return op === 'link' ? 'toast.linkSelectionParagraphBreak' : 'toast.inlineMathSelectionParagraphBreak'
+  let end = value.indexOf('\n')
+  if (end < 0) return null
+  if (op === 'wikilink') return 'toast.wikilinkSelectionLineBreak'
+
+  while (end !== -1) {
+    const from = end + 1
+    end = value.indexOf('\n', from)
+    if (end < 0) break
+    const line = value.slice(from, end)
+    const quote = parseLinePrefix(line)?.quote ?? ''
+    if (!/^[ \t]*$/u.test(line.slice(quote.length))) continue
+    if (quote) {
+      // 仅正文引用的空行分段；字面 `>` 或代码围栏里的引用前缀不分段。
+      root ??= markdownTreeParser.parse(text).topNode
+      const marker = root.resolveInner(range.from + from + quote.lastIndexOf('>'), 1)
+      if (marker.name !== 'QuoteMark' || marker.parent?.name !== 'Blockquote') continue
+    }
+    return op === 'link' ? 'toast.linkSelectionParagraphBreak' : 'toast.inlineMathSelectionParagraphBreak'
+  }
+  return null
 }
 
 export function planFormatOperation(
@@ -870,7 +887,7 @@ export function planFormatOperation(
   if (op.startsWith('heading') || op === 'bulletList' || op === 'orderedList' ||
       op === 'taskList' || op === 'quote') return linePlan(text, op, range)
   if (op === 'link' || op === 'inlineMath' || op === 'wikilink') {
-    if (inlineInsertSelectionWarning(text, op, range)) return null
+    if (inlineInsertSelectionWarning(text, op, range, root)) return null
     let { from, to } = range
     if (from !== to) {
       const lineFrom = text.lastIndexOf('\n', from - 1) + 1

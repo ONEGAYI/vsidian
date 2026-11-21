@@ -48,6 +48,21 @@ describe('格式命令生产链路', () => {
     controller.dispose()
   })
 
+  it.each(['link', 'inlineMath'] as const)('添加引用后，%s 不改写跨引用空行的选区', (op) => {
+    const { controller, sent, view } = setup('ABCD\n\nEFGH')
+    view.dispatch({ selection: { anchor: 1, head: 8 } })
+    controller.handleHostMessage({ kind: 'format.command', op: 'quote' })
+    const source = '> ABCD\n>\n> EFGH'
+    expect(view.state.doc.toString()).toBe(source)
+    const selection = view.state.selection
+    const requests = sent.filter((message) => message.kind === 'edit.request').length
+    controller.handleHostMessage({ kind: 'format.command', op })
+    expect(view.state.doc.toString()).toBe(source)
+    expect(view.state.selection.eq(selection)).toBe(true)
+    expect(sent.filter((message) => message.kind === 'edit.request')).toHaveLength(requests)
+    controller.dispose()
+  })
+
   it('无选区围栏两态切换：包裹后光标在开围栏内侧，再按取消，三按复原', () => {
     const cases = [
       ['bold', '**word**'], ['italic', '*word*'],
