@@ -251,6 +251,32 @@ try {
       })
   }
 
+  for (const [label, definition] of [
+    ['[price _$12]', '[Price   _$12]: https://example.test'],
+    ['[price _$12][REF]', '[ref]: https://example.test'],
+    ['[price _$12][]', '[Price   _$12]: https://example.test'],
+  ]) {
+    const line = `${label}, currency $ here`
+    const body = line + '\n\n后续公式 $x$\n\n'
+    await scenario(`引用定义增删后，实时预览重算公式边界：${label}`, { doc: body + definition, cursor: 0 }, async (page) => {
+      const painted = page.locator('.cm-content .vsidian-math .katex-html')
+      const firstLine = page.locator('.cm-content .cm-line').first()
+      assert.equal(await firstLine.innerText(), line, '有定义的引用保持完整字面文本')
+      assert.equal(await painted.count(), 1, '仅排版后续的正常公式')
+
+      await page.evaluate((offset) => window.locate(offset), body.length)
+      await page.keyboard.press('Shift+End')
+      await page.keyboard.press('Backspace')
+      await check(page, body, body.length, '清除引用定义')
+      assert.equal(await painted.count(), 2, '无定义的方括号不再充当链接边界')
+
+      await cdpSession.send('Input.insertText', { text: definition })
+      await check(page, body + definition, body.length + definition.length, '恢复引用定义')
+      assert.equal(await firstLine.innerText(), line, '恢复定义后不再跨标签排版')
+      assert.equal(await painted.count(), 1, '后续正常公式仍可见')
+    })
+  }
+
   for (const [source, rendered] of [
     ['**粗体**', '粗体'],
     ['**粗\n体**', '粗\n体'],

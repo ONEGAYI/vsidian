@@ -3,9 +3,9 @@
 // 阅读渲染语义对照共用——两处对「什么算公式」的判定必须一致，否则同一
 // 文本在两种视图呈现不同语义。
 //
-// 判定规则与 @vscode/markdown-it-katex（阅读侧渲染插件）逐条对齐：
-// - 行内 `$…$`：开 `$` 的左侧不得是 `$`/`\`/词字符（[\w]，即紧贴拉丁字母
-//   数字下划线不开启）；闭 `$` 的右侧不得是 `$`/词字符。内容为空不命中。
+// 判定沿用 @vscode/markdown-it-katex；行内下划线按 Obsidian 的强调写法放行：
+// - 行内 `$…$`：开 `$` 的左侧不得是 `$`/`\`/ASCII 字母或数字；闭 `$` 的右侧
+//   不得是 `$`/ASCII 字母或数字。下划线可紧贴定界符，允许 `_$x$_` 等强调写法。
 // - `$$…$$`：左侧不得是 `$`/`\`，右侧不得是 `$`；`$` 优先级高于 `$$`
 //   （扫描先消费 `$$` 对）。
 // - 转义：前置奇数个反斜杠的 `$` 不是定界符（找闭合时跳过；开定界符
@@ -138,6 +138,33 @@ export interface MathOccurrence {
   lineMap: ContentLineMapEntry[]
 }
 
+export interface MathLinkLabel {
+  from: number
+  to: number
+  /** 直链为 null；快捷、完整与折叠引用都必须找到归一后的引用键。 */
+  referenceKey: string | null
+}
+
+export interface MathLinkRanges {
+  targets: readonly Pick<MathOccurrence, 'from' | 'to'>[]
+  labels: readonly MathLinkLabel[]
+  hasReference?: (key: string) => boolean
+}
+
+/** 只阻止穿过有效标签单侧的公式；标签内公式和完整包含标签的 TeX 均保留。 */
+export function mathCrossesLinkLabel(
+  labels: readonly MathLinkLabel[], from: number, to: number,
+  hasReference?: (key: string) => boolean,
+  enclosingLabelEnd?: number,
+): boolean {
+  return labels.some(label => {
+    const opensInside = label.from <= from && from < label.to
+    const closesInside = label.from < to && to <= label.to
+    return opensInside !== closesInside && label.to !== enclosingLabelEnd &&
+      (label.referenceKey === null || hasReference?.(label.referenceKey))
+  })
+}
+
 /** 公式排除的代码上下文节点名（lezer；照 #11 双链先例）。live 装饰的
  *  mathSuppressed 与 #433 附加组件语法查询面（addonSyntaxApi）共用——
  * 两处分叉会让「代码内 `$` 是否公式」的呈现与查询判定漂移 */
@@ -155,7 +182,7 @@ function isWordChar(ch: string | undefined): boolean {
   return ch !== undefined && /[\w\d]/u.test(ch)
 }
 
-/** 相邻字符会阻止单美元定界符识别时，粘贴需要在这一侧插入空格。 */
+/** 粘贴公式时在字母、数字、下划线或有歧义的定界符旁保留空格隔离。 */
 export function inlineMathNeedsSpace(ch: string | undefined, side: 'before' | 'after'): boolean {
   return isWordChar(ch) || ch === '$' || (side === 'before' && ch === '\\')
 }
@@ -191,8 +218,9 @@ function findDollarPair(line: string, from: number): number {
  * 缺省 0）。反引号 span 内的 `$` 跳过；未闭合/非法形态不产出。
  * 纯函数，与跨行块扫描（scanMathRanges 的块模式）共用同一贴字/转义规则。
  */
-export function scanMathInLine(line: string, base = 0, linkTargets: readonly Pick<MathOccurrence, 'from' | 'to'>[] = []): MathOccurrence[] {
+export function scanMathInLine(line: string, base = 0, links?: MathLinkRanges): MathOccurrence[] {
   const out: MathOccurrence[] = []
+  const linkTargets = links?.targets ?? []
   const len = line.length
   let at = 0
   let targetIndex = 0
@@ -247,39 +275,31 @@ export function scanMathInLine(line: string, base = 0, linkTargets: readonly Pic
       at = close + 2
       continue
     }
-    // 单 `$…$`：开定界符贴字判定（$、\ 与词字符之后不开启）
-    if (inlineMathNeedsSpace(prev, 'before')) {
+    const end = singleDollarMathEnd(line, at)
+    // `[_$…$_]` 等整段标签允许 TeX 带不配对的 `[`：Lezer 可能把它当成
+    // 使用同一闭括号的内层标签。其他真实标签仍按双向穿界判定。
+    const fence = prev === '_' && line[end] === '_' ? /\[(_{1,3})$/.exec(line.slice(Math.max(0, at - 4), at))?.[1] : undefined
+    const enclosingLabelEnd = fence && line.startsWith(fence + ']', end) ? base + end + fence.length : undefined
+    if (end < 0 || ((prev === '_' || line[end] === '_') && links &&
+        mathCrossesLinkLabel(links.labels, base + at, base + end, links.hasReference, enclosingLabelEnd))) {
       at += 1
       continue
     }
-    const close = findClosingDollar(line, at + 1)
-    if (close < 0) {
-      at += 1
-      continue
-    }
-    out.push({ from: base + at, to: base + close + 1, kind: 'inline', tex: line.slice(at + 1, close), lineMap: [] })
-    at = close + 1
+    out.push({ from: base + at, to: base + end, kind: 'inline', tex: line.slice(at + 1, end - 1), lineMap: [] })
+    at = end
   }
   return out
 }
 
-/** 从 from 起找可作为闭合的单 `$`（未转义且右侧非 $/词字符）；无则 -1 */
-function findClosingDollar(line: string, from: number): number {
-  let at = from
-  while (at < line.length) {
-    if (line[at] !== '$') {
-      at += 1
-      continue
-    }
-    if (isEscapedDollar(line, at)) {
-      at += 1
-      continue
-    }
-    const next = line[at + 1]
-    if (inlineMathNeedsSpace(next, 'after')) {
-      return -1 // 与插件一致：首个候选不可闭合即放弃本次开启
-    }
-    return at
+/** 单美元公式的结束偏移（不含）；下划线不阻断定界符，其余贴字规则沿用 KaTeX 插件。 */
+export function singleDollarMathEnd(source: string, from: number, limit = source.length): number {
+  const prev = source[from - 1]
+  if (source[from] !== '$' || source[from + 1] === '$' ||
+      (prev !== '_' && inlineMathNeedsSpace(prev, 'before'))) return -1
+  for (let close = source.indexOf('$', from + 1); close >= 0 && close < limit; close = source.indexOf('$', close + 1)) {
+    if (isEscapedDollar(source, close)) continue
+    const next = source[close + 1]
+    return next !== '_' && inlineMathNeedsSpace(next, 'after') ? -1 : close + 1
   }
   return -1
 }
@@ -348,7 +368,7 @@ export function stripInlineTexTicks(tex: string): string {
  * 某个未闭合块内时，本扫描以非块态起步，不会把窗口内的闭合定界符误配
  * 为新块（闭合判定要求先有开启行）。
  */
-export function scanMathRanges(lines: readonly string[], firstLineStart: number, linkTargets: readonly Pick<MathOccurrence, 'from' | 'to'>[] = []): MathOccurrence[] {
+export function scanMathRanges(lines: readonly string[], firstLineStart: number, links?: MathLinkRanges): MathOccurrence[] {
   if (!lines.some((line) => line.includes('$'))) {
     return []
   }
@@ -421,7 +441,7 @@ export function scanMathRanges(lines: readonly string[], firstLineStart: number,
             lineMap: [{ contentOffset: 0, lineStart, prefixLen: prefixLen + indent + 2 }],
           })
         } else if (pairs.length > 1) {
-          out.push(...scanMathInLine(bare, lineStart + prefixLen, linkTargets))
+          out.push(...scanMathInLine(bare, lineStart + prefixLen, links))
         }
         lineStart += line.length + 1
         continue
@@ -438,7 +458,7 @@ export function scanMathRanges(lines: readonly string[], firstLineStart: number,
       continue
     }
     // 行内路径不动：原行原坐标（引用前缀对该路径是普通字符）
-    out.push(...scanMathInLine(line, lineStart, linkTargets))
+    out.push(...scanMathInLine(line, lineStart, links))
     lineStart += line.length + 1
   }
   // 未闭合块不产出（稳定降级为源码）

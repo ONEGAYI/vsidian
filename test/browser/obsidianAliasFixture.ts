@@ -4,6 +4,7 @@
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import '../../src/webview/main.css'
+import 'katex/dist/katex.min.css'
 
 bootLocaleFromDocument()
 let saved: unknown

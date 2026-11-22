@@ -39,6 +39,119 @@ describe('阅读切块：公式块的独立成块与锚点', () => {
     expect(para!.innerHTML).not.toContain('katex-display')
   })
 
+  it.each([
+    ['__$x_1$__', 'strong'],
+    ['_$x_1$_', 'em'],
+    ['___$x_1$___', 'strong > em'],
+    ['***文字 $x_1$***', 'strong > em'],
+    ['***<span>$x_1$</span>***', 'strong > em'],
+    ['___<span>$x_1$</span>___', 'strong > em'],
+    ['***<span>&#36;x_1&#36;</span>***', 'strong > em'],
+    ['_**$x_1$**_', 'em > strong'],
+    ['***$x_1$** 文字*', 'em > strong'],
+    ['*****$x_1$*****', 'em > strong > strong'],
+    ['__文字 $x_1$__', 'strong'],
+    ['_$x_1$ 文字_', 'em'],
+  ])('强调标记 %s 不阻断行内公式，外层格式顺序正确', (source, selector) => {
+    const [para] = renderBlocks(source)
+    expect(para.querySelector(selector)?.querySelector('.vsidian-math annotation')?.textContent).toBe('x_1')
+  })
+
+  it.each(['***文字***', '***<code>$x$</code>***', '***<span title="$x$">文字</span>***'])(
+    '不含可排版公式的三重强调保留既有阅读 DOM 顺序：%s', (source) => {
+      const [para] = renderBlocks(source)
+      expect(para.querySelector('em > strong')).not.toBeNull()
+      expect(para.querySelector('.vsidian-math')).toBeNull()
+    },
+  )
+
+  it.each([
+    ['![_$qwert$_](image.png)', '$qwert$'],
+    ['![![_$qwert$_](inner.png)](image.png)', '$qwert$'],
+    ['![_$a&amp;b$_](image.png)', '$a&b$'],
+    [String.raw`![_$q\_1$_](image.png)`, '$q_1$'],
+    ['![_$a **b** c$_](image.png)', '$a b c$'],
+  ])('公式识别不改变图片替代文字 %s', (source, alt) => {
+    const [para] = renderBlocks(source)
+    expect(para.querySelector('img')?.alt).toBe(alt)
+  })
+
+  it.each([
+    ['![price _$12](image.png), currency $ here', 'img'],
+    ['[price _$12](https://example.test), currency $ here', 'a'],
+    ['[![price _$12](image.png)](https://example.test), currency $ here', 'a > img'],
+    ['[price _$12](), currency $ here', 'a'],
+    ['[price _$12][ref], currency $ here\n\n[ref]: https://example.test', 'a'],
+    ['[price _$12], currency $ here\n\n[price _$12]: https://example.test', 'a'],
+  ])('未闭合的下划线公式不能跨过链接或图片边界：%s', (source, selector) => {
+    const [para] = renderBlocks(source)
+    expect(para.querySelector(selector)).not.toBeNull()
+    expect(para.querySelector('.vsidian-math, .vsidian-math-error')).toBeNull()
+    expect(para.textContent).toContain(', currency $ here')
+  })
+  it.each([
+    ['[label $ after](/ok) tail', 'a'],
+    ['![label $ after](img.png) tail', 'img'],
+    ['[label $ after][ref] tail\n\n[Ref]: /ok', 'a'],
+    ['[label $ after] tail\n\n[label $ after]: /ok', 'a'],
+  ])('从标签外开始的公式不吞掉有效链接或图片：%s', (target, selector) => {
+    const [para] = renderBlocks('before _$ money ' + target)
+    expect(para.querySelector(selector)).not.toBeNull()
+    expect(para.querySelector('.vsidian-math, .vsidian-math-error')).toBeNull()
+  })
+  it.each([
+    ['[price _$12][REF]', '[ref]: /ok', '12][REF], currency '],
+    ['[price _$12][]', '[Price   _$12]: /ok', '12][], currency '],
+  ])('未定义的完整或折叠引用不限制公式，定义后保留真实链接：%s', (label, definition, tex) => {
+    const text = label + ', currency $ here'
+    const [undefinedRef] = renderBlocks(text)
+    expect(undefinedRef.querySelector('a')).toBeNull()
+    expect(undefinedRef.querySelector('.vsidian-math annotation')?.textContent).toBe(tex)
+    const [definedRef] = renderBlocks(text + '\n\n' + definition)
+    expect(definedRef.querySelector('a')?.getAttribute('href')).toBe('/ok')
+    expect(definedRef.querySelector('.vsidian-math, .vsidian-math-error')).toBeNull()
+  })
+  it('公式可完整包含形似链接的 TeX', () => {
+    const [para] = renderBlocks('前 _$[x](url)$_ 后')
+    expect(para.querySelector('.vsidian-math annotation')?.textContent).toBe('[x](url)')
+  })
+
+  it.each([
+    ['_', 'x_1'],
+    ['__', String.raw`\left[x,y\right)`],
+    ['_', String.raw`\text{]}`],
+  ])('链接标签内成对的下划线公式仍参与排版：%s %s', (fence, tex) => {
+    const [para] = renderBlocks(`[${fence}$${tex}$${fence}](https://example.test)`)
+    expect(para.querySelector('a .vsidian-math annotation')?.textContent).toBe(tex)
+  })
+
+  it('行内 HTML 内只排版文本节点中的公式，保留外壳、属性与其他 Markdown 字面内容', () => {
+    const [para] = renderBlocks('前 <span style="color: purple" title="$t$">**字面** <em>$x_1$</em> 和 $a&lt;b$</span> 后')
+    const span = para.querySelector<HTMLSpanElement>('span[title]')!
+    expect(span.getAttribute('title')).toBe('$t$')
+    expect(span.style.color).toBe('purple')
+    expect(span.querySelector('strong')).toBeNull()
+    expect(span.textContent).toContain('**字面**')
+    expect(span.querySelector('em .vsidian-math annotation')?.textContent).toBe('x_1')
+    expect(span.querySelector(':scope > .vsidian-math annotation')?.textContent).toBe('a<b')
+    expect(para.textContent?.trimEnd()).toMatch(/^前 .* 后$/u)
+  })
+
+  it('行内 HTML 的代码、原生 MathML 和源码降级不重新排版', () => {
+    const [para] = renderBlocks('前 <code>$x$</code> <math><mtext>$y$</mtext></math> <script>$z$</script> 后')
+    expect(para.querySelector('.vsidian-math')).toBeNull()
+    expect(para.querySelector('code')?.textContent).toBe('$x$')
+    expect(para.querySelector('mtext')?.textContent).toBe('$y$')
+    expect(para.querySelector('.vsidian-html-source-fallback')?.textContent).toBe('<script>$z$</script>')
+  })
+
+  it('行内 HTML 的建议项和输出控件保留原始值，邻近公式仍正常渲染', () => {
+    const [para] = renderBlocks('前 <span><datalist id="choices"><option>$x$</option></datalist> <input list="choices"> <output>$y$</output> $z$</span> 后')
+    expect(para.querySelector('option')?.value).toBe('$x$')
+    expect(para.querySelector('output')?.value).toBe('$y$')
+    expect([...para.querySelectorAll('.vsidian-math annotation')].map(node => node.textContent)).toEqual(['z'])
+  })
+
   it('代码区内的 $ 不渲染公式', () => {
     const code = renderBlocks('`a $b$ c`\n\n```\n$x$\n```\n')
     for (const el of code) {
