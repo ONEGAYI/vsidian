@@ -377,6 +377,20 @@ try {
   await page.waitForFunction(url => window.sent().some(m => m.kind === 'link.activate' && m.href === url), url)
   console.log('[PASS] 含美元的链接目标不参与公式配对，点击时发出原地址')
 
+  await page.evaluate(() => {
+    window.replace('$a$ end')
+    window.selectRanges([{ anchor: 0, head: 0 }])
+  })
+  await write('x USD', katexSpan('x') + ' USD')
+  await page.keyboard.press('Control+V')
+  const adjacent = '$x$ USD $a$ end'
+  await waitBoth(adjacent)
+  await page.evaluate(end => window.selectRanges([{ anchor: end, head: end }]), adjacent.length)
+  await renderedMath.nth(1).waitFor({ state: 'visible' })
+  assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['x', 'a'])
+  await page.keyboard.press('Control+Z'); await waitBoth('x USD$a$ end')
+  console.log('[PASS] 新公式和尾随英文不破坏旧公式；撤销格式仍恢复原剪贴板纯文本')
+
   await page.evaluate(() => window.pasteRules({ version: 8, rules: [] }))
   await page.evaluate(() => window.replace('原文'))
   await write(antiGravityPlain, antiGravityHtml)

@@ -31,6 +31,7 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
 } | null {
   const ranges = state.selection.ranges
   const scanned = new Map<number, MathOccurrence[]>()
+  const existingInline: MathOccurrence[] = []
   let blockIndex = 0
   for (const range of ranges) {
     for (const at of [range.from, range.to]) {
@@ -43,10 +44,13 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
       if (!hits) {
         hits = scanMathInMarkdownLine(line.text, line.from)
         scanned.set(line.number, hits)
+        for (const hit of hits) if (hit.kind === 'inline') existingInline.push(hit)
       }
       if (hits.some(hit => hit.from < at && at < hit.to)) return null
     }
   }
+  const existingStarts = new Set(existingInline.map(hit => hit.from))
+  const existingEnds = new Set(existingInline.map(hit => hit.to))
   const input = state.toText(text)
   const distribute = input.lines === ranges.length
   const mathByLine = new Map<number, { from: number; to: number }[]>()
@@ -67,7 +71,7 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
     const math = line ? mathByLine.get(line.number) ?? [] : inlineMath
     if (ranges[i - 1]?.to !== range.from) {
       tail = range.from > 0 ? state.doc.sliceString(range.from - 1, range.from) : undefined
-      tailIsMath = false
+      tailIsMath = existingEnds.has(range.from)
     }
     const before = chunk.length > 0 && (math[0]?.from === start && inlineMathNeedsSpace(tail, 'before') ||
       tailIsMath && inlineMathNeedsSpace(chunk[0], 'after'))
@@ -75,8 +79,11 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
       tail = chunk.at(-1)
       tailIsMath = math.at(-1)?.to === start + chunk.length
     }
-    const after = tailIsMath && ranges[i + 1]?.from !== range.to && range.to < state.doc.length &&
-      inlineMathNeedsSpace(state.doc.sliceString(range.to, range.to + 1), 'after')
+    const after = ranges[i + 1]?.from !== range.to && (
+      existingStarts.has(range.to) && inlineMathNeedsSpace(tail, 'before') ||
+      tailIsMath && range.to < state.doc.length &&
+        inlineMathNeedsSpace(state.doc.sliceString(range.to, range.to + 1), 'after')
+    )
     const insert = (before ? ' ' : '') + chunk + (after ? ' ' : '')
     const offset = range.from + shift + Number(before) - start
     for (const hit of math) expected.push({ from: hit.from + offset, to: hit.to + offset })
@@ -85,7 +92,18 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
     return insert
   })
   // 校验草稿文档，不触发安装在真实事务上的行为或过滤器。
-  const doc = pasteChanges(state, text, insertions).changes.apply(state.doc)
+  const { changes } = pasteChanges(state, text, insertions)
+  const doc = changes.apply(state.doc)
+  // 选区端点所在线的旧公式也必须保留；被选区替换的公式不参与校验。
+  let selectionIndex = 0
+  for (const hit of existingInline) {
+    while (selectionIndex < ranges.length && ranges[selectionIndex]!.to <= hit.from) selectionIndex++
+    const range = ranges[selectionIndex]
+    if (!range || range.from >= hit.to) {
+      expected.push({ from: changes.mapPos(hit.from, 1), to: changes.mapPos(hit.to, -1) })
+    }
+  }
+  expected.sort((a, b) => a.from - b.from)
   let checked = 0, actual = new Map<number, number>()
   for (const hit of expected) {
     const line = doc.lineAt(hit.from)

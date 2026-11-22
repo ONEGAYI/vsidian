@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import { EditorSelection } from '@codemirror/state'
 import { WebviewSyncController } from '../../src/webview/syncController'
+import { splitReadingBlocks } from '../../src/webview/readingBlocks'
+import { createReadingBlockElement } from '../../src/webview/readingView'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import type { WebviewToHost } from '../../src/shared/protocol'
@@ -63,14 +65,14 @@ const PROMPT_LINK_SNAPSHOT = (version: number) => ({
   }],
 })
 
-function pasteMath(view: EditorView, tex: string, plain: string, htmlPrefix = '') {
+function pasteMath(view: EditorView, tex: string, plain: string, htmlPrefix = '', htmlSuffix = '') {
   const [link] = PROMPT_LINK_SNAPSHOT(1).rules
   c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: {
     version: 1, rules: [{ ...link!, match: { tag: 'SPAN' }, output: {
       kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } },
     } }],
   } })
-  paste(view, `${htmlPrefix}<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>`, plain)
+  paste(view, `${htmlPrefix}<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>${htmlSuffix}`, plain)
 }
 
 describe('粘贴规则控制器消费链', () => {
@@ -91,6 +93,27 @@ describe('粘贴规则控制器消费链', () => {
     pasteMath(view, String.raw`\frac{a}{b}`, 'a/b')
     await settle()
     expect(view.state.doc.toString()).toBe(String.raw`$\frac{a}{b}$ $\frac{a}{b}$`)
+  })
+
+  it.each([
+    { doc: '$a$ end', at: 0, plain: 'x USD', prefix: '', suffix: ' USD', formatted: '$x$ USD $a$ end', tex: ['x', 'a'] },
+    { doc: 'start $a$', at: 9, plain: 'USD x', prefix: 'USD ', suffix: '', formatted: 'start $a$ USD $x$', tex: ['a', 'x'] },
+  ])('恢复新公式时保留选区外的旧公式：$doc', async ({ doc, at, plain, prefix, suffix, formatted, tex }) => {
+    const { view, sent } = mount(doc)
+    view.dispatch({ selection: { anchor: at } })
+    pasteMath(view, 'x', plain, prefix, suffix)
+    await settle()
+
+    const finalSource = view.state.doc.toString()
+    const renderedTex = splitReadingBlocks(finalSource).flatMap(block =>
+      Array.from(createReadingBlockElement(block, finalSource).querySelectorAll('annotation'), node => node.textContent),
+    )
+    expect(renderedTex).toEqual(tex)
+    expect(finalSource).toBe(formatted)
+    ack(sent); await settle()
+    const edits = sent.filter((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')
+    expect(edits.map(edit => edit.paste?.stage)).toEqual(['text', 'format'])
+    expect(edits[0]!.changes).toEqual([{ offset: at, length: 0, text: plain }])
   })
 
   it('已有不配对的美元不能抢占从剪贴板恢复的公式定界符', async () => {
