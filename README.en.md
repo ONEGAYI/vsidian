@@ -84,7 +84,9 @@ Preview and edit one note from inside another, or export a document with equatio
 
 A VS Code extension can declare itself a Vsidian add-on. Vsidian discovers it on install. Add-ons can provide settings pages, input behaviors, code-block renderers, paste converters, themes, commands, menus, toolbar buttons, and panels. If an add-on fails, Vsidian withdraws its contributions without disabling built-in features or other add-ons.
 
-See the [add-on developer guide](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md). The stable API has carried compatibility commitments since 1.1.0.
+With [Vsidian Agent Bridge](https://github.com/ONEGAYI/vsidian-agent-bridge) installed, Vsidian 1.8.0 and later can restore inline formulas when pasting rich text from sources such as Antigravity.
+
+See the [add-on developer guide](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md). The current stable API is 1.5.0. Compatibility commitments began with 1.1.0.
 
 ## More features
 
