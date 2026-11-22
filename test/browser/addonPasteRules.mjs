@@ -263,4 +263,91 @@ try {
   await selectAll(); await page.keyboard.press('Control+V')
   await waitBoth('[D16]')
   console.log('[PASS] 16 层条件组合快照穿过协议守卫并被生产控制器接纳')
+
+  // 反重力实际剪贴板双载荷，HTML 仅去掉 Windows CF_HTML 外壳。
+  const antiGravityPlain = "一个诊断问题实例（DPI）由五元组 \n(\n𝑆\n𝐷\n，\n𝐶\n𝑂\n𝑀\n𝑃\n𝑆\n，\n𝑂\n𝐵\n𝑆\n，\n𝑃\n，\n𝑁\n)\n(SD，COMPS，OBS，P，N) 构成"
+  const antiGravityHtml = [
+    "一个<strong>诊断问题实例（DPI）</strong>由五元组 <span>",
+    "<span class=\"katex\">",
+    "<span class=\"katex-mathml\">",
+    "<math xmlns=\"http://www.w3.org/1998/Math/MathML\">",
+    "<semantics>",
+    "<mrow>",
+    "<mo stretchy=\"false\">(</mo>",
+    "<mi>S</mi>",
+    "<mi>D</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>C</mi>",
+    "<mi>O</mi>",
+    "<mi>M</mi>",
+    "<mi>P</mi>",
+    "<mi>S</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>O</mi>",
+    "<mi>B</mi>",
+    "<mi>S</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>P</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>N</mi>",
+    "<mo stretchy=\"false\">)</mo>",
+    "</mrow>",
+    "<annotation encoding=\"application/x-tex\">(SD, COMPS, OBS, P, N)</annotation>",
+    "</semantics>",
+    "</math>",
+    "</span>",
+    "<span class=\"katex-html\" aria-hidden=\"true\">",
+    "<span class=\"katex-base\">",
+    "<span class=\"katex-strut\" style=\"height: 1em; vertical-align: -0.25em;\">",
+    "</span>",
+    "<span class=\"mopen\">(</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0576em;\">S</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0278em;\">D</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0715em;\">C</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0278em;\">O</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">M</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.1389em;\">P</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0576em;\">S</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0278em;\">O</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0502em;\">B</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0576em;\">S</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.1389em;\">P</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">N</span>",
+    "<span class=\"mclose\">)</span>",
+    "</span>",
+    "</span>",
+    "</span>",
+    "</span> 构成",
+  ].join('')
+  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 7, rules: [{
+    addonId: 'ONEGAYI.vsidian-codex-bridge',
+    id: 'katex-inline-math',
+    priority: 0,
+    match: { tag: 'SPAN', condition: { kind: 'attribute-regex', name: 'class', regex: { pattern: '(?:^|\\s)katex(?:\\s|$)' } } },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } } },
+  }] })
+  await write(antiGravityPlain, antiGravityHtml)
+  await selectAll(); await page.keyboard.press('Control+V')
+  // “）”紧贴粗体结束符，宿主已有序列化规则把相邻的“由”写成等价字符实体。
+  await waitBoth('一个**诊断问题实例（DPI）**&#30001;五元组 $(SD, COMPS, OBS, P, N)$ 构成')
+  assert.strictEqual(await editor.locator('.cm-strong').first().textContent(), '诊断问题实例（DPI）')
+  const renderedMath = editor.locator('.vsidian-math .katex-html')
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.strictEqual(await renderedMath.count(), 1)
+  await page.evaluate(() => window.pasteRules({ version: 8, rules: [] }))
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('一个**诊断问题实例（DPI）**&#30001;五元组 (SD, COMPS, OBS, P, N) 构成')
+  console.log('[PASS] 反重力双载荷：粗体与单个可见行内公式保留；撤回规则后按旧链路粘贴')
 } finally { await browser.close() }

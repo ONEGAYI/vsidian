@@ -19,6 +19,7 @@
 // 预算，超限确定性停用）。
 import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown } from '../../src/webview/htmlToMarkdown'
+import { scanMathInLine } from '../../src/shared/math'
 import * as pasteRulesModule from '../../src/shared/addonPasteRules'
 import {
   ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
@@ -50,6 +51,63 @@ const promptLinkRule = (override: Partial<AddonPasteRule> = {}): AddonPasteRule 
   })
 
 const convert = (html: string, rules: readonly AddonPasteRule[]) => htmlToMarkdown(html, { addonPasteRules: rules })
+
+describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
+  const declarations = [{
+    id: 'inline-math',
+    match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex' }] },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } } },
+  }]
+  const markup = (tex: string, display = '') =>
+    `<span class="katex"><span class="katex-mathml"><math ${display}><semantics><mrow><mi>a</mi></mrow>${tex}</semantics></math></span><span class="katex-html" aria-hidden="true">视觉副本</span></span>`
+  const annotate = (tex: string) => `<annotation encoding="application/x-tex">${tex}</annotation>`
+  function snapshot() {
+    const result = pasteRulesModule.validateAddonPasteRuleDeclarations(declarations)
+    if (!result.ok) throw new Error(result.detail)
+    return { version: 1, rules: result.rules.map(r => ({ ...r, addonId: 'fixture.demo' })) }
+  }
+
+  it('注册和接收快照后，从 annotation 取源码而不是渲染文字', () => {
+    const registered = snapshot()
+    expect(pasteRulesModule.isAddonPasteRulesSnapshot(registered)).toBe(true)
+    const tex = String.raw`\frac{a_1}{b}`
+    expect(convert(markup(annotate(tex)), registered.rules)).toEqual({
+      markdown: `$${tex}$`,
+      hasFormatting: true,
+    })
+  })
+
+  it('没有行内 TeX、含未转义的定界符或块公式时回到原转换', () => {
+    const { rules } = snapshot()
+    const invalid = [
+      markup('<annotation encoding="other">x</annotation>'),
+      markup(annotate('')),
+      markup(annotate('a$b')),
+      markup(annotate('x\\')),
+      markup(annotate('a\nb')),
+      markup(annotate('x'), 'display="block"'),
+    ]
+    for (const html of invalid) expect(convert(html, rules)).toEqual(convert(html, []))
+  })
+
+  it('只在行内定界符无法紧贴的位置插入分隔空格', () => {
+    const { rules } = snapshot()
+    const formula = (tex: string) => markup(annotate(tex))
+    const { markdown } = convert(`字${formula('t')}字 x${formula('y')}z ${formula('a')}${formula('b')}`, rules)
+    expect(markdown).toBe('字$t$字 x $y$ z $a$ $b$')
+    expect(scanMathInLine(markdown, 0).map(hit => hit.tex)).toEqual(['t', 'y', 'a', 'b'])
+  })
+
+  it('行内公式槽必须独占模板，不能兼做 URL 槽', () => {
+    const [rule] = declarations
+    expect(pasteRulesModule.validateAddonPasteRuleDeclarations([
+      { ...rule, output: { ...rule!.output, template: 'x{{tex}}' } },
+    ])).toMatchObject({ ok: false, reason: 'invalid-declaration' })
+    expect(pasteRulesModule.validateAddonPasteRuleDeclarations([
+      { ...rule, output: { ...rule!.output, slots: { tex: { ...rule!.output.slots.tex, url: true } } } },
+    ])).toMatchObject({ ok: false, reason: 'invalid-declaration' })
+  })
+})
 
 describe('粘贴规则转换：命中与回退', () => {
   it('命中：来源特化 span 恢复为可点击链接', () => {

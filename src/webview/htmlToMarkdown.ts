@@ -27,7 +27,7 @@ const escapeEntityPrefixes = (value: string) => value.replace(/&(?=(?:#(?:\d+|x[
 const escapeText = (text: string) => escapeEntityPrefixes(text).replace(/\\/g, '\\\\').replace(/([`*_~{}\[\]<>#])/g, '\\$1')
   .replace(/^(\s{0,3})([-+])(?=\s|[-+]{2})/gm, '$1\\$2').replace(/^(\s{0,3}\d+)([.)])(?=\s)/gm, '$1\\$2')
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
-interface InlineRun extends Marks { text: string }
+interface InlineRun extends Marks { text: string; inlineMath?: boolean }
 const unmarked: Marks = { bold:false, italic:false, strike:false }
 const markKeys: Array<keyof Marks> = ['strike','italic','bold']
 
@@ -168,6 +168,13 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
     }
     const slot = rule.output.slots[part.slot]
     if (!slot) return null
+    if (slot.inlineMath) {
+      const annotation = el.querySelector('math:not([display="block"]) > semantics > annotation[encoding="application/x-tex"]')
+      const tex = annotation?.textContent?.trim()
+      // 公式槽独占模板：裸 $ 会提前闭合，尾部反斜杠会改变结束定界符语义。
+      if (!tex || /[\r\n]|(^|[^\\])(?:\\\\)*\$|\\$/u.test(tex)) return null
+      return `$${tex}$`
+    }
     // 取值：属性缺失（null）、文本/子内容为空串、正则不匹配、捕获组
     // 未参与与捕获空串、正则输入超上限，都是必需取值缺失——本规则失败
     let raw: string | null
@@ -260,9 +267,10 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
           // children 槽（含嵌套子规则集产物）已由子转换编码当前/继承
           // 格式；其余模板沿用行内 run 的格式合并，避免规则命中的文字
           // 脱离父层粗体等标记。
-          const convertedChildren = rule.output.kind === 'template' && Object.values(rule.output.slots)
-            .some(slot => slot.source.kind === 'children')
-          return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)), text: output }
+          const slots = rule.output.kind === 'template' ? Object.values(rule.output.slots) : []
+          const convertedChildren = slots.some(slot => slot.source.kind === 'children')
+          return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)),
+            text: output, inlineMath: slots.some(slot => slot.inlineMath) }
         }
       } catch (error) {
         // 求值步预算耗尽：停用全部组件规则（本元素回内置，后续元素跳过）
@@ -330,8 +338,14 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const merged: InlineRun[]=[]
     for (const run of runs) {
       const last=merged.at(-1)
-      if (last && last.bold===run.bold && last.italic===run.italic && last.strike===run.strike) last.text+=run.text
-      else merged.push({...run})
+      if (last && last.bold===run.bold && last.italic===run.italic && last.strike===run.strike) {
+        // 跟随行内公式解析器的定界符边界：x$x$、$x$y 与 $x$$y$ 都不能正确显示。
+        if ((last.inlineMath && /^[\w$]/u.test(run.text)) || (run.inlineMath && /[\w$\\]$/u.test(last.text))) {
+          last.text += ' '
+        }
+        last.text += run.text
+        if (run.text) last.inlineMath = run.inlineMath ?? false
+      } else merged.push({...run})
     }
     // CommonMark 标点两侧的 delimiter flanking 会受邻接文字影响。
     // 仅把必要的邻接文字写成字符实体，呈现正文不增空格、不插 HTML 标签。
