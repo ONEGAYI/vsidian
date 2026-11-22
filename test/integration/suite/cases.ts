@@ -16735,6 +16735,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     assert(held.container === 'live', `默认模式收编落点应为 live，实际 ${held.container}`)
     assert(typeof held.shownAt === 'number', '回报应含呈现时刻打点')
+    // 收编回报早于 ready；postToPanel 只向已就绪的真实面板投递。
+    await waitSessionReady('mode.md')
     await vscode.commands.executeCommand(
       CMD.postToPanel, wsUri('mode.md'), { kind: '_test.skeleton.release' })
     const released = await poll('骨架撤除回报', async () => {
