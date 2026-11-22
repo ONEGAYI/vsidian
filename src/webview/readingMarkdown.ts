@@ -610,23 +610,25 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
     // 沿用插件对未成型 HTML 开标签的降级；完整 HTML 片段走专用 renderer。
     const previous = state.tokens.at(-1)
     if (previous?.type === 'html_inline' && /^<\w+.+[^/]>$/.test(previous.content)) return false
-    if (silent) {
-      // 静默探查尚未限定标签范围。保留既有标签末端，但允许 TeX 自带方括号。
-      const bracket = src.indexOf(']', pos + 1)
-      if (bracket >= 0 && bracket < end) {
-        let links = linkRangesByInlineState.get(state)
-        if (!links) {
-          links = mathLinkRanges(src, 0)
-          linkRangesByInlineState.set(state, links)
-        }
-        const references = state.env.references
-        if (mathCrossesLinkLabel(links.labels, pos, end, ({ from, to }) =>
-          references !== undefined && Object.hasOwn(references, md.utils.normalizeReference(src.slice(from, to))))) return false
+    const content = src.slice(pos + 1, end - 1)
+    // 静默探查先确定当前标签，公式内部的 `[` 不能抢成下一条链接的开头。
+    if (/[\[\]]/.test(content)) {
+      let links = linkRangesByInlineState.get(state)
+      if (!links) {
+        links = mathLinkRanges(src, 0)
+        linkRangesByInlineState.set(state, links)
       }
-    } else {
+      const references = state.env.references
+      // 正式解析只保护闭括号仍在当前解析域内的标签；与 posMax 共用
+      // 闭括号的 Lezer 候选，可能只是 TeX 中未配对的左括号。
+      const labels = links.labels.filter(label => label.to < posMax && (!silent || label.from <= pos))
+      if (mathCrossesLinkLabel(labels, pos, end, key =>
+        references !== undefined && Object.hasOwn(references, key))) return false
+    }
+    if (!silent) {
       const token = state.push('math_inline', 'math', 0)
       token.markup = '$'
-      token.content = src.slice(pos + 1, end - 1)
+      token.content = content
     }
     state.pos = end
     return true

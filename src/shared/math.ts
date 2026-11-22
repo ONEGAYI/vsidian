@@ -141,23 +141,28 @@ export interface MathOccurrence {
 export interface MathLinkLabel {
   from: number
   to: number
-  /** 存在显式目标或引用标签；快捷引用按所属文档的定义确认。 */
-  hasTarget: boolean
+  /** 直链为 null；快捷、完整与折叠引用都必须找到归一后的引用键。 */
+  referenceKey: string | null
 }
 
 export interface MathLinkRanges {
   targets: readonly Pick<MathOccurrence, 'from' | 'to'>[]
   labels: readonly MathLinkLabel[]
-  hasShortcutReference?: (label: MathLinkLabel) => boolean
+  hasReference?: (key: string) => boolean
 }
 
-/** 从一个既有标签内部开始的公式不能借用标签外的闭合美元。 */
+/** 只阻止穿过有效标签单侧的公式；标签内公式和完整包含标签的 TeX 均保留。 */
 export function mathCrossesLinkLabel(
   labels: readonly MathLinkLabel[], from: number, to: number,
-  hasShortcutReference?: (label: MathLinkLabel) => boolean,
+  hasReference?: (key: string) => boolean,
+  enclosingLabelEnd?: number,
 ): boolean {
-  return labels.some(label => label.from <= from && from < label.to && label.to < to &&
-    (label.hasTarget || hasShortcutReference?.(label)))
+  return labels.some(label => {
+    const opensInside = label.from <= from && from < label.to
+    const closesInside = label.from < to && to <= label.to
+    return opensInside !== closesInside && label.to !== enclosingLabelEnd &&
+      (label.referenceKey === null || hasReference?.(label.referenceKey))
+  })
 }
 
 /** 公式排除的代码上下文节点名（lezer；照 #11 双链先例）。live 装饰的
@@ -271,9 +276,12 @@ export function scanMathInLine(line: string, base = 0, links?: MathLinkRanges): 
       continue
     }
     const end = singleDollarMathEnd(line, at)
-    // 仅限制下划线新增的命中；起于链接外的公式仍可消费完整 TeX。
+    // `[_$…$_]` 等整段标签允许 TeX 带不配对的 `[`：Lezer 可能把它当成
+    // 使用同一闭括号的内层标签。其他真实标签仍按双向穿界判定。
+    const fence = prev === '_' && line[end] === '_' ? /\[(_{1,3})$/.exec(line.slice(Math.max(0, at - 4), at))?.[1] : undefined
+    const enclosingLabelEnd = fence && line.startsWith(fence + ']', end) ? base + end + fence.length : undefined
     if (end < 0 || ((prev === '_' || line[end] === '_') && links &&
-        mathCrossesLinkLabel(links.labels, base + at, base + end, links.hasShortcutReference))) {
+        mathCrossesLinkLabel(links.labels, base + at, base + end, links.hasReference, enclosingLabelEnd))) {
       at += 1
       continue
     }

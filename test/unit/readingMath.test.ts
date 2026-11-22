@@ -89,6 +89,32 @@ describe('阅读切块：公式块的独立成块与锚点', () => {
     expect(para.querySelector('.vsidian-math, .vsidian-math-error')).toBeNull()
     expect(para.textContent).toContain(', currency $ here')
   })
+  it.each([
+    ['[label $ after](/ok) tail', 'a'],
+    ['![label $ after](img.png) tail', 'img'],
+    ['[label $ after][ref] tail\n\n[Ref]: /ok', 'a'],
+    ['[label $ after] tail\n\n[label $ after]: /ok', 'a'],
+  ])('从标签外开始的公式不吞掉有效链接或图片：%s', (target, selector) => {
+    const [para] = renderBlocks('before _$ money ' + target)
+    expect(para.querySelector(selector)).not.toBeNull()
+    expect(para.querySelector('.vsidian-math, .vsidian-math-error')).toBeNull()
+  })
+  it.each([
+    ['[price _$12][REF]', '[ref]: /ok', '12][REF], currency '],
+    ['[price _$12][]', '[Price   _$12]: /ok', '12][], currency '],
+  ])('未定义的完整或折叠引用不限制公式，定义后保留真实链接：%s', (label, definition, tex) => {
+    const text = label + ', currency $ here'
+    const [undefinedRef] = renderBlocks(text)
+    expect(undefinedRef.querySelector('a')).toBeNull()
+    expect(undefinedRef.querySelector('.vsidian-math annotation')?.textContent).toBe(tex)
+    const [definedRef] = renderBlocks(text + '\n\n' + definition)
+    expect(definedRef.querySelector('a')?.getAttribute('href')).toBe('/ok')
+    expect(definedRef.querySelector('.vsidian-math, .vsidian-math-error')).toBeNull()
+  })
+  it('公式可完整包含形似链接的 TeX', () => {
+    const [para] = renderBlocks('前 _$[x](url)$_ 后')
+    expect(para.querySelector('.vsidian-math annotation')?.textContent).toBe('[x](url)')
+  })
 
   it.each([
     ['_', 'x_1'],

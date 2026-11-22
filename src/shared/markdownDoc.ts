@@ -166,11 +166,11 @@ interface MarkdownMathSource {
   fm: SourceRange | null
 }
 
-const shortcutLabelsByTree = new WeakMap<Tree, { doc: Text; labels: ReadonlySet<string> }>()
+const referenceLabelsByTree = new WeakMap<Tree, { doc: Text; labels: ReadonlySet<string> }>()
 
-/** 只在公式确实尝试跨过快捷引用候选时查询，不为每条视口行扫描全文。 */
-function shortcutLabelsOf(doc: Text, tree: Tree, bodyStart: number): ReadonlySet<string> {
-  const cached = shortcutLabelsByTree.get(tree)
+/** 只在公式确实尝试跨过引用标签候选时查询，不为每条视口行扫描全文。 */
+function referenceLabelsOf(doc: Text, tree: Tree, bodyStart: number): ReadonlySet<string> {
+  const cached = referenceLabelsByTree.get(tree)
   if (cached?.doc === doc) return cached.labels
   const labels = new Set<string>()
   tree.iterate({ from: bodyStart, enter(node) {
@@ -178,7 +178,7 @@ function shortcutLabelsOf(doc: Text, tree: Tree, bodyStart: number): ReadonlySet
     const label = node.node.getChild('LinkLabel')!
     labels.add(normalizeReferenceLabel(doc.sliceString(label.from + 1, label.to - 1)))
   } })
-  shortcutLabelsByTree.set(tree, { doc, labels })
+  referenceLabelsByTree.set(tree, { doc, labels })
   return labels
 }
 
@@ -192,17 +192,27 @@ export function mathLinkRanges(line: string, base: number, source?: MarkdownMath
   visitRange(tree ?? markdownTreeParser.parse(line), offset, offset + line.length, (node, path) => {
     if (node.name === 'Link' || node.name === 'Image') {
       const [open, close] = node.getChildren('LinkMark')
-      if (open && close) labels.push({ from: base + open.to - offset, to: base + close.from - offset, hasTarget: close.to < node.to })
+      if (open && close) {
+        const ref = node.getChild('LinkLabel')
+        let referenceKey: string | null = null
+        if (ref || close.to === node.to) {
+          // 完整引用用第二组括号；折叠和快捷引用用第一组括号。
+          const fullRef = ref && ref.to - ref.from > 2
+          const from = fullRef ? ref.from + 1 : open.to
+          const to = fullRef ? ref.to - 1 : close.from
+          referenceKey = normalizeReferenceLabel(source && tree ? source.doc.sliceString(from, to) : line.slice(from, to))
+        }
+        labels.push({ from: base + open.to - offset, to: base + close.from - offset, referenceKey })
+      }
     }
     const owner = path.at(-1)?.name
     if (node.name === 'URL' && (owner === 'Link' || owner === 'Image' || owner === 'Autolink')) {
       targets.push({ from: base + Math.max(node.from - offset, 0), to: base + Math.min(node.to - offset, line.length) })
     }
   })
-  const hasShortcutReference = source && tree ? ({ from, to }: MathLinkLabel) =>
-    shortcutLabelsOf(source.doc, tree, source.fm?.end ?? 0)
-      .has(normalizeReferenceLabel(source.doc.sliceString(from, to))) : undefined
-  return { targets, labels, hasShortcutReference }
+  const hasReference = source && tree ? (key: string) =>
+    referenceLabelsOf(source.doc, tree, source.fm?.end ?? 0).has(key) : undefined
+  return { targets, labels, hasReference }
 }
 
 export function scanMathInMarkdownLine(line: string, base: number, source?: MarkdownMathSource) {

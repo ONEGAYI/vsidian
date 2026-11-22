@@ -185,6 +185,17 @@ describe('inlineAt：行内标记点位（code / formula / none）', () => {
     expect(addonSyntaxInlineAt(source, at(1, line.indexOf('currency'))).kind).toBe('none')
     expect(addonSyntaxInlineAt(source, at(1, line.indexOf('$x$') + 1)).kind).toBe('formula')
   })
+  it.each([
+    ['[price _$12][ref]', '[ref]: /ok'],
+    ['[price _$12][]', '[price _$12]: /ok'],
+  ])('引用定义决定标签边界，语法查询与实时预览同源：%s', (label, definition) => {
+    const line = label + ', currency $ here'
+    const without = sourceOf([line, '', ''])
+    const withRef = sourceOf([line, '', definition])
+    const col = line.indexOf('currency')
+    expect(addonSyntaxInlineAt(without.source, without.at(1, col)).kind).toBe('formula')
+    expect(addonSyntaxInlineAt(withRef.source, withRef.at(1, col)).kind).toBe('none')
+  })
   const sample = sourceOf(SAMPLE_LINES)
   it('探针点位：行内代码/行内公式/高亮/普通文本（#408 基线迁移）', () => {
     const line = SAMPLE_LINES[7]!

@@ -251,14 +251,17 @@ try {
       })
   }
 
-  {
-    const line = '[price _$12], currency $ here'
+  for (const [label, definition] of [
+    ['[price _$12]', '[Price   _$12]: https://example.test'],
+    ['[price _$12][REF]', '[ref]: https://example.test'],
+    ['[price _$12][]', '[Price   _$12]: https://example.test'],
+  ]) {
+    const line = `${label}, currency $ here`
     const body = line + '\n\n后续公式 $x$\n\n'
-    const definition = '[Price   _$12]: https://example.test'
-    await scenario('快捷引用定义增删后，实时预览重算公式边界', { doc: body + definition, cursor: 0 }, async (page) => {
+    await scenario(`引用定义增删后，实时预览重算公式边界：${label}`, { doc: body + definition, cursor: 0 }, async (page) => {
       const painted = page.locator('.cm-content .vsidian-math .katex-html')
       const firstLine = page.locator('.cm-content .cm-line').first()
-      assert.equal(await firstLine.innerText(), line, '有定义的快捷引用保持完整字面文本')
+      assert.equal(await firstLine.innerText(), line, '有定义的引用保持完整字面文本')
       assert.equal(await painted.count(), 1, '仅排版后续的正常公式')
 
       await page.evaluate((offset) => window.locate(offset), body.length)

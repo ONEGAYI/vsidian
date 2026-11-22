@@ -109,9 +109,29 @@ describe('live 公式装饰：显形与渲染切换', () => {
   ])('下划线公式同样不跨空目标或引用式标签：%s', (doc) => {
     expect(collect(build(doc, 0))).toEqual([])
   })
+  it.each([
+    '[label $ after](/ok) tail',
+    '![label $ after](img.png) tail',
+    '[label $ after][ref] tail\n\n[ref]: /ok',
+    '[label $ after] tail\n\n[label $ after]: /ok',
+  ])('公式也不能从标签外闭在有效链接或图片的标签内：%s', (target) => {
+    expect(collect(build('before _$ money ' + target, 0))).toEqual([])
+  })
+  it.each([
+    ['[price _$12][REF]', '[ref]: /ok', '12][REF], currency '],
+    ['[price _$12][]', '[Price   _$12]: /ok', '12][], currency '],
+  ])('完整或折叠引用只有定义有效时才保护标签：%s', (label, definition, tex) => {
+    const doc = label + ', currency $ here'
+    expect(collect(build(doc, 0)).map(item => item.widget?.tex)).toEqual([tex])
+    expect(collect(build(doc + '\n\n' + definition, 0))).toEqual([])
+  })
   it('下划线公式可以完全位于链接标签内，也可以先于内部链接样式的 TeX 文本', () => {
     const doc = '前 [_$x_1$_](https://example.test) 与 _$[x](url)$_ 后'
     expect(collect(build(doc, 0)).map(item => item.widget?.tex)).toEqual(['x_1', '[x](url)'])
+  })
+  it('公式内未配对的左方括号不能抢占外层标签边界', () => {
+    const doc = String.raw`前 [__$\left[x,y\right)$__](https://example.test)`
+    expect(collect(build(doc, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\left[x,y\right)`])
   })
   it('没有引用定义的方括号不截断公式；代码块和 frontmatter 不提供定义', () => {
     const line = '[price _$12], currency $ here'
