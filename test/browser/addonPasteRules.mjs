@@ -331,13 +331,14 @@ try {
     "</span>",
     "</span> 构成",
   ].join('')
-  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 7, rules: [{
+  const formulaRules = [{
     addonId: 'ONEGAYI.vsidian-codex-bridge',
     id: 'katex-inline-math',
     priority: 0,
     match: { tag: 'SPAN', condition: { kind: 'attribute-regex', name: 'class', regex: { pattern: '(?:^|\\s)katex(?:\\s|$)' } } },
     output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } } },
-  }] })
+  }]
+  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 7, rules: formulaRules })
   await write(antiGravityPlain, antiGravityHtml)
   await selectAll(); await page.keyboard.press('Control+V')
   // “）”紧贴粗体结束符，宿主已有序列化规则把相邻的“由”写成等价字符实体。
@@ -397,4 +398,19 @@ try {
   await selectAll(); await page.keyboard.press('Control+V')
   await waitBoth('一个**诊断问题实例（DPI）**&#30001;五元组 (SD, COMPS, OBS, P, N) 构成')
   console.log('[PASS] 反重力双载荷：粗体与单个可见行内公式保留；撤回规则后按旧链路粘贴')
+
+  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 9, rules: formulaRules })
+  const blockSource = '$$\na+b\n$$\n\nend'
+  await page.evaluate(source => {
+    window.replace(source)
+    window.selectRanges([{ anchor: 0, head: 0 }])
+  }, blockSource)
+  await write('x USD\n\n', katexSpan('x') + ' USD')
+  await page.keyboard.press('Control+V')
+  const preservedBlock = 'x USD\n\n' + blockSource
+  await waitBoth(preservedBlock)
+  await page.evaluate(end => window.selectRanges([{ anchor: end, head: end }]), preservedBlock.length)
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), ['a+b'])
+  console.log('[PASS] 富文本会破坏旧块公式时，用原剪贴板纯文本保留换行')
 } finally { await browser.close() }

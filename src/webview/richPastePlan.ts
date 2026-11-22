@@ -1,6 +1,6 @@
 import { EditorSelection, type EditorState, type Transaction } from '@codemirror/state'
 import type { PasteSelection, PasteStage } from '../shared/protocol'
-import { inlineMathNeedsSpace, type MathOccurrence } from '../shared/math'
+import { inlineMathNeedsSpace, scanMathRanges, type MathOccurrence } from '../shared/math'
 import { scanMathInMarkdownLine } from '../shared/markdownDoc'
 import type { ConvertedHtml } from './htmlToMarkdown'
 
@@ -32,14 +32,18 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
   const ranges = state.selection.ranges
   const scanned = new Map<number, MathOccurrence[]>()
   const existingInline: MathOccurrence[] = []
+  const boundaryBlocks = new Set<MathOccurrence>()
   let blockIndex = 0
   for (const range of ranges) {
     for (const at of [range.from, range.to]) {
-      // 光标或选区端点在已有公式内部：沿纯文本编辑，不新增一层美元定界符。
-      while (blockIndex < blocks.length && blocks[blockIndex]!.to <= at) blockIndex++
-      const block = blocks[blockIndex]
-      if (block && block.from < at) return null
       const line = state.doc.lineAt(at)
+      // 光标或选区端点在已有公式内部：沿纯文本编辑，不新增一层美元定界符。
+      while (blockIndex < blocks.length && blocks[blockIndex]!.to <= line.from) blockIndex++
+      const block = blocks[blockIndex]
+      if (block && block.from < line.to) {
+        if (block.from < at && at < block.to) return null
+        boundaryBlocks.add(block)
+      }
       let hits = scanned.get(line.number)
       if (!hits) {
         hits = scanMathInMarkdownLine(line.text, line.from)
@@ -94,14 +98,27 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
   // 校验草稿文档，不触发安装在真实事务上的行为或过滤器。
   const { changes } = pasteChanges(state, text, insertions)
   const doc = changes.apply(state.doc)
-  // 选区端点所在线的旧公式也必须保留；被选区替换的公式不参与校验。
+  // 只检查选区端点所在线的旧公式；被选区替换的公式不参与校验。
+  const existing = existingInline.concat([...boundaryBlocks]).sort((a, b) => a.from - b.from)
   let selectionIndex = 0
-  for (const hit of existingInline) {
+  for (const hit of existing) {
     while (selectionIndex < ranges.length && ranges[selectionIndex]!.to <= hit.from) selectionIndex++
     const range = ranges[selectionIndex]
-    if (!range || range.from >= hit.to) {
-      expected.push({ from: changes.mapPos(hit.from, 1), to: changes.mapPos(hit.to, -1) })
+    if (range && range.from < hit.to) continue
+    const from = changes.mapPos(hit.from, 1)
+    const to = changes.mapPos(hit.to, -1)
+    if (hit.kind === 'inline') {
+      expected.push({ from, to })
+      continue
     }
+    // 不能仅扫描定界符之间：粘贴可能在旧开启标记之前接上正文。
+    const first = doc.lineAt(from)
+    const last = doc.lineAt(to - 1)
+    const lines: string[] = []
+    for (let n = first.number; n <= last.number; n++) lines.push(doc.line(n).text)
+    if (!scanMathRanges(lines, first.from).some(block =>
+      block.kind === 'block' && block.from === from && block.to === to && block.tex === hit.tex,
+    )) return null
   }
   expected.sort((a, b) => a.from - b.from)
   let checked = 0, actual = new Map<number, number>()

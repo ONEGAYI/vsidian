@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import { EditorSelection } from '@codemirror/state'
 import { WebviewSyncController } from '../../src/webview/syncController'
+import { mathBlocksField } from '../../src/webview/liveMath'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 import { createReadingBlockElement } from '../../src/webview/readingView'
 import { installLocale } from '../../src/shared/i18n'
@@ -75,6 +76,12 @@ function pasteMath(view: EditorView, tex: string, plain: string, htmlPrefix = ''
   paste(view, `${htmlPrefix}<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>${htmlSuffix}`, plain)
 }
 
+function readingTexOf(source: string): (string | null)[] {
+  return splitReadingBlocks(source).flatMap(block =>
+    Array.from(createReadingBlockElement(block, source).querySelectorAll('annotation'), node => node.textContent?.trim() ?? null),
+  )
+}
+
 describe('粘贴规则控制器消费链', () => {
   it('公式贴到选区两端的英文旁时仅在富文本阶段插入分隔', async () => {
     const { view, sent } = mount('foo…bar')
@@ -105,15 +112,38 @@ describe('粘贴规则控制器消费链', () => {
     await settle()
 
     const finalSource = view.state.doc.toString()
-    const renderedTex = splitReadingBlocks(finalSource).flatMap(block =>
-      Array.from(createReadingBlockElement(block, finalSource).querySelectorAll('annotation'), node => node.textContent),
-    )
-    expect(renderedTex).toEqual(tex)
+    expect(readingTexOf(finalSource)).toEqual(tex)
     expect(finalSource).toBe(formatted)
     ack(sent); await settle()
     const edits = sent.filter((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')
     expect(edits.map(edit => edit.paste?.stage)).toEqual(['text', 'format'])
     expect(edits[0]!.changes).toEqual([{ offset: at, length: 0, text: plain }])
+  })
+
+  it.each(['$$\na+b\n$$\n\nend', '  $$\na+b\n$$\n\nend'])('不能保留未选中的跨行公式时回退原纯文本：%s', async (doc) => {
+    const { view, sent } = mount(doc)
+    view.dispatch({ selection: { anchor: 0 } })
+    const plain = 'x USD\n\n'
+    pasteMath(view, 'x', plain, '', ' USD')
+    await settle()
+    const finalSource = view.state.doc.toString()
+    expect(view.state.field(mathBlocksField).map(hit => hit.tex.trim())).toEqual(['a+b'])
+    expect(readingTexOf(finalSource)).toEqual(['a+b'])
+    expect(finalSource).toBe(plain + doc)
+    const edits = sent.filter((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')
+    expect(edits.map(edit => edit.changes)).toEqual([[{ offset: 0, length: 0, text: plain }]])
+  })
+
+  it('旧块公式边界不变时仍可富文本粘贴行内公式', async () => {
+    const doc = '前文\n\n$$\na+b\n$$\n\n尾'
+    const { view } = mount(doc)
+    view.dispatch({ selection: { anchor: 2 } })
+    pasteMath(view, 'x', 'x USD', '', ' USD')
+    await settle()
+    const finalSource = view.state.doc.toString()
+    expect(finalSource).toBe('前文$x$ USD' + doc.slice(2))
+    expect(view.state.field(mathBlocksField).map(hit => hit.tex.trim())).toEqual(['a+b'])
+    expect(readingTexOf(finalSource)).toEqual(['x', 'a+b'])
   })
 
   it('已有不配对的美元不能抢占从剪贴板恢复的公式定界符', async () => {
