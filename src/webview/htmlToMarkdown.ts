@@ -33,6 +33,8 @@ const blockTags = new Set(['P','DIV','UL','OL','LI','TABLE','TR','TH','TD','PRE'
 const escapeEntityPrefixes = (value: string) => value.replace(/&(?=(?:#(?:\d+|x[\da-f]+)|[a-z][\da-z]*);)/gi, '&amp;')
 const escapeText = (text: string) => escapeEntityPrefixes(text).replace(/\\/g, '\\\\').replace(/([`*_~{}\[\]<>#])/g, '\\$1')
   .replace(/^(\s{0,3})([-+])(?=\s|[-+]{2})/gm, '$1\\$2').replace(/^(\s{0,3}\d+)([.)])(?=\s)/gm, '$1\\$2')
+// 来源正文里的美元不是定界符。保留身份到最终行，避免改变没有还原公式的行。
+const escapeClipboardText = (text: string) => escapeText(text).replace(/\$/g, '\u0000d\u0000')
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
 interface InlineRun extends Marks { text: string }
 const unmarked: Marks = { bold:false, italic:false, strike:false }
@@ -172,7 +174,8 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
   let output = ''
   for (const part of parts) {
     if ('literal' in part) {
-      output += part.literal
+      // 模板是作者声明的 Markdown；NUL 加倍以免字面量伪装成内部占位。
+      output += part.literal.replaceAll('\u0000', '\u0000\u0000')
       continue
     }
     const slot = rule.output.slots[part.slot]
@@ -221,7 +224,7 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
     } else if (slot.source.kind === 'children') {
       output += raw
     } else {
-      output += escapeText(raw)
+      output += escapeClipboardText(raw)
     }
   }
   if (output === '') return null
@@ -309,7 +312,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   }
   function inline(node: Node, inherited: Marks, table: boolean): InlineRun[] {
     if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
-    if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeText((node.textContent ?? '').replace(/\s+/g,' '))}]
+    if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeClipboardText((node.textContent ?? '').replace(/\s+/g,' '))}]
     if (!(node instanceof Element) || ignored.has(node.tagName) || node.tagName === 'INPUT') return []
     const addonOutput = addonRuleOutput(node, table, inherited)
     if (addonOutput !== null) {
@@ -319,7 +322,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const marks = effectiveMarks(node, inherited)
     const tag = node.tagName
     if (tag === 'BR') return [{...unmarked,text:table ? '<br>' : '  \n'}]
-    if (node.matches('.katex,.MathJax,mjx-container,math')) return [{...marks,text:escapeText(node.querySelector('annotation')?.textContent ?? node.textContent ?? '')}]
+    if (node.matches('.katex,.MathJax,mjx-container,math')) return [{...marks,text:escapeClipboardText(node.querySelector('annotation')?.textContent ?? node.textContent ?? '')}]
     if (tag === 'IMG') {
       const alt=escapeText(node.getAttribute('alt') ?? '')
       const src=safeUrl(node.getAttribute('src') ?? '')
@@ -363,8 +366,8 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     for (let index = 0; index < merged.length - 1; index++) {
       const before = merged[index]!, after = merged[index + 1]!
       // 行内公式占位两端在最终 Markdown 中都是标点 `$`。
-      const last = before.text.endsWith('\u0000') ? '$' : Array.from(before.text).at(-1) ?? ''
-      const first = after.text.startsWith('\u0000') ? '$' : Array.from(after.text)[0] ?? ''
+      const last = before.text.endsWith('\u0000') && !before.text.endsWith('\u0000\u0000') ? '$' : Array.from(before.text).at(-1) ?? ''
+      const first = after.text.startsWith('\u0000') && !after.text.startsWith('\u0000\u0000') ? '$' : Array.from(after.text)[0] ?? ''
       if (markKeys.some(key => before[key] && !after[key]) && punctuation.test(last) && literal.test(first)) {
         after.text = entity(first) + after.text.slice(first.length)
       }
@@ -483,22 +486,31 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   const paragraphs = template.content.querySelectorAll('p')
   if (paragraphs.length > 1) hasFormatting = true
   const output = render(template.content).replace(/\n{3,}/g, '\n\n').trim()
+  if (!output.includes('\u0000')) return { markdown: output, hasFormatting }
   const inlineMath: { from: number; to: number }[] = []
-  let markdown = '', end = 0
-  // DOM 解析不会保留来自 HTML 的 NUL；这里只消费转换器自己生成的占位。
-  for (const match of output.matchAll(/\u0000(m?)(\d+)\u0000/g)) {
-    markdown += output.slice(end, match.index)
-    end = match.index + match[0].length
-    if (match[1] === 'm') {
-      if (inlineMathNeedsSpace(markdown.at(-1), 'before')) markdown += ' '
-      const from = markdown.length
-      markdown += `$${mathLiterals[Number(match[2])]}$`
-      inlineMath.push({ from, to: markdown.length })
-      if (inlineMathNeedsSpace(output[end], 'after')) markdown += ' '
-    } else {
-      markdown += literalBlocks[Number(match[2])]
+  let markdown = ''
+  for (const [index, line] of output.split('\n').entries()) {
+    if (index > 0) markdown += '\n'
+    let end = 0
+    const tokens = [...line.matchAll(/\u0000(\u0000|d\u0000|m?\d+\u0000)/g)]
+    const hasMath = tokens.some(match => match[1]![0] === 'm')
+    for (const match of tokens) {
+      markdown += line.slice(end, match.index)
+      end = match.index + match[0].length
+      const token = match[1]!
+      if (token === '\u0000') markdown += token
+      else if (token === 'd\u0000') markdown += hasMath ? '\\$' : '$'
+      else if (token.startsWith('m')) {
+        if (inlineMathNeedsSpace(markdown.at(-1), 'before')) markdown += ' '
+        const from = markdown.length
+        markdown += `$${mathLiterals[Number(token.slice(1, -1))]}$`
+        inlineMath.push({ from, to: markdown.length })
+        if (inlineMathNeedsSpace(line[end], 'after')) markdown += ' '
+      } else {
+        markdown += literalBlocks[Number(token.slice(0, -1))]
+      }
     }
+    markdown += line.slice(end)
   }
-  markdown += output.slice(end)
   return { markdown, hasFormatting, ...(inlineMath.length ? { inlineMath } : {}) }
 }

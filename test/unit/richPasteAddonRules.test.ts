@@ -9,6 +9,7 @@
 // - 纯文本粘贴（总开关关闭/代码上下文）不经过规则。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
+import { EditorSelection } from '@codemirror/state'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -62,21 +63,50 @@ const PROMPT_LINK_SNAPSHOT = (version: number) => ({
   }],
 })
 
+function pasteMath(view: EditorView, tex: string, plain: string) {
+  const [link] = PROMPT_LINK_SNAPSHOT(1).rules
+  c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: {
+    version: 1, rules: [{ ...link!, match: { tag: 'SPAN' }, output: {
+      kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } },
+    } }],
+  } })
+  paste(view, `<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>`, plain)
+}
+
 describe('粘贴规则控制器消费链', () => {
   it('公式贴到选区两端的英文旁时仅在富文本阶段插入分隔', async () => {
     const { view, sent } = mount('foo…bar')
     view.dispatch({ selection: { anchor: 3, head: 4 } })
-    const [link] = PROMPT_LINK_SNAPSHOT(1).rules
-    c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: {
-      version: 1, rules: [{ ...link!, match: { tag: 'SPAN' }, output: {
-        kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } },
-      } }],
-    } })
-    paste(view, '<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">x</annotation></semantics></math></span>', 'x')
+    pasteMath(view, 'x', 'x')
     await settle()
     expect(view.state.doc.toString()).toBe('foo $x$ bar')
     const edit = sent.find((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')!
     expect(edit.changes).toEqual([{ offset: 3, length: 1, text: 'x' }])
+  })
+
+  it('相接选区的实际插入公式只补一枚分隔空格', async () => {
+    const { view } = mount('!?')
+    view.dispatch({ selection: EditorSelection.create([EditorSelection.range(0, 1), EditorSelection.range(1, 2)]) })
+    expect(view.state.selection.ranges).toHaveLength(2)
+    pasteMath(view, String.raw`\frac{a}{b}`, 'a/b')
+    await settle()
+    expect(view.state.doc.toString()).toBe(String.raw`$\frac{a}{b}$ $\frac{a}{b}$`)
+  })
+
+  it('已有不配对的美元不能抢占从剪贴板恢复的公式定界符', async () => {
+    const { view } = mount('cash $5 … end')
+    view.dispatch({ selection: { anchor: 8, head: 9 } })
+    pasteMath(view, String.raw`\frac{a}{b}`, 'a/b')
+    await settle()
+    expect(view.state.doc.toString()).toBe('cash $5 a/b end')
+  })
+
+  it('双载荷文本等值但落点仍需要分隔时保留富文本阶段', async () => {
+    const { view } = mount('foo…bar')
+    view.dispatch({ selection: { anchor: 3, head: 4 } })
+    pasteMath(view, 'x', '$x$')
+    await settle()
+    expect(view.state.doc.toString()).toBe('foo $x$ bar')
   })
   it('命中规则的双载荷粘贴：链接恢复、分步撤销两阶段携带 text/format', async () => {
     const { view, sent } = mount()

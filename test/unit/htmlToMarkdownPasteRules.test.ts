@@ -130,6 +130,24 @@ describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
     const ambiguous = table(String.raw`\left\|x\right\|`)
     expect(convert(ambiguous, rules)).toEqual(convert(ambiguous, []))
   })
+
+  it('只在有恢复公式的行保护来源正文里的字面美元', () => {
+    const { rules } = snapshot()
+    const result = convert(`<p>price $5 ${markup(annotate(String.raw`\frac{a}{b}`))}</p><p>other $6</p>`, rules)
+    expect(result.markdown).toBe(String.raw`price \$5 $\frac{a}{b}$` + '\n\nother $6')
+    expect(scanMathInLine(result.markdown.split('\n')[0]!).map(hit => hit.tex)).toEqual([String.raw`\frac{a}{b}`])
+  })
+
+  it('规则的模板字面量不能引用内部公式占位', () => {
+    const { rules } = snapshot()
+    const template = rule({
+      id: 'static-text', match: { tag: 'SPAN', attributes: [{ name: 'data-static' }] },
+      output: { kind: 'template', template: 'left\u0000m0\u0000right', slots: {} },
+    })
+    const result = convert(`<span data-static>text</span> ${markup(annotate('t'))}`, [template, ...rules])
+    expect(result.markdown).toBe('left\u0000m0\u0000right $t$')
+    expect(result.inlineMath).toHaveLength(1)
+  })
 })
 
 describe('粘贴规则转换：命中与回退', () => {

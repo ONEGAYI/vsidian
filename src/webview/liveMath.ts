@@ -32,7 +32,7 @@ import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathInLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
 import { t } from '../shared/i18n'
-import { decodeCellView } from '../shared/tableCellEmbed'
+import { isEscapedAt } from '../shared/tableCells'
 
 export { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml }
 
@@ -343,7 +343,8 @@ function emitMathHit(
   } else {
     const inCell = hit.kind === 'inline' && hit.tex.includes('\\|') &&
       chainAt(tree, hit.from).some(node => node.name === 'TableCell' && hit.to <= node.to)
-    const tex = inCell ? decodeCellView(hit.tex).text : hit.tex
+    // 已识别为 TeX：反引号是公式内容，不是 Markdown 代码边界。
+    const tex = inCell ? hit.tex.replace(/\\\|/g, (pipe, at: number) => isEscapedAt(hit.tex, at + 1) ? '|' : pipe) : hit.tex
     out.push(mathWidgetDeco(tex, hit.kind === 'block').range(hit.from, hit.to))
   }
 }

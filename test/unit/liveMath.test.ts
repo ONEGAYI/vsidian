@@ -79,10 +79,11 @@ function collect(ranges: ReturnType<typeof build>): Item[] {
 describe('live 公式装饰：显形与渲染切换', () => {
   it('表格公式只在渲染输入上解码格内管道，保留源码区间', () => {
     const tex = String.raw`P(A\|B)`
-    const doc = `| 例 |\n| --- |\n| $${tex}$ |\n\n正文 $${tex}$`
+    const withTicks = '\\texttt{`A\\|B`}'
+    const doc = `| 例 |\n| --- |\n| $${tex}$ |\n| $${withTicks}$ |\n\n正文 $${tex}$`
     const items = collect(build(doc, 0))
-    expect(items.map(item => item.widget?.tex)).toEqual(['P(A|B)', tex])
-    expect(items.map(item => doc.slice(item.from, item.to))).toEqual([`$${tex}$`, `$${tex}$`])
+    expect(items.map(item => item.widget?.tex)).toEqual(['P(A|B)', '\\texttt{`A|B`}', tex])
+    expect(items.map(item => doc.slice(item.from, item.to))).toEqual([`$${tex}$`, `$${withTicks}$`, `$${tex}$`])
   })
   it('光标在公式范围外 → 整体替换为 KaTeX widget', () => {
     const items = collect(build('价格 $x^2$ 元', 0))

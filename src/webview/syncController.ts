@@ -70,7 +70,7 @@ import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readCli
 import { ToastChannel } from './toast'
 import { RichPasteDialog } from './richPasteDialog'
 import { htmlToMarkdown } from './htmlToMarkdown'
-import { planRichPaste, richPasteDistributionMatches } from './richPastePlan'
+import { planRichPaste, prepareMathPaste, richPasteDistributionMatches } from './richPastePlan'
 import type { AddonPasteRule } from '../shared/addonPasteRules'
 import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
@@ -8674,11 +8674,13 @@ export class WebviewSyncController {
       else this.toast?.show(t('toast.pasteNoText'), 'error')
       return
     }
-    if (!converted.hasFormatting || converted.markdown === plain) {
+    const distributionMatches = richPasteDistributionMatches(state, plain, converted.markdown)
+    const math = converted.inlineMath && distributionMatches ? prepareMathPaste(state, converted.markdown, converted.inlineMath) : undefined
+    if (!converted.hasFormatting || math === null || converted.markdown === plain && !math?.spaced) {
       if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
       return
     }
-    if (!richPasteDistributionMatches(target.view.state, plain, converted.markdown)) {
+    if (!distributionMatches) {
       this.clipboardReadReqId += 1
       this.clipboardReadTarget = undefined
       if (plain) this.applyRichPaste(plain, plain, 'fallback', target.view)
@@ -8697,7 +8699,7 @@ export class WebviewSyncController {
     if (!valid()) return
     this.clipboardReadReqId += 1
     this.clipboardReadTarget = undefined
-    if (keep) this.applyRichPaste(plain, converted.markdown, 'rich', target.view, converted.inlineMath)
+    if (keep) this.applyRichPaste(plain, converted.markdown, 'rich', target.view, math?.insertions)
     else if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
   }
 
@@ -8707,7 +8709,7 @@ export class WebviewSyncController {
    *  onViewUpdate 豁免与释放守卫，不再参与出站）；撤销段边界经实例公开
    *  markUndoSegmentBoundary；组身份（sessionId/seq）取目标实例（嵌入
    *  粘贴的组不冒充根会话） */
-  private applyRichPaste(plain: string, formatted: string, feedback: 'rich' | 'fallback', view: EditorView, inlineMath?: ReturnType<typeof htmlToMarkdown>['inlineMath']): void {
+  private applyRichPaste(plain: string, formatted: string, feedback: 'rich' | 'fallback', view: EditorView, insertions?: readonly string[]): void {
     const instance = this.pasteOwnerInstance(view)
     if (!instance || instance.getView() !== view || !formatted ||
         instance.isSuspended || view.state.readOnly || !view.state.facet(EditorView.editable)) return
@@ -8715,7 +8717,7 @@ export class WebviewSyncController {
     // seq由bridge持久化并在面板重载后续号，避免新实例复用旧历史的组身份。
     const identity = this.pasteTargetIdentity(view, instance)
     const group = `${identity.sessionId}:${instance.seqNow + 1}:paste-${++this.pasteGroupId}`
-    const stages = planRichPaste(view.state, plain, formatted, feedback === 'rich' && this.settings?.[PASTE_SPLIT_UNDO_KEY] !== false, group, inlineMath)
+    const stages = planRichPaste(view.state, plain, formatted, feedback === 'rich' && this.settings?.[PASTE_SPLIT_UNDO_KEY] !== false, group, insertions)
     if (stages.length === 0) return
     this.pasteFeedback.push({ kind: feedback, group, stage: stages.at(-1)!.paste.stage, landed: false })
     try {
