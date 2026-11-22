@@ -1,7 +1,7 @@
-import { EditorSelection, type EditorState, type Transaction } from '@codemirror/state'
+import { EditorSelection, type EditorState, type Text, type Transaction } from '@codemirror/state'
 import type { PasteSelection, PasteStage } from '../shared/protocol'
 import { inlineMathNeedsSpace, scanMathRanges, type MathOccurrence } from '../shared/math'
-import { scanMathInMarkdownLine } from '../shared/markdownDoc'
+import { markdownTreeParser, scanMathInMarkdownLine, type MarkdownMathSource } from '../shared/markdownDoc'
 import type { ConvertedHtml } from './htmlToMarkdown'
 
 export function pasteSelection(selection: EditorSelection): PasteSelection {
@@ -24,12 +24,46 @@ function pasteTransaction(state: EditorState, text: string, insertions?: readonl
   return state.update({ ...pasteChanges(state, text, insertions), userEvent: 'input.paste', scrollIntoView: true })
 }
 
+/** 在已有正文与粘贴的块之间补齐一条空行，不改选区外的文本。 */
+function paragraphBreak(doc: Text, at: number, side: 'before' | 'after'): string {
+  const line = doc.lineAt(at)
+  const before = side === 'before'
+  const neighbor = line.number + (before ? -1 : 1)
+  const sameLine = before ? doc.sliceString(line.from, at) : doc.sliceString(at, line.to)
+  if (sameLine.trim()) return '\n\n'
+  if ((before && sameLine.length) || (neighbor >= 1 && neighbor <= doc.lines && doc.line(neighbor).text.trim())) return '\n'
+  return ''
+}
+
+const independentPasteBlocks = new Set(['BulletList', 'OrderedList', 'Blockquote'])
+
+function blockPasteBreaks(state: EditorState, input: Text, distribute: boolean): readonly { before: string; after: string }[] {
+  const ranges = state.selection.ranges
+  const edges = (text: string) => {
+    const tree = markdownTreeParser.parse(text).topNode
+    return { before: independentPasteBlocks.has(tree.firstChild?.name ?? ''), after: independentPasteBlocks.has(tree.lastChild?.name ?? '') }
+  }
+  const parsed = distribute ? ranges.map((_, i) => edges(input.line(i + 1).text)) : [edges(input.toString())]
+  return ranges.map((range, i) => {
+    const edge = parsed[distribute ? i : 0]!
+    const next = parsed[distribute ? i + 1 : 0]
+    return {
+      before: edge.before ? (ranges[i - 1]?.to === range.from ? '\n\n' : paragraphBreak(state.doc, range.from, 'before')) : '',
+      // 相接选区共享一处分隔；后一个选区已有前缀时不在前一个尾部重复补。
+      after: edge.after ? (ranges[i + 1]?.from === range.to
+        ? (next?.before ? '' : '\n\n')
+        : paragraphBreak(state.doc, range.to, 'after')) : '',
+    }
+  })
+}
+
 /** 计算富文本选区的实际插入内容。既有文档会抢占公式定界符或吞掉新内容时返回 null，
  *  让调用方沿纯文本路径回退，而不是为修正格式改动选区之外的源码。 */
-export function prepareMathPaste(state: EditorState, text: string, inlineMath: NonNullable<ConvertedHtml['inlineMath']>, blocks: readonly MathOccurrence[]): {
-  insertions: string[]; spaced: boolean
+export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, blocks: readonly MathOccurrence[], source?: MarkdownMathSource): {
+  insertions?: string[]; adjusted: boolean
 } | null {
   const ranges = state.selection.ranges
+  const { markdown: text, inlineMath = [] } = converted
   const scanned = new Map<number, MathOccurrence[]>()
   const existingInline: MathOccurrence[] = []
   const boundaryBlocks = new Set<MathOccurrence>()
@@ -37,7 +71,7 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
   for (const range of ranges) {
     for (const at of [range.from, range.to]) {
       const line = state.doc.lineAt(at)
-      // 光标或选区端点在已有公式内部：沿纯文本编辑，不新增一层美元定界符。
+      // 光标或选区端点在已有公式内部：沿纯文本编辑，不把 Markdown 定界符写入 TeX。
       while (blockIndex < blocks.length && blocks[blockIndex]!.to <= line.from) blockIndex++
       const block = blocks[blockIndex]
       if (block && block.from < line.to) {
@@ -46,17 +80,19 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
       }
       let hits = scanned.get(line.number)
       if (!hits) {
-        hits = scanMathInMarkdownLine(line.text, line.from)
+        hits = scanMathInMarkdownLine(line.text, line.from, source)
         scanned.set(line.number, hits)
         for (const hit of hits) if (hit.kind === 'inline') existingInline.push(hit)
       }
       if (hits.some(hit => hit.from < at && at < hit.to)) return null
     }
   }
-  const existingStarts = new Set(existingInline.map(hit => hit.from))
-  const existingEnds = new Set(existingInline.map(hit => hit.to))
   const input = state.toText(text)
   const distribute = input.lines === ranges.length
+  const breaks = blockPasteBreaks(state, input, distribute)
+  if (!inlineMath.length && !breaks.some(edge => edge.before || edge.after)) return { adjusted: false }
+  const existingStarts = new Set(existingInline.map(hit => hit.from))
+  const existingEnds = new Set(existingInline.map(hit => hit.to))
   const mathByLine = new Map<number, { from: number; to: number }[]>()
   if (distribute) {
     for (const hit of inlineMath) {
@@ -67,32 +103,37 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
     }
   }
   const expected: { from: number; to: number }[] = []
-  let tail: string | undefined, tailIsMath = false, shift = 0, spaced = false
+  let tail: string | undefined, tailIsMath = false, shift = 0, adjusted = false
   const insertions = ranges.map((range, i) => {
     const line = distribute ? input.line(i + 1) : undefined
     const chunk = line?.text ?? text
     const start = line?.from ?? 0
     const math = line ? mathByLine.get(line.number) ?? [] : inlineMath
+    const { before: prefix, after: suffix } = breaks[i]!
     if (ranges[i - 1]?.to !== range.from) {
       tail = range.from > 0 ? state.doc.sliceString(range.from - 1, range.from) : undefined
       tailIsMath = existingEnds.has(range.from)
     }
-    const before = chunk.length > 0 && (math[0]?.from === start && inlineMathNeedsSpace(tail, 'before') ||
+    const before = !prefix && chunk.length > 0 && (math[0]?.from === start && inlineMathNeedsSpace(tail, 'before') ||
       tailIsMath && inlineMathNeedsSpace(chunk[0], 'after'))
     if (chunk) {
       tail = chunk.at(-1)
       tailIsMath = math.at(-1)?.to === start + chunk.length
     }
-    const after = ranges[i + 1]?.from !== range.to && (
+    const after = !suffix && ranges[i + 1]?.from !== range.to && (
       existingStarts.has(range.to) && inlineMathNeedsSpace(tail, 'before') ||
       tailIsMath && range.to < state.doc.length &&
         inlineMathNeedsSpace(state.doc.sliceString(range.to, range.to + 1), 'after')
     )
-    const insert = (before ? ' ' : '') + chunk + (after ? ' ' : '')
-    const offset = range.from + shift + Number(before) - start
+    const insert = prefix + (before ? ' ' : '') + chunk + (after ? ' ' : '') + suffix
+    const offset = range.from + shift + prefix.length + Number(before) - start
     for (const hit of math) expected.push({ from: hit.from + offset, to: hit.to + offset })
     shift += insert.length - (range.to - range.from)
-    spaced ||= before || after
+    if (suffix) {
+      tail = '\n'
+      tailIsMath = false
+    }
+    adjusted ||= before || after || !!prefix || !!suffix
     return insert
   })
   // 校验草稿文档，不触发安装在真实事务上的行为或过滤器。
@@ -150,7 +191,7 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
     }
     if (actual.get(hit.from) !== hit.to) return null
   }
-  return { insertions, spaced }
+  return { insertions, adjusted }
 }
 
 /** 格式引入额外换行时，不能让多选区B/C改变文本分发数量。 */

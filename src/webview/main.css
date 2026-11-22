@@ -3923,6 +3923,11 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
 }
 
+/* 普通实体与阅读端一样折叠换行/制表空白，不在源码行内制造新视觉行。 */
+#app .cm-editor .vsidian-inline-entity {
+  white-space: normal;
+}
+
 /* #43 悬停控件位于 CM6 文本层之上，只为视口内网格行建立 DOM。 */
 #app .cm-editor .vsidian-table-controls {
   position: absolute;

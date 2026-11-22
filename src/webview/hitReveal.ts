@@ -51,8 +51,20 @@ const EMPTY_LINES: ReadonlySet<number> = new Set<number>()
 
 /** 命中与区间相交（selectionTouchesRange 同谓词的区间版）：
  *  非空命中开区间交（from <= to 闭右端——命中起点落在区间右端也算触界，
- *  该位置仍是区间内可编辑位置）；零宽命中按点闭端触界 */
-export function hitIntersectsRange(hits: readonly HitRange[], from: number, to: number): boolean {
+ *  该位置仍是区间内可编辑位置）；零宽命中按点闭端触界。
+ *  查找匹配和选词选区各自有序且互不重叠，分开传入时可跳过屏外命中。
+ *  两者拼接后的 hits 不保证有序，沿用线性查找。 */
+export function hitIntersectsRange(hits: readonly HitRange[], from: number, to: number, ordered = false): boolean {
+  if (ordered) {
+    let lo = 0, hi = hits.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      const hit = hits[mid]!, end = hit.to
+      if (end < from || (end === from && hit.from < end)) lo = mid + 1
+      else hi = mid
+    }
+    return lo < hits.length && hits[lo]!.from <= to
+  }
   for (const hit of hits) {
     if (hit.to <= hit.from) {
       if (hit.from >= from && hit.from <= to) {

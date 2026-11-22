@@ -71,10 +71,10 @@ import { ToastChannel } from './toast'
 import { RichPasteDialog } from './richPasteDialog'
 import { htmlToMarkdown } from './htmlToMarkdown'
 import { mathBlocksField } from './liveMath'
-import { planRichPaste, prepareMathPaste, richPasteDistributionMatches } from './richPastePlan'
+import { planRichPaste, prepareRichPaste, richPasteDistributionMatches } from './richPastePlan'
 import type { AddonPasteRule } from '../shared/addonPasteRules'
 import type { ClipboardSnapshot } from './clipboardPaste'
-import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
+import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_EMPHASIS_BOUNDARY_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
 import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage, PdfExportEntryMode } from '../shared/protocol'
 import type { TableEditOp } from '../shared/protocol'
@@ -8695,7 +8695,8 @@ export class WebviewSyncController {
     let plain: string
     try { plain = clipboardPlainText(snapshot) } catch { this.toast?.show(t('toast.pasteNoText'), 'error'); return }
     const state = target.view.state
-    const tree = state.field(liveDecorationsField, false)?.tree
+    const markdown = state.field(liveDecorationsField, false)
+    const tree = markdown?.tree
     const plainContext = state.selection.ranges.some((range) => tree && [range.from, range.to].some((pos) =>
       chainAt(tree, pos).some((node) => ['FencedCode', 'CodeBlock', 'InlineCode', 'Table', 'TableHeader', 'TableRow', 'TableDelimiter'].includes(node.name))))
     const enabled = this.settings?.[PASTE_PRESERVE_FORMATTING_KEY] !== false
@@ -8704,17 +8705,23 @@ export class WebviewSyncController {
       return
     }
     let converted: ReturnType<typeof htmlToMarkdown>
-    try { converted = htmlToMarkdown(snapshot.html, { addonPasteRules }) }
+    try {
+      converted = htmlToMarkdown(snapshot.html, {
+        addonPasteRules,
+        emphasisBoundary: this.settings?.[PASTE_EMPHASIS_BOUNDARY_KEY] === 'space' ? 'space' : 'entity',
+      })
+    }
     catch {
       if (plain) this.applyRichPaste(plain, plain, 'fallback', target.view)
       else this.toast?.show(t('toast.pasteNoText'), 'error')
       return
     }
     const distributionMatches = richPasteDistributionMatches(state, plain, converted.markdown)
-    const math = converted.inlineMath && distributionMatches
-      ? prepareMathPaste(state, converted.markdown, converted.inlineMath, state.field(mathBlocksField, false) ?? [])
+    const rich = converted.hasFormatting && distributionMatches
+      ? prepareRichPaste(state, converted, state.field(mathBlocksField, false) ?? [],
+        markdown && { doc: state.doc, tree: markdown.tree, fm: markdown.fm })
       : undefined
-    if (!converted.hasFormatting || math === null || converted.markdown === plain && !math?.spaced) {
+    if (!converted.hasFormatting || rich === null || converted.markdown === plain && !rich?.adjusted) {
       if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
       return
     }
@@ -8737,7 +8744,7 @@ export class WebviewSyncController {
     if (!valid()) return
     this.clipboardReadReqId += 1
     this.clipboardReadTarget = undefined
-    if (keep) this.applyRichPaste(plain, converted.markdown, 'rich', target.view, math?.insertions)
+    if (keep) this.applyRichPaste(plain, converted.markdown, 'rich', target.view, rich?.insertions)
     else if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
   }
 

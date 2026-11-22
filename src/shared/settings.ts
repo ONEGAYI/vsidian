@@ -310,6 +310,7 @@ export const LANGUAGE_DEFAULT = 'auto'
 export const IMAGE_PASTE_KEY = 'image.paste'
 export const IMAGE_PASTE_DEFAULT = true
 export const PASTE_PRESERVE_FORMATTING_KEY = 'editor.pastePreserveFormatting'
+export const PASTE_EMPHASIS_BOUNDARY_KEY = 'editor.pasteEmphasisBoundary'
 export const PASTE_ASK_BEFORE_KEY = 'editor.pasteAskBefore'
 export const PASTE_SPLIT_UNDO_KEY = 'editor.pasteSplitUndo'
 
@@ -643,6 +644,18 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     type: 'boolean', default: true,
     titleKey: 'setting.pastePreserveFormatting.title',
     descriptionKey: 'setting.pastePreserveFormatting.description',
+  },
+  {
+    key: PASTE_EMPHASIS_BOUNDARY_KEY,
+    type: 'string', default: 'entity',
+    enum: ['entity', 'space'],
+    titleKey: 'setting.pasteEmphasisBoundary.title',
+    descriptionKey: 'setting.pasteEmphasisBoundary.description',
+    optionLabelKeys: {
+      entity: 'setting.pasteEmphasisBoundary.entity',
+      space: 'setting.pasteEmphasisBoundary.space',
+    },
+    dependsOn: PASTE_PRESERVE_FORMATTING_KEY,
   },
   {
     key: PASTE_SPLIT_UNDO_KEY,
