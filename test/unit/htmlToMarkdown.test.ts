@@ -21,6 +21,12 @@ describe('剪贴板HTML可表达格式', () => {
   ])('%s -> Markdown', (html, markdown) => {
     expect(htmlToMarkdown(html)).toEqual({ markdown, hasFormatting: true })
   })
+  it.each([
+    ['<li>甲</li>\n  <li>乙<ul><li>子项</li></ul></li>', '- 甲\n- 乙\n  - 子项'],
+    ['<p>前文</p><li><input type="checkbox" checked>完成</li><p>后文</p>', '前文\n\n- [x] 完成\n\n后文'],
+  ])('独立条目保留列表结构：%s', (html, markdown) => {
+    expect(htmlToMarkdown(html)).toEqual({ markdown, hasFormatting: true, hasOrphanList: true })
+  })
   it.each(['<p>*星号*</p>', '<span style="color:red;font-size:30px">*星号*</span>', '<b style="font-weight:normal">*星号*</b>'])('普通包装与不支持外观不当作格式：%s', (html) => {
     expect(htmlToMarkdown(html).hasFormatting).toBe(false)
   })
@@ -59,6 +65,18 @@ describe('剪贴板HTML可表达格式', () => {
     const template = document.createElement('template'); template.innerHTML = output
     expect([...template.content.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['粗', '再粗'])
     expect(template.content.textContent).toContain('粗普通再粗')
+  })
+  it.each([
+    ['entity', '意味&#30528;**“重点”**&#21518;，**正常**文字', '意味着“重点”后，正常文字'],
+    ['space', '意味着 **“重点”** 后，**正常**文字', '意味着 “重点” 后，正常文字'],
+  ] as const)('仅在强调边界冲突时用 %s 保留格式', (emphasisBoundary, expected, visible) => {
+    const html = '<span>意味着</span><strong>“重点”</strong><span>后，</span><strong>正常</strong>文字'
+    const { markdown } = htmlToMarkdown(html, { emphasisBoundary })
+    expect(markdown).toBe(expected)
+    const template = document.createElement('template')
+    template.innerHTML = new MarkdownIt().renderInline(markdown)
+    expect(template.content.textContent).toBe(visible)
+    expect([...template.content.querySelectorAll('strong')].map(el => el.textContent)).toEqual(['“重点”', '正常'])
   })
   it('混合嵌套粗斜体保持每段实际语义，不以相邻星号叠出额外标记', () => {
     for (const html of ['<i>a<b>b</b>c</i>', '<b>a<i>b</i>c</b>']) {

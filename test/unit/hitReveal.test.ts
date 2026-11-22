@@ -64,6 +64,20 @@ describe('命中相交判定（纯函数）', () => {
     expect(hitIntersectsRange([{ from: 13, to: 13 }], 5, 12)).toBe(false)
   })
 
+  it('有序命中跳过大段屏外结果，并保留零宽的触界语义', () => {
+    const offset = 200_000
+    let inspected = 0
+    const hits = Array.from({ length: 100_000 }, (_, i) => ({
+      from: i * 2,
+      get to() { inspected++; return i * 2 + 1 },
+    }))
+    hits.push({ from: offset, to: offset }, { from: offset + 2, to: offset + 3 })
+    expect(hitIntersectsRange(hits, offset, offset + 1, true)).toBe(true)
+    expect(hitIntersectsRange(hits, offset + 1, offset + 1, true)).toBe(false)
+    expect(hitIntersectsRange(hits, offset + 3, offset + 4, true)).toBe(false)
+    expect(inspected).toBeLessThan(100)
+  })
+
   it('行触界与区间同谓词；空集恒 false', () => {
     expect(hitTouchesLine([{ from: line.from, to: line.from + 1 }], line)).toBe(true)
     expect(hitTouchesLine([], line)).toBe(false)

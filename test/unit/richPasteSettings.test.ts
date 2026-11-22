@@ -20,4 +20,16 @@ describe('富文本粘贴偏好', () => {
     expect((await service.apply({ 'editor.pastePreserveFormatting': false, 'editor.pasteAskBefore': false })).ok).toBe(true)
     expect(new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS).getSnapshot()).toMatchObject({ 'editor.pastePreserveFormatting': false, 'editor.pasteAskBefore': false })
   })
+  it('格式边界默认用实体，另一档可持久化；关闭保留格式只禁用控件', async () => {
+    let stored: unknown
+    const storage = { get: <T>() => stored as T, update: async (_key: string, value: unknown) => { stored = value } }
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'editor.pasteEmphasisBoundary')!
+    const service = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
+    expect(service.getSnapshot()['editor.pasteEmphasisBoundary']).toBe('entity')
+    expect(def).toMatchObject({ type: 'string', enum: ['entity', 'space'] })
+    expect((await service.apply({ 'editor.pasteEmphasisBoundary': 'space', 'editor.pastePreserveFormatting': false })).ok).toBe(true)
+    const values = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS).getSnapshot()
+    expect(values['editor.pasteEmphasisBoundary']).toBe('space')
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, values, def)).toBe(false)
+  })
 })

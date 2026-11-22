@@ -17,12 +17,13 @@ import { createReadingBlockElement } from '../../src/webview/readingView'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import type { WebviewToHost } from '../../src/shared/protocol'
+import type { SettingsPayload } from '../../src/shared/settings'
 import * as conversion from '../../src/webview/htmlToMarkdown'
 
 if (!Range.prototype.getClientRects) { Range.prototype.getClientRects = () => [] as unknown as DOMRectList; Range.prototype.getBoundingClientRect = () => new DOMRect() }
 let c: WebviewSyncController
 afterEach(() => { c?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks() })
-function mount(text = '旧内容', values: Record<string, boolean> = {}) {
+function mount(text = '旧内容', values: SettingsPayload = {}) {
   installLocale('zh-cn', zhCn)
   const sent: WebviewToHost[] = []
   c = new WebviewSyncController({ postMessage: (m) => sent.push(m as WebviewToHost), getState: () => undefined, setState: () => {} })
@@ -83,6 +84,100 @@ function readingTexOf(source: string): (string | null)[] {
 }
 
 describe('粘贴规则控制器消费链', () => {
+  it('Live 展示实体解码文本，光标进入只显形当前实体，代码保持字面', () => {
+    const source = '开头&#30528; &amp; &#x1F642; &missing; `&#30528;`\n结尾'
+    const { view } = mount(source)
+    view.dispatch({ selection: { anchor: source.length } })
+    const firstLine = view.contentDOM.querySelector('.cm-line')!
+    expect(firstLine.textContent).toBe('开头着 & 🙂 &missing; &#30528;')
+    view.dispatch({ selection: { anchor: source.indexOf('&#30528;') + 2 } })
+    expect(firstLine.textContent).toBe('开头&#30528; & 🙂 &missing; &#30528;')
+    view.dispatch({ selection: { anchor: source.length } })
+    expect(firstLine.textContent).toBe('开头着 & 🙂 &missing; &#30528;')
+    expect(view.state.doc.toString()).toBe(source)
+  })
+  it('编辑公式或行内 HTML 的源码时，实体不接管其中的内容', () => {
+    const source = '段落 $a &amp; b$ 和 <span>&amp;</span>。\n\n$$\na &amp; b\n$$'
+    const { view } = mount(source)
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(source.indexOf('$a') + 1),
+      EditorSelection.cursor(source.indexOf('<span>') + 1),
+      EditorSelection.cursor(source.lastIndexOf('a &amp; b')),
+    ]) })
+    expect(view.contentDOM.querySelectorAll('.vsidian-inline-entity')).toHaveLength(0)
+    expect(view.contentDOM.textContent?.match(/&amp;/g)).toHaveLength(3)
+  })
+
+  it('补空格档保留无外层的两个条目，仍恢复公式，纯文本阶段不补空格', async () => {
+    const { view, sent } = mount('原文', { 'editor.pasteEmphasisBoundary': 'space' })
+    const plain = '意味着“重点” x\n第二项'
+    pasteMath(view, 'x', plain, '<li>意味着<strong>“重点”</strong> ', '</li>\n<li>第二项</li>')
+    await settle()
+    expect(view.state.doc.toString()).toBe('- 意味着 **“重点”** $x$\n- 第二项')
+    expect(readingTexOf(view.state.doc.toString())).toEqual(['x'])
+    const first = sent.find((m) => m.kind === 'edit.request')
+    expect(first?.kind === 'edit.request' && first.changes[0]?.text).toBe(plain)
+  })
+
+  it.each([false, true])('段中粘贴独立列表时保留前后段界（带公式：%s）', async (math) => {
+    const { view, sent } = mount('前文后文')
+    view.dispatch({ selection: { anchor: 2 } })
+    const plain = math ? '甲 x\n乙' : '甲\n乙'
+    if (math) pasteMath(view, 'x', plain, '<li>甲 ', '</li><li>乙</li>')
+    else paste(view, '<li>甲</li><li>乙</li>', plain)
+    await settle()
+    const source = view.state.doc.toString()
+    expect(source).toBe(`前文\n\n- 甲${math ? ' $x$' : ''}\n- 乙\n\n后文`)
+    const reading = splitReadingBlocks(source).map(block => createReadingBlockElement(block, source))
+    expect(reading.flatMap(block => [...block.querySelectorAll('li')])).toHaveLength(2)
+    expect(reading.flatMap(block => [...block.querySelectorAll('p')]).map(p => p.textContent)).toEqual(['前文', '后文'])
+    expect(readingTexOf(source)).toEqual(math ? ['x'] : [])
+    const first = sent.find(m => m.kind === 'edit.request')
+    expect(first?.kind === 'edit.request' && first.changes).toEqual([{ offset: 2, length: 0, text: plain }])
+  })
+
+  it('独立条目按行分给相接的选区时只生成一处分隔，纯文本段仍逐行分派', async () => {
+    const { view, sent } = mount('!?')
+    view.dispatch({ selection: EditorSelection.create([EditorSelection.range(0, 1), EditorSelection.range(1, 2)]) })
+    paste(view, '<li>甲</li><li>乙</li>', '甲\n乙')
+    await settle()
+    expect(view.state.doc.toString()).toBe('- 甲\n\n- 乙')
+    const first = sent.find(m => m.kind === 'edit.request')
+    expect(first?.kind === 'edit.request' && first.changes).toEqual([{ offset: 0, length: 2, text: '甲乙' }])
+  })
+
+  it.each([
+    ['<blockquote><li>甲</li><li>乙</li></blockquote>', '> - 甲\n> - 乙'],
+    ['<blockquote><p>引文</p><blockquote><li>甲</li><li>乙</li></blockquote></blockquote>',
+      '> > - 甲\n> > - 乙'],
+  ])('段中粘贴时保住包裹独立条目的引用和段界：%s', async (html, quotedList) => {
+    const { view } = mount('前后')
+    view.dispatch({ selection: { anchor: 1 } })
+    paste(view, html, '甲\n乙')
+    await settle()
+    const source = view.state.doc.toString()
+    expect(source.startsWith('前\n\n> ')).toBe(true)
+    expect(source.endsWith(quotedList + '\n\n后')).toBe(true)
+    const reading = splitReadingBlocks(source).map(block => createReadingBlockElement(block, source))
+    expect(reading.flatMap(block => [...block.querySelectorAll('blockquote li')]).map(li => li.textContent))
+      .toEqual(['甲', '乙'])
+  })
+
+  it.each([
+    ['$abc$ tail', 3, 'abxc'],
+    ['$$\na+b\n$$\nend', 5, 'a+xb'],
+  ] as const)('旧公式内粘贴无公式的列表时仍按纯文本编辑：%s', async (source, at, tex) => {
+    const { view, sent } = mount(source)
+    view.dispatch({ selection: { anchor: at } })
+    paste(view, '<li>x</li>', 'x')
+    await settle()
+    const result = view.state.doc.toString()
+    expect(result).toBe(source.slice(0, at) + 'x' + source.slice(at))
+    expect(readingTexOf(result)).toEqual([tex])
+    const edits = sent.filter(m => m.kind === 'edit.request')
+    expect(edits.map(edit => edit.changes)).toEqual([[{ offset: at, length: 0, text: 'x' }]])
+  })
+
   it('公式贴到选区两端的英文旁时仅在富文本阶段插入分隔', async () => {
     const { view, sent } = mount('foo…bar')
     view.dispatch({ selection: { anchor: 3, head: 4 } })

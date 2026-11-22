@@ -287,6 +287,7 @@ vsidian/
         ├── liveCodeCard.ts               # Live 代码块卡片装饰
         ├── liveDecorations.ts            # 语法树驱动 Live 装饰（#8）
         ├── liveEmbed.ts                  # Live 嵌入装饰与源码显隐
+        ├── liveEntities.ts               # 实时预览字符实体显隐
         ├── liveHtml.ts                   # Live 块级 HTML 片段替换装饰
         ├── liveInlineHtml.ts             # 行内 HTML Live 装饰
         ├── liveInstance.ts               # Live 编辑器可复用实例

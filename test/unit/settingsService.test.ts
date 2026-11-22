@@ -62,6 +62,7 @@ describe('快照读取', () => {
       'editor.multicursor': true,
       'editor.pastePreserveFormatting': true,
       'editor.pasteAskBefore': true,
+      'editor.pasteEmphasisBoundary': 'entity',
       'editor.pasteSplitUndo': true,
       // #161 图片粘贴四件：总开关 / 存放模式枚举 / 子路径自由文本 / 链接格式
       'image.paste': true,

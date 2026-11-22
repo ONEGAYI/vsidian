@@ -56,6 +56,7 @@ import {
 import { liveDecorationsField, livePreviewDecorations, tableCompositionSettled, tableContainerRenderFacet } from './liveDecorations'
 import { createLinkInteractions } from './liveLinks'
 import { liveMath, mathBlocksField } from './liveMath'
+import { liveEntities } from './liveEntities'
 import { liveMermaid, rendererLanguagesChanged } from './liveMermaid'
 import {
   applyHeadingFoldOperation,
@@ -2886,6 +2887,7 @@ export class LiveEditorInstance {
       // 源码显形，selectionTouchesRange 语义；查找命中同列）+ 点击拦截
       // 与块级共用工厂（选中该片段完整源码）。主文/嵌入实例统一装配
       liveInlineHtml,
+      liveEntities,
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
       // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
       liveBlockId,

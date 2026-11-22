@@ -18,12 +18,15 @@ const urlPolicy = new MarkdownIt()
 export interface ConvertedHtml {
   markdown: string
   hasFormatting: boolean
+  /** 从没有 ul/ol 的 li 保留下来的列表，粘贴落点需保住独立的块边界。 */
+  hasOrphanList?: true
   /** 本次由规则恢复的公式在 Markdown 中的定界符区间（含美元符）。 */
   inlineMath?: readonly { from: number; to: number }[]
 }
 /** 转换选项：addonPasteRules 为本次粘贴开始时捕获的有效规则序（快照） */
 export interface HtmlToMarkdownOptions {
   addonPasteRules?: readonly AddonPasteRule[]
+  emphasisBoundary?: 'entity' | 'space'
 }
 const ignored = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK'])
 const HTML_NODE_BUDGET = 100_000
@@ -245,6 +248,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   const template = document.createElement('template')
   template.innerHTML = html
   let hasFormatting = false
+  let hasOrphanList = false
   const literalBlocks: string[] = []
   const mathLiterals: string[] = []
   let visited = 0
@@ -370,7 +374,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       else merged.push({...run})
     }
     // CommonMark 标点两侧的 delimiter flanking 会受邻接文字影响。
-    // 仅把必要的邻接文字写成字符实体，呈现正文不增空格、不插 HTML 标签。
+    // 只在定界符会失效时处理邻接文字；默认用等价实体保留原有间距。
     const punctuation = /[\p{P}\p{S}]/u
     const literal = /[\p{L}\p{N}\p{M}]/u
     const entity = (character: string) => `&#${character.codePointAt(0)};`
@@ -380,10 +384,10 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       const last = before.text.endsWith('\u0000') && !before.text.endsWith('\u0000\u0000') ? '$' : Array.from(before.text).at(-1) ?? ''
       const first = after.text.startsWith('\u0000') && !after.text.startsWith('\u0000\u0000') ? '$' : Array.from(after.text)[0] ?? ''
       if (markKeys.some(key => before[key] && !after[key]) && punctuation.test(last) && literal.test(first)) {
-        after.text = entity(first) + after.text.slice(first.length)
+        after.text = options?.emphasisBoundary === 'space' ? ' ' + after.text : entity(first) + after.text.slice(first.length)
       }
       if (markKeys.some(key => !before[key] && after[key]) && literal.test(last) && punctuation.test(first)) {
-        before.text = before.text.slice(0, -last.length) + entity(last)
+        before.text = options?.emphasisBoundary === 'space' ? before.text + ' ' : before.text.slice(0, -last.length) + entity(last)
       }
     }
     function encode(parts: InlineRun[], available: Array<keyof Marks>): string {
@@ -407,9 +411,17 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   function children(el: Node, table = false, inherited: Marks = unmarked): string {
     const marks=el instanceof Element ? effectiveMarks(el,inherited) : inherited
     let result='',runs:InlineRun[]=[]
+    let previousOrphanItem = false
     for (const node of Array.from(el.childNodes)) {
       if (node instanceof Element && isBlockContainer(node)) {
-        result+=serialize(runs)+render(node,table,marks);runs=[]
+        const block = render(node, table, marks)
+        const orphanItem = node.tagName === 'LI' && block.startsWith('\n\n- ') && block.endsWith('\n\n')
+        if (orphanItem && runs.every(run => !run.text.trim())) {
+          // 两个相邻的独立 li 合成紧凑列表。两侧仍留段界，避免吸收正文。
+          result = previousOrphanItem ? result.slice(0, -1) + block.slice(2) : result + block
+        } else result += serialize(runs) + block
+        runs = []
+        previousOrphanItem = orphanItem
       } else runs.push(...inline(node,marks,table))
     }
     return result+serialize(runs)
@@ -420,6 +432,19 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const leading = text.match(/^\s*/)?.[0] ?? ''
     const trailing = text.match(/\s*$/)?.[0] ?? ''
     return leading + marker + text.trim() + marker + trailing
+  }
+  function renderListItem(li: Element, prefix: string, table: boolean, inherited: Marks): string {
+    const clone = li.cloneNode(true) as Element
+    const nested = Array.from(li.children).filter(el => el.matches('ul,ol'))
+    Array.from(clone.children).filter(el => el.matches('ul,ol')).forEach(el => el.remove())
+    const checkbox = clone.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    const task = checkbox ? (checkbox.checked ? '[x] ' : '[ ] ') : ''
+    checkbox?.remove()
+    const indent = ' '.repeat(prefix.length)
+    const content = children(clone, table, inherited).trim().replace(/\n{3,}/g, '\n\n')
+    const tail = nested.map(el => '\n' + render(el, table, effectiveMarks(li, inherited)).trim().split('\n')
+      .map(part => indent + part).join('\n')).join('')
+    return prefix + task + content.replace(/\n/g, '\n' + indent) + tail
   }
   function render(node: Node, table = false, inherited: Marks = unmarked): string {
     if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
@@ -468,19 +493,14 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       if (!items.length) return ''
       hasFormatting = true
       const start = Number(node.getAttribute('start') ?? 1) || 1
-      const lines = items.map((li, index) => {
-        const nested = Array.from(li.children).filter((el) => el.matches('ul,ol'))
-        const clone = li.cloneNode(true) as Element
-        Array.from(clone.children).filter((el) => el.matches('ul,ol')).forEach((el) => el.remove())
-        const checkbox = clone.querySelector('input[type="checkbox"]') as HTMLInputElement | null
-        const task = checkbox ? (checkbox.checked ? '[x] ' : '[ ] ') : ''
-        checkbox?.remove()
-        const prefix = tag === 'OL' ? `${start + index}. ` : '- '
-        const content = children(clone, table, marks).trim().replace(/\n{3,}/g, '\n\n')
-        const line = prefix + task + content.replace(/\n/g, '\n' + ' '.repeat(prefix.length))
-        return line + nested.map((el) => '\n' + render(el, table, effectiveMarks(li, marks)).trim().split('\n').map((part) => ' '.repeat(prefix.length) + part).join('\n')).join('')
-      })
+      const lines = items.map((li, index) => renderListItem(li, tag === 'OL' ? `${start + index}. ` : '- ', table, marks))
       return '\n\n' + lines.join('\n') + '\n\n'
+    }
+    if (tag === 'LI') {
+      // 剪贴板可能只带选中的 li，未携带 ul/ol；保留条目，不猜原始编号。
+      hasFormatting = true
+      hasOrphanList = true
+      return '\n\n' + renderListItem(node, '- ', table, inherited) + '\n\n'
     }
     const content = children(node, table, inherited)
     if (tag === 'BLOCKQUOTE') {
@@ -500,7 +520,8 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   // 公式坐标由 CM6 消费，必须在计数前统一 CRLF/CR；无公式保留既有输出。
   const normalizeLF = mathLiterals.length > 0 && containsMathToken(rendered)
   const output = (normalizeLF ? rendered.replace(/\r\n?/g, '\n') : rendered).replace(/\n{3,}/g, '\n\n').trim()
-  if (!output.includes('\u0000')) return { markdown: output, hasFormatting }
+  const formatting = { hasFormatting, ...(hasOrphanList ? { hasOrphanList: true as const } : {}) }
+  if (!output.includes('\u0000')) return { markdown: output, ...formatting }
   const inlineMath: { from: number; to: number }[] = []
   let markdown = ''
   for (const [index, line] of output.split('\n').entries()) {
@@ -526,5 +547,5 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     }
     markdown += line.slice(end)
   }
-  return { markdown, hasFormatting, ...(inlineMath.length ? { inlineMath } : {}) }
+  return { markdown, ...formatting, ...(inlineMath.length ? { inlineMath } : {}) }
 }

@@ -18,7 +18,8 @@ import { build, artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const bundle = artifactPath(root, 'addonPasteRules/addonPasteRules.js')
-await build({ entryPoints: [path.join(root,'test/browser/addonPasteRulesFixture.ts')], bundle:true, outfile:bundle, format:'iife', loader:{'.svg':'file'}, assetNames:'assets/[name]' })
+await build({ entryPoints: [path.join(root,'test/browser/addonPasteRulesFixture.ts')], bundle:true, outfile:bundle, format:'iife',
+  loader:{'.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}, assetNames:'assets/[name]' })
 const { islandHtml } = await buildZhLocaleIsland(root)
 const browser = await chromium.launch({ headless: true, channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 
@@ -121,7 +122,7 @@ try {
   const page = await context.newPage()
   await page.route('http://localhost/**', async route => {
     const name=path.basename(new URL(route.request().url()).pathname)
-    if(name.endsWith('.svg')) return route.fulfill({path:artifactPath(root,'addonPasteRules/assets',name),contentType:'image/svg+xml'})
+    if (/\.(svg|woff2?|ttf)$/.test(name)) return route.fulfill({ path: artifactPath(root, 'addonPasteRules/assets', name) })
     return route.fulfill({contentType:'text/html; charset=utf-8',body:`<html><head><meta charset="utf-8"></head><body style="--vscode-editor-background:#fff;--vscode-editor-foreground:#222;--vscode-editorWidget-background:#f8f8f8;--vscode-editorWidget-foreground:#222">${islandHtml}<div id="app"></div></body></html>`})
   })
   await page.goto('http://localhost/')
@@ -400,6 +401,80 @@ try {
   console.log('[PASS] 反重力双载荷：粗体与单个可见行内公式保留；撤回规则后按旧链路粘贴')
 
   await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 9, rules: formulaRules })
+  const listHtml = '<li><span>意味着</span><strong>“重点”</strong> ' + katexSpan('n') +
+    '。</li>\n  <li>其次 ' + katexSpan('2^n') + '。</li>'
+  const listPlain = '意味着“重点” n。\n其次 2ⁿ。'
+  const withEntity = '- 意味&#30528;**“重点”** $n$。\n- 其次 $2^n$。'
+  await write(listPlain, listHtml)
+  await selectAll(); await page.keyboard.press('Control+V'); await waitBoth(withEntity)
+  const entity = editor.locator('.vsidian-inline-entity')
+  await entity.waitFor({ state: 'visible' })
+  assert.equal(await entity.textContent(), '着')
+  assert.equal(await editor.locator('.vsidian-list-bullet').count(), 2)
+  await renderedMath.nth(1).waitFor({ state: 'visible' })
+  assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['n', '2^n'])
+  assert.equal(await editor.locator('.vsidian-math .katex-mathml').first().evaluate(el => getComputedStyle(el).position), 'absolute')
+  assert.equal(await editor.locator('.cm-strong').first().textContent(), '“重点”')
+  await editor.screenshot({ path: artifactPath(root, 'addonPasteRules/paste-list-entity.png') })
+  await entity.click()
+  await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent?.includes('&#30528;'))
+  assert.equal(await page.evaluate(() => window.text()), withEntity)
+  await page.keyboard.press('Control+End')
+  await entity.waitFor({ state: 'visible' })
+
+  await page.evaluate(() => { window.openSettings() })
+  const boundaryMode = page.locator('select[data-setting-key="editor.pasteEmphasisBoundary"]')
+  await boundaryMode.waitFor({ state: 'visible' })
+  assert.deepEqual(await boundaryMode.locator('option').allTextContents(), ['使用字符实体（不插空格）', '按需补空格'])
+  assert.equal(await boundaryMode.inputValue(), 'entity')
+  await boundaryMode.locator('..').screenshot({ path: artifactPath(root, 'addonPasteRules/paste-boundary-setting.png') })
+  await boundaryMode.selectOption('space')
+  await page.evaluate(() => { window.closeSettings(); window.openSettings() })
+  assert.equal(await boundaryMode.inputValue(), 'space')
+  await page.evaluate(() => window.closeSettings())
+  await write(listPlain, listHtml)
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('- 意味着 **“重点”** $n$。\n- 其次 $2^n$。')
+  assert.equal(await entity.count(), 0)
+  assert.equal(await editor.locator('.cm-strong').first().textContent(), '“重点”')
+  await page.keyboard.press('Control+Z'); await waitBoth(listPlain)
+  console.log('[PASS] 裸列表项、实体触界显形与设置页二选一；换档仅改变富文本阶段')
+
+  await page.evaluate(() => {
+    window.replace('前文后文')
+    window.selectRanges([{ anchor: 2, head: 2 }])
+  })
+  await write(listPlain, listHtml)
+  await page.keyboard.press('Control+V')
+  await waitBoth('前文\n\n- 意味着 **“重点”** $n$。\n- 其次 $2^n$。\n\n后文')
+  assert.equal(await editor.locator('.vsidian-list-bullet').count(), 2)
+  await page.keyboard.press('Control+Z')
+  await waitBoth('前文' + listPlain + '后文')
+  console.log('[PASS] 段中粘贴仅富文本阶段保留列表的前后段界')
+
+  const newlineEntitySource = 'A&NewLine;B\nA&#10;B\n普通行'
+  await page.evaluate(source => {
+    window.replace(source)
+    window.selectRanges([{ anchor: source.length, head: source.length }])
+  }, newlineEntitySource)
+  await entity.nth(1).waitFor({ state: 'attached' })
+  const rowHeights = await editor.locator('.cm-line').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height))
+  assert.deepEqual(rowHeights.slice(0, 2), [rowHeights[2], rowHeights[2]], '命名和数值换行实体都不抬高源码行')
+  assert.equal(await page.evaluate(() => window.text()), newlineEntitySource)
+  console.log('[PASS] 命名与数值换行实体不引入额外视觉行')
+
+  await page.evaluate(() => {
+    window.replace('$abc$ tail')
+    window.selectRanges([{ anchor: 3, head: 3 }])
+  })
+  await write('x', '<li>x</li>')
+  await page.keyboard.press('Control+V')
+  await waitBoth('$abxc$ tail')
+  await page.keyboard.press('Control+End')
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['abxc'])
+  console.log('[PASS] 恢复独立列表时不会把正在编辑的旧公式拆成多个段落')
+
   const blockSource = '$$\na+b\n$$\n\nend'
   await page.evaluate(source => {
     window.replace(source)

@@ -1,6 +1,6 @@
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
-import { PRODUCTION_SETTING_DEFINITIONS, sanitizeStoredSettings, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY } from '../../src/shared/settings'
+import { PRODUCTION_SETTING_DEFINITIONS, sanitizeStoredSettings, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, type SettingsPayload } from '../../src/shared/settings'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
@@ -8,6 +8,7 @@ import { ChangeSet, EditorSelection, Text } from '@codemirror/state'
 import type { PasteStage, SerChange } from '../../src/shared/protocol'
 import '../../src/webview/main.css'
 import '../../src/webview/settingsPage.css'
+import 'katex/dist/katex.min.css'
 
 bootLocaleFromDocument()
 let values = sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, {})
@@ -70,7 +71,7 @@ Object.assign(window, {
   selection: () => c.getView()!.state.selection.toJSON(),
   selectRanges(ranges: { anchor: number; head: number }[]) { c.getView()!.dispatch({ selection: EditorSelection.create(ranges.map(r => EditorSelection.range(r.anchor, r.head))) }); c.getView()!.focus() },
   paint() { c.handleHostMessage({ kind: 'view.state.request' }); return [...sent].reverse().find(m => m.kind === 'view.state')!['paint'] },
-  settings(valuesPatch: Record<string, boolean>) { values = { ...values, ...valuesPatch }; c.handleHostMessage({ kind: 'settings.changed', values }) },
+  settings(valuesPatch: SettingsPayload) { values = { ...values, ...valuesPatch }; c.handleHostMessage({ kind: 'settings.changed', values }) },
   failNextEdit() { failNextEdit = true },
   openSettings() {
     settings?.dispose()
@@ -80,7 +81,7 @@ Object.assign(window, {
     settingsParent = element
     document.body.append(element)
     settings = new SettingsPageView({ postMessage(message: unknown) {
-      const m = message as { kind: string; values: Record<string, boolean> }
+      const m = message as { kind: string; values: SettingsPayload }
       if (m.kind === 'settings.set') {
         values = { ...values, ...m.values }; localStorage.setItem('preferences', JSON.stringify(values))
         settings?.handleHostMessage({ kind: 'settings.changed', values }); c.handleHostMessage({ kind: 'settings.changed', values })
