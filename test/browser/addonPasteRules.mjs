@@ -367,6 +367,16 @@ try {
   assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['P(A|B)', withTicks])
   console.log('[PASS] HTML 表格中的公式：源码保护格边界，Live 实际渲染仍使用原 TeX')
 
+  await page.evaluate(() => window.replace('原文'))
+  const url = 'https://example.com/$x'
+  await write('source y 尾', `<a href="${url}">source</a> ${katexSpan('y')} 尾`)
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth(`[source](${url}) $y$ 尾`)
+  await renderedMath.waitFor({ state: 'visible' })
+  await editor.locator('[data-vsidian-rendered-link="true"]').click()
+  await page.waitForFunction(url => window.sent().some(m => m.kind === 'link.activate' && m.href === url), url)
+  console.log('[PASS] 含美元的链接目标不参与公式配对，点击时发出原地址')
+
   await page.evaluate(() => window.pasteRules({ version: 8, rules: [] }))
   await page.evaluate(() => window.replace('原文'))
   await write(antiGravityPlain, antiGravityHtml)

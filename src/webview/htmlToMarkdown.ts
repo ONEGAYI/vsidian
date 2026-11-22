@@ -35,6 +35,13 @@ const escapeText = (text: string) => escapeEntityPrefixes(text).replace(/\\/g, '
   .replace(/^(\s{0,3})([-+])(?=\s|[-+]{2})/gm, '$1\\$2').replace(/^(\s{0,3}\d+)([.)])(?=\s)/gm, '$1\\$2')
 // 来源正文里的美元不是定界符。保留身份到最终行，避免改变没有还原公式的行。
 const escapeClipboardText = (text: string) => escapeText(text).replace(/\$/g, '\u0000d\u0000')
+const PASTE_TOKEN = /\u0000(\u0000|d\u0000|m?\d+\u0000)/g
+function containsMathToken(text: string): boolean {
+  for (const match of text.matchAll(PASTE_TOKEN)) {
+    if (match[1]!.startsWith('m')) return true
+  }
+  return false
+}
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
 interface InlineRun extends Marks { text: string }
 const unmarked: Marks = { bold:false, italic:false, strike:false }
@@ -65,6 +72,7 @@ function safeUrl(value: string): string | null {
 const ADDON_PASTE_RULES_BUDGET_EXHAUSTED = { sentinel: 'addon-paste-rules-eval-budget' }
 
 interface AddonPasteRuleEvaluationDeps {
+  escapeSourceText(value: string): string
   /** 格式化阶段保留公式身份；最终序列化后才写入真实定界符。 */
   inlineMath(tex: string): string | null
   templateCache: Map<string, readonly AddonPasteTemplatePart[]>
@@ -224,7 +232,7 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
     } else if (slot.source.kind === 'children') {
       output += raw
     } else {
-      output += escapeClipboardText(raw)
+      output += deps.escapeSourceText(raw)
     }
   }
   if (output === '') return null
@@ -247,6 +255,8 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   // 嵌套求值期间活动规则集切换为 children 槽声明的子规则集（外层规则集
   // 不串入——不按规则 ID 回跳或再次转换自身，只沿子节点下降）。
   const addonRules = orderAddonPasteRules(options?.addonPasteRules ?? [])
+  const escapeSourceText = addonRules.length && template.content.querySelector('annotation[encoding="application/x-tex"]')
+    ? escapeClipboardText : escapeText
   // 本次粘贴结束即释放，旧注册/代次的模板与正则不驻留到后续粘贴。
   const templateCache = new Map<string, readonly AddonPasteTemplatePart[]>()
   const regexCache = new Map<string, RegExp | null>()
@@ -263,6 +273,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       try {
         spendAddonRuleStep()
         const output = evaluateAddonPasteRule(rule, el, {
+          escapeSourceText,
           inlineMath: (tex) => {
             // 两端只能同义表示“加一枚反斜杠后仍为转义管道”的 TeX。
             if (table && Array.from(tex.matchAll(/\|/g)).some(hit => isEscapedAt(tex, hit.index))) return null
@@ -312,7 +323,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   }
   function inline(node: Node, inherited: Marks, table: boolean): InlineRun[] {
     if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
-    if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeClipboardText((node.textContent ?? '').replace(/\s+/g,' '))}]
+    if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeSourceText((node.textContent ?? '').replace(/\s+/g,' '))}]
     if (!(node instanceof Element) || ignored.has(node.tagName) || node.tagName === 'INPUT') return []
     const addonOutput = addonRuleOutput(node, table, inherited)
     if (addonOutput !== null) {
@@ -322,7 +333,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const marks = effectiveMarks(node, inherited)
     const tag = node.tagName
     if (tag === 'BR') return [{...unmarked,text:table ? '<br>' : '  \n'}]
-    if (node.matches('.katex,.MathJax,mjx-container,math')) return [{...marks,text:escapeClipboardText(node.querySelector('annotation')?.textContent ?? node.textContent ?? '')}]
+    if (node.matches('.katex,.MathJax,mjx-container,math')) return [{...marks,text:escapeSourceText(node.querySelector('annotation')?.textContent ?? node.textContent ?? '')}]
     if (tag === 'IMG') {
       const alt=escapeText(node.getAttribute('alt') ?? '')
       const src=safeUrl(node.getAttribute('src') ?? '')
@@ -485,16 +496,18 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   }
   const paragraphs = template.content.querySelectorAll('p')
   if (paragraphs.length > 1) hasFormatting = true
-  const output = render(template.content).replace(/\n{3,}/g, '\n\n').trim()
+  const rendered = render(template.content)
+  // 公式坐标由 CM6 消费，必须在计数前统一 CRLF/CR；无公式保留既有输出。
+  const normalizeLF = mathLiterals.length > 0 && containsMathToken(rendered)
+  const output = (normalizeLF ? rendered.replace(/\r\n?/g, '\n') : rendered).replace(/\n{3,}/g, '\n\n').trim()
   if (!output.includes('\u0000')) return { markdown: output, hasFormatting }
   const inlineMath: { from: number; to: number }[] = []
   let markdown = ''
   for (const [index, line] of output.split('\n').entries()) {
     if (index > 0) markdown += '\n'
     let end = 0
-    const tokens = [...line.matchAll(/\u0000(\u0000|d\u0000|m?\d+\u0000)/g)]
-    const hasMath = tokens.some(match => match[1]![0] === 'm')
-    for (const match of tokens) {
+    const hasMath = normalizeLF && line.includes('\u0000m') && containsMathToken(line)
+    for (const match of line.matchAll(PASTE_TOKEN)) {
       markdown += line.slice(end, match.index)
       end = match.index + match[0].length
       const token = match[1]!
@@ -507,7 +520,8 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
         inlineMath.push({ from, to: markdown.length })
         if (inlineMathNeedsSpace(line[end], 'after')) markdown += ' '
       } else {
-        markdown += literalBlocks[Number(token.slice(0, -1))]
+        const block = literalBlocks[Number(token.slice(0, -1))]!
+        markdown += normalizeLF ? block.replace(/\r\n?/g, '\n') : block
       }
     }
     markdown += line.slice(end)

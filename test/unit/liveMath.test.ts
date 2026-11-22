@@ -77,6 +77,11 @@ function collect(ranges: ReturnType<typeof build>): Item[] {
 }
 
 describe('live 公式装饰：显形与渲染切换', () => {
+  it('只跳过链接目标中的美元，不跳过标签和正文公式', () => {
+    const doc = '[$t$](https://example.com/$x) ' + String.raw`$\frac{a}{b}$ 尾`
+    const items = collect(build(doc, 0))
+    expect(items.map(item => item.widget?.tex)).toEqual(['t', String.raw`\frac{a}{b}`])
+  })
   it('表格公式只在渲染输入上解码格内管道，保留源码区间', () => {
     const tex = String.raw`P(A\|B)`
     const withTicks = '\\texttt{`A\\|B`}'

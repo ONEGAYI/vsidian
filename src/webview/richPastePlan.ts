@@ -1,6 +1,7 @@
 import { EditorSelection, type EditorState, type Transaction } from '@codemirror/state'
 import type { PasteSelection, PasteStage } from '../shared/protocol'
-import { inlineMathNeedsSpace, scanMathInLine } from '../shared/math'
+import { inlineMathNeedsSpace, type MathOccurrence } from '../shared/math'
+import { scanMathInMarkdownLine } from '../shared/markdownDoc'
 import type { ConvertedHtml } from './htmlToMarkdown'
 
 export function pasteSelection(selection: EditorSelection): PasteSelection {
@@ -25,10 +26,27 @@ function pasteTransaction(state: EditorState, text: string, insertions?: readonl
 
 /** 计算富文本选区的实际插入内容。既有文档会抢占公式定界符时返回 null，
  *  让调用方沿纯文本路径回退，而不是为修正格式改动选区之外的源码。 */
-export function prepareMathPaste(state: EditorState, text: string, inlineMath: NonNullable<ConvertedHtml['inlineMath']>): {
+export function prepareMathPaste(state: EditorState, text: string, inlineMath: NonNullable<ConvertedHtml['inlineMath']>, blocks: readonly MathOccurrence[]): {
   insertions: string[]; spaced: boolean
 } | null {
   const ranges = state.selection.ranges
+  const scanned = new Map<number, MathOccurrence[]>()
+  let blockIndex = 0
+  for (const range of ranges) {
+    for (const at of [range.from, range.to]) {
+      // 光标或选区端点在已有公式内部：沿纯文本编辑，不新增一层美元定界符。
+      while (blockIndex < blocks.length && blocks[blockIndex]!.to <= at) blockIndex++
+      const block = blocks[blockIndex]
+      if (block && block.from < at) return null
+      const line = state.doc.lineAt(at)
+      let hits = scanned.get(line.number)
+      if (!hits) {
+        hits = scanMathInMarkdownLine(line.text, line.from)
+        scanned.set(line.number, hits)
+      }
+      if (hits.some(hit => hit.from < at && at < hit.to)) return null
+    }
+  }
   const input = state.toText(text)
   const distribute = input.lines === ranges.length
   const mathByLine = new Map<number, { from: number; to: number }[]>()
@@ -73,7 +91,7 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
     const line = doc.lineAt(hit.from)
     if (line.number !== checked) {
       checked = line.number
-      actual = new Map(scanMathInLine(line.text, line.from).filter(hit => hit.kind === 'inline').map(hit => [hit.from, hit.to]))
+      actual = new Map(scanMathInMarkdownLine(line.text, line.from).filter(hit => hit.kind === 'inline').map(hit => [hit.from, hit.to]))
     }
     if (actual.get(hit.from) !== hit.to) return null
   }

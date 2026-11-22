@@ -70,6 +70,7 @@ import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readCli
 import { ToastChannel } from './toast'
 import { RichPasteDialog } from './richPasteDialog'
 import { htmlToMarkdown } from './htmlToMarkdown'
+import { mathBlocksField } from './liveMath'
 import { planRichPaste, prepareMathPaste, richPasteDistributionMatches } from './richPastePlan'
 import type { AddonPasteRule } from '../shared/addonPasteRules'
 import type { ClipboardSnapshot } from './clipboardPaste'
@@ -8675,7 +8676,9 @@ export class WebviewSyncController {
       return
     }
     const distributionMatches = richPasteDistributionMatches(state, plain, converted.markdown)
-    const math = converted.inlineMath && distributionMatches ? prepareMathPaste(state, converted.markdown, converted.inlineMath) : undefined
+    const math = converted.inlineMath && distributionMatches
+      ? prepareMathPaste(state, converted.markdown, converted.inlineMath, state.field(mathBlocksField, false) ?? [])
+      : undefined
     if (!converted.hasFormatting || math === null || converted.markdown === plain && !math?.spaced) {
       if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
       return

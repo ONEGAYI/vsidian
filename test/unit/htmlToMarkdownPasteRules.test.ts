@@ -148,6 +148,20 @@ describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
     expect(result.markdown).toBe('left\u0000m0\u0000right $t$')
     expect(result.inlineMath).toHaveLength(1)
   })
+
+  it('包含公式的模板按 LF 写出，并按归一后的源码记录公式坐标', () => {
+    const { rules: [math] } = snapshot()
+    const nested = rule({
+      id: 'wrap-crlf',
+      match: { tag: 'SPAN', attributes: [{ name: 'data-wrap' }] },
+      output: { kind: 'template', template: 'line\r\n{{body}}', slots: {
+        body: { source: { kind: 'children', rules: [math!] } },
+      } },
+    })
+    const result = convert(`<span data-wrap>${markup(annotate('t'))}</span>`, [nested])
+    expect(result.markdown).toBe('line\n$t$')
+    expect(result.inlineMath).toEqual([{ from: 5, to: 8 }])
+  })
 })
 
 describe('粘贴规则转换：命中与回退', () => {

@@ -63,14 +63,14 @@ const PROMPT_LINK_SNAPSHOT = (version: number) => ({
   }],
 })
 
-function pasteMath(view: EditorView, tex: string, plain: string) {
+function pasteMath(view: EditorView, tex: string, plain: string, htmlPrefix = '') {
   const [link] = PROMPT_LINK_SNAPSHOT(1).rules
   c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: {
     version: 1, rules: [{ ...link!, match: { tag: 'SPAN' }, output: {
       kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } },
     } }],
   } })
-  paste(view, `<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>`, plain)
+  paste(view, `${htmlPrefix}<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>`, plain)
 }
 
 describe('粘贴规则控制器消费链', () => {
@@ -107,6 +107,30 @@ describe('粘贴规则控制器消费链', () => {
     pasteMath(view, 'x', '$x$')
     await settle()
     expect(view.state.doc.toString()).toBe('foo $x$ bar')
+  })
+
+  it('保留含美元链接的原地址与邻接公式，不回纯文本', async () => {
+    const { view } = mount()
+    pasteMath(view, String.raw`\frac{a}{b}`, 'source a/b', '<a href="https://example.com/$x">source</a> ')
+    await settle()
+    expect(view.state.doc.toString()).toBe(String.raw`[source](https://example.com/$x) $\frac{a}{b}$`)
+  })
+
+  it.each(['Formula: $a + b$ end', 'Formula:\n$$\na + b\n$$\nend'])('编辑既有公式内部时使用纯文本 %s', async (doc) => {
+    const { view } = mount(doc)
+    const at = doc.indexOf('b')
+    view.dispatch({ selection: { anchor: at, head: at + 1 } })
+    pasteMath(view, 'x', 'x')
+    await settle()
+    expect(view.state.doc.toString()).toBe(doc.replace('b', 'x'))
+  })
+
+  it('完整选中已有公式仍可恢复新的公式', async () => {
+    const { view } = mount('Formula: $a$ end')
+    view.dispatch({ selection: { anchor: 9, head: 12 } })
+    pasteMath(view, 'x', 'x')
+    await settle()
+    expect(view.state.doc.toString()).toBe('Formula: $x$ end')
   })
   it('命中规则的双载荷粘贴：链接恢复、分步撤销两阶段携带 text/format', async () => {
     const { view, sent } = mount()

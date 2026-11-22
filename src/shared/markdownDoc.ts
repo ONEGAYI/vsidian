@@ -18,6 +18,7 @@ import type { Text } from '@codemirror/state'
 import { markdownLanguage } from '@codemirror/lang-markdown'
 import type { InlineContext, MarkdownParser } from '@lezer/markdown'
 import type { Input, SyntaxNode, Tree } from '@lezer/common'
+import { scanMathInLine } from './math'
 
 /** 源文本区间（UTF-16 offset，end 不含）——与协议 SerChange 坐标同构 */
 export interface SourceRange {
@@ -156,6 +157,26 @@ export function visitRange(
     }
   }
   rec(tree.topNode, [])
+}
+
+/** Markdown 先消费链接目标：目标中的美元不能开关公式，链接标签仍能含公式。 */
+export function scanMathInMarkdownLine(line: string, base: number, tree?: Tree) {
+  if (!line.includes('$')) return []
+  if (!line.includes('](') && !line.includes('<')) return scanMathInLine(line, base)
+  let masked: string[] | undefined
+  const offset = tree ? base : 0
+  visitRange(tree ?? markdownTreeParser.parse(line), offset, offset + line.length, node => {
+    if (node.name !== 'URL') return
+    const to = Math.min(node.to - offset, line.length)
+    for (let at = Math.max(node.from - offset, 0); at < to; at++) {
+      if (line[at] === '$') (masked ??= line.split(''))[at] = ' '
+    }
+  })
+  if (!masked) return scanMathInLine(line, base)
+  return scanMathInLine(masked.join(''), base).map(hit => {
+    const delimiters = hit.kind === 'inline' ? 1 : 2
+    return { ...hit, tex: line.slice(hit.from - base + delimiters, hit.to - base - delimiters) }
+  })
 }
 
 /**
