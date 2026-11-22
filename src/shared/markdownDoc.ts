@@ -18,7 +18,8 @@ import type { Text } from '@codemirror/state'
 import { markdownLanguage } from '@codemirror/lang-markdown'
 import type { InlineContext, MarkdownParser } from '@lezer/markdown'
 import type { Input, SyntaxNode, Tree } from '@lezer/common'
-import { scanMathInLine } from './math'
+import { scanMathInLine, type MathLinkLabel, type MathLinkRanges } from './math'
+import { normalizeReferenceLabel } from './wikilink'
 
 /** 源文本区间（UTF-16 offset，end 不含）——与协议 SerChange 坐标同构 */
 export interface SourceRange {
@@ -159,22 +160,53 @@ export function visitRange(
   rec(tree.topNode, [])
 }
 
-/** 供公式扫描识别的实际链接目标。裸 GFM URL 不先于公式消费。 */
-export function mathLinkTargets(line: string, base: number, tree?: Tree): { from: number; to: number }[] {
-  if (!line.includes('$') || (!tree && !line.includes('](') && !line.includes('<'))) return []
-  const targets: { from: number; to: number }[] = []
+interface MarkdownMathSource {
+  doc: Text
+  tree: Tree | undefined
+  fm: SourceRange | null
+}
+
+const shortcutLabelsByTree = new WeakMap<Tree, { doc: Text; labels: ReadonlySet<string> }>()
+
+/** 只在公式确实尝试跨过快捷引用候选时查询，不为每条视口行扫描全文。 */
+function shortcutLabelsOf(doc: Text, tree: Tree, bodyStart: number): ReadonlySet<string> {
+  const cached = shortcutLabelsByTree.get(tree)
+  if (cached?.doc === doc) return cached.labels
+  const labels = new Set<string>()
+  tree.iterate({ from: bodyStart, enter(node) {
+    if (node.name !== 'LinkReference' || node.from < bodyStart) return
+    const label = node.node.getChild('LinkLabel')!
+    labels.add(normalizeReferenceLabel(doc.sliceString(label.from + 1, label.to - 1)))
+  } })
+  shortcutLabelsByTree.set(tree, { doc, labels })
+  return labels
+}
+
+/** 供公式扫描使用的链接目标和标签坐标，含无 URL 的空目标与引用形式。 */
+export function mathLinkRanges(line: string, base: number, source?: MarkdownMathSource): MathLinkRanges {
+  const tree = source?.tree
+  const targets: Array<{ from: number; to: number }> = []
+  const labels: MathLinkLabel[] = []
+  if (!line.includes('$') || (!tree && !line.includes('[') && !line.includes('<'))) return { targets, labels }
   const offset = tree ? base : 0
   visitRange(tree ?? markdownTreeParser.parse(line), offset, offset + line.length, (node, path) => {
+    if (node.name === 'Link' || node.name === 'Image') {
+      const [open, close] = node.getChildren('LinkMark')
+      if (open && close) labels.push({ from: base + open.to - offset, to: base + close.from - offset, hasTarget: close.to < node.to })
+    }
     const owner = path.at(-1)?.name
     if (node.name === 'URL' && (owner === 'Link' || owner === 'Image' || owner === 'Autolink')) {
       targets.push({ from: base + Math.max(node.from - offset, 0), to: base + Math.min(node.to - offset, line.length) })
     }
   })
-  return targets
+  const hasShortcutReference = source && tree ? ({ from, to }: MathLinkLabel) =>
+    shortcutLabelsOf(source.doc, tree, source.fm?.end ?? 0)
+      .has(normalizeReferenceLabel(source.doc.sliceString(from, to))) : undefined
+  return { targets, labels, hasShortcutReference }
 }
 
-export function scanMathInMarkdownLine(line: string, base: number, tree?: Tree) {
-  return scanMathInLine(line, base, mathLinkTargets(line, base, tree))
+export function scanMathInMarkdownLine(line: string, base: number, source?: MarkdownMathSource) {
+  return scanMathInLine(line, base, mathLinkRanges(line, base, source))
 }
 
 /**

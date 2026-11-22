@@ -307,13 +307,14 @@ export function buildMathDecorationRanges(
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seenLines = new Set<number>()
+  const source = { doc, tree, fm }
   for (const range of visibleRanges) {
     let pos = range.from
     while (pos < range.to) {
       const line = doc.lineAt(pos)
       if (!seenLines.has(line.number)) {
         seenLines.add(line.number)
-        for (const hit of scanMathInMarkdownLine(line.text, line.from, tree)) {
+        for (const hit of scanMathInMarkdownLine(line.text, line.from, source)) {
           emitMathHit(out, doc, tree, hit, selection, fm, hits, compositionSelection)
         }
       }

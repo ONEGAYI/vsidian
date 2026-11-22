@@ -15,6 +15,10 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 ## Unreleased - 开发中
 
+### 修复
+
+- `__$x$__` 和 `_$x$_` 等下划线强调写法不再阻断行内公式。阅读模式下，公式也会继承行内 HTML 包裹的颜色，例如 `<span style="color: purple">$x$</span>`。
+
 ## 1.8.0 - 2026-11-22
 
 Vsidian 1.8.0 支持配合 Vsidian Agent Bridge 从富文本粘贴中还原行内公式，并修复实时预览的输入法、切窗焦点和跨段格式操作。附加组件公开 API 随本版发行 1.5.0，详见 [API 变更记录](https://github.com/ONEGAYI/vsidian/blob/v1.8.0/CHANGELOG-API.md)。

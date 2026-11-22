@@ -17,7 +17,7 @@
 // 锚点在 convertTaskItems 中按 li 首行源文计算（#9 勾选写回的定位依据）。
 import MarkdownIt, { type Env, type StateInline, type Token } from 'markdown-it'
 import katexPlugin from '@vscode/markdown-it-katex'
-import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
+import { MATH_CLASS_NAMES, mathCrossesLinkLabel, scanMathInLine, singleDollarMathEnd, stripInlineTexTicks, type MathLinkRanges } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
 import { WIKILINK_CLASS_NAMES, embedAtPosition, parseWikilinkInner } from '../shared/wikilink'
 import { imageSizeAttrs, splitAliasAndSize, type ImageSize } from '../shared/imageSize'
@@ -27,11 +27,11 @@ import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { escapeHtml } from '../shared/frontmatterTable'
 import { renderMathHtml } from './mathRenderCache'
-import { highlightFlankOk } from '../shared/markdownDoc'
+import { highlightFlankOk, mathLinkRanges } from '../shared/markdownDoc'
 import { tableCellBreakLength } from '../shared/tableCells'
 import { decodeCellView } from '../shared/tableCellEmbed'
 import { matchInlineHtmlFragmentAt } from '../shared/htmlInline'
-import { htmlInlineRenderHtml, IFRAME_APPROVED_ATTR } from './htmlSanitize'
+import { htmlInlineRenderHtml, HTML_SOURCE_FALLBACK_CLASS, IFRAME_APPROVED_ATTR } from './htmlSanitize'
 import { calloutDefaultTitle, parseCalloutDecl } from '../shared/calloutSyntax'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
@@ -90,27 +90,25 @@ function installMermaidFenceRenderer(md: InstanceType<typeof MarkdownIt>): void 
   }
 }
 
+function renderInlineMath(content: string): string {
+  const tex = stripInlineTexTicks(content)
+  const displayMode = /\\begin\{(align|equation|gather|cd|alignat)\}/i.test(tex)
+  const html = renderMathHtml(content, displayMode)
+  return html !== null
+    ? `<span class="${MATH_CLASS_NAMES.math}">${html}</span>`
+    : `<span class="${MATH_CLASS_NAMES.mathError}" data-tooltip="${escapeHtml(tex)}">${escapeHtml(`$${tex}$`)}</span>`
+}
+
 /**
  * 公式渲染规则（#59）：覆盖插件的默认规则——
  * - 成功：KaTeX HTML 包 vsidian-math（/ vsidian-math-block）稳定类名
  *   （cssProbe 与选择器映射表的入口）
  * - 失败：vsidian-math-error span 显示 `$原文$`（可读降级，源文经转义，
- *   title 带原文便于悬停核对）
+ *   悬停提示带原文便于核对）
  * 块级输出对齐插件的 `<p class="katex-block">` 包裹（阅读 CSS 的 display
  * 居中挂在该容器上）。
  */
 function installMathRenderers(md: InstanceType<typeof MarkdownIt>): void {
-  const inline = (tokens: Token[], idx: number): string => {
-    const content = tokens[idx]!.content
-    // 与插件一致：$`1+1`$ 形态剥反引号（stripInlineTexTicks 与 live 渲染
-    // 共用同一实现，#59 评审 C5；renderMathHtml 内部对行内同样剥离）
-    const tex = stripInlineTexTicks(content)
-    const displayMode = /\\begin\{(align|equation|gather|cd|alignat)\}/i.test(tex)
-    const html = renderMathHtml(content, displayMode)
-    return html !== null
-      ? `<span class="${MATH_CLASS_NAMES.math}">${html}</span>`
-      : `<span class="${MATH_CLASS_NAMES.mathError}" data-tooltip="${escapeHtml(tex)}">${escapeHtml(`$${tex}$`)}</span>`
-  }
   const block = (tokens: Token[], idx: number): string => {
     const tex = tokens[idx]!.content
     const html = renderMathHtml(tex, true)
@@ -118,10 +116,38 @@ function installMathRenderers(md: InstanceType<typeof MarkdownIt>): void {
       ? `<p class="katex-block ${MATH_CLASS_NAMES.math} ${MATH_CLASS_NAMES.mathBlock}">${html}</p>\n`
       : `<p class="katex-block ${MATH_CLASS_NAMES.mathError}"><code>${escapeHtml(`$$${tex}$$`)}</code></p>\n`
   }
-  md.renderer.rules['math_inline'] = inline
+  md.renderer.rules['math_inline'] = (tokens, idx) => renderInlineMath(tokens[idx]!.content)
   md.renderer.rules['math_inline_block'] = block
   md.renderer.rules['math_inline_bare_block'] = block
   md.renderer.rules['math_block'] = block
+}
+
+/** 阅读模式在净化后的行内 HTML 文本节点中排版公式，不重新解析 Markdown 或属性。 */
+function renderMathInInlineHtml(html: string): string {
+  if (!html.includes('$')) return html
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT)
+  const range = document.createRange()
+  let changed = false
+  for (let node = walker.nextNode() as Text | null; node;) {
+    const text = node
+    node = walker.nextNode() as Text | null
+    if (!text.parentElement ||
+        text.parentElement.closest(`code,pre,textarea,select,option,output,svg,math,.${HTML_SOURCE_FALLBACK_CLASS}`)) continue
+    const hits = scanMathInLine(text.data).filter(hit => hit.kind === 'inline')
+    if (hits.length === 0) continue
+    let markup = ''
+    let offset = 0
+    for (const hit of hits) {
+      markup += escapeHtml(text.data.slice(offset, hit.from)) + renderInlineMath(hit.tex)
+      offset = hit.to
+    }
+    range.selectNode(text)
+    text.replaceWith(range.createContextualFragment(markup + escapeHtml(text.data.slice(offset))))
+    changed = true
+  }
+  return changed ? template.innerHTML : html
 }
 
 /**
@@ -544,6 +570,19 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
     typographer: false,
     breaks: opts?.breaks === true,
   })
+  const imageAltParse = Symbol('imageAltParse')
+  const linkRangesByInlineState = new WeakMap<StateInline, MathLinkRanges>()
+  // 三连强调的判定与最终输出共用同一片段；按 token 复用，不重复净化或渲染。
+  const htmlPaint = new WeakMap<Token, { html: string; hasMath: boolean }>()
+  const paintInlineHtml = (token: Token) => {
+    const existing = htmlPaint.get(token)
+    if (existing) return existing
+    const sanitized = htmlInlineRenderHtml(token.content)
+    const html = renderMathInInlineHtml(sanitized)
+    const paint = { html, hasMath: html !== sanitized }
+    htmlPaint.set(token, paint)
+    return paint
+  }
   // #567（T02）行内 HTML 字面化：html_inline 渲染覆盖为转义（与 html:false
   // 的呈现逐字节同观感；识别仍由解析层完成，token 边界不进渲染产物）
   md.renderer.rules['html_inline'] = (tokens, idx) => escapeHtml(tokens[idx]!.content)
@@ -561,10 +600,70 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
   md.inline.ruler.before('link', 'vsidian_loose_link', vsidianLooseLinkInlineRule)
   // #105 高亮：挂 emphasis 之前（backticks 已消费，行内代码内不转换）
   md.inline.ruler.before('emphasis', 'vsidian_highlight', vsidianHighlightInlineRule)
-  // #59 公式：@vscode/markdown-it-katex 的解析规则（$…$ / $$…$$ 判定与
-  // shared/math.ts 对齐）；渲染规则覆盖为带稳定类名 + 原文降级
+  // #59 公式：保留插件的解析；仅补上被插件当成词字符的外侧下划线。
   md.use(katexPlugin, { throwOnError: true })
+  md.inline.ruler.before('math_inline', 'vsidian_math_next_to_underscore', (state, silent) => {
+    if (state.env[imageAltParse]) return false
+    const { src, pos, posMax } = state
+    const end = singleDollarMathEnd(src, pos, posMax)
+    if (end < 0 || (src[pos - 1] !== '_' && src[end] !== '_')) return false
+    // 沿用插件对未成型 HTML 开标签的降级；完整 HTML 片段走专用 renderer。
+    const previous = state.tokens.at(-1)
+    if (previous?.type === 'html_inline' && /^<\w+.+[^/]>$/.test(previous.content)) return false
+    if (silent) {
+      // 静默探查尚未限定标签范围。保留既有标签末端，但允许 TeX 自带方括号。
+      const bracket = src.indexOf(']', pos + 1)
+      if (bracket >= 0 && bracket < end) {
+        let links = linkRangesByInlineState.get(state)
+        if (!links) {
+          links = mathLinkRanges(src, 0)
+          linkRangesByInlineState.set(state, links)
+        }
+        const references = state.env.references
+        if (mathCrossesLinkLabel(links.labels, pos, end, ({ from, to }) =>
+          references !== undefined && Object.hasOwn(references, md.utils.normalizeReference(src.slice(from, to))))) return false
+      }
+    } else {
+      const token = state.push('math_inline', 'math', 0)
+      token.markup = '$'
+      token.content = src.slice(pos + 1, end - 1)
+    }
+    state.pos = end
+    return true
+  })
   installMathRenderers(md)
+  // Obsidian 把同符三连的斜体放在内层，公式优先继承斜体色。
+  // 只调整包含公式且粗斜范围完全相同的三连；显式嵌套和普通文本沿用原顺序。
+  md.inline.ruler2.after('emphasis', 'vsidian_math_triple_emphasis', ({ src, env, tokens, delimiters, tokens_meta }) => {
+    if (env[imageAltParse] || (!src.includes('***') && !src.includes('___'))) return
+    for (const pairs of [delimiters, ...tokens_meta.flatMap(meta => meta?.delimiters ? [meta.delimiters] : [])]) {
+      for (let i = 0; i < pairs.length; i++) {
+        const open = pairs[i]!
+        if (open.length !== 3 || open.end < 0 || tokens[open.token]!.type !== 'em_open') continue
+        const close = pairs[open.end]!
+        const inner = pairs[i + 2]
+        // 同一组三连产生相邻的 em/strong 定界 token，中间各有一个空 token。
+        if (close.length !== 3 || inner?.token !== open.token + 2 || inner.end !== open.end - 2) continue
+        const strongEnd = pairs[inner.end]!.token
+        if (strongEnd !== close.token - 2 || tokens[inner.token]!.type !== 'strong_open') continue
+        if (!tokens.slice(inner.token + 1, strongEnd)
+          .some(token => token.type === 'math_inline' ||
+            (token.type === 'vsidian_inline_html' && paintInlineHtml(token).hasMath))) continue
+        ;[tokens[open.token], tokens[inner.token]] = [tokens[inner.token]!, tokens[open.token]!]
+        ;[tokens[strongEnd], tokens[close.token]] = [tokens[close.token]!, tokens[strongEnd]!]
+      }
+    }
+  })
+  // 图片标签仍走原有纯文本投影。受下划线公式规则影响的标签先按旧规则
+  // 重解析；在 inline 阶段替换 children，转义和实体仍由 core.text_join 接手。
+  md.inline.ruler2.push('vsidian_preserve_image_alt', ({ env, tokens }) => {
+    if (env[imageAltParse]) return
+    for (const token of tokens) {
+      if (token.type !== 'image' || (!token.content.includes('_$') && !token.content.includes('$_'))) continue
+      token.children = []
+      md.inline.parse(token.content, md, { ...env, [imageAltParse]: true }, token.children)
+    }
+  })
   // #246 混排嵌入占位渲染：token 无 children，inner 存 content 由本规则
   // 产出完整 span（显示文本 + data-inner——挂载配对与未升级降级的同源）
   md.renderer.rules['vsidian_embed_slot'] = (tokens, idx) => embedSlotHtml(tokens[idx]!.content)
@@ -673,7 +772,7 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
   // #568（T03）行内片段渲染：净化装配（DOMPurify 单一事实源复用，
   // 行内降级回退为转义源码 span）；无包装容器类——原位渲染保持用户
   // DOM 形态（Q4=B：CSS 按实际 DOM 匹配，不引入额外包装干扰选择器语义）
-  md.renderer.rules['vsidian_inline_html'] = (tokens, idx) => htmlInlineRenderHtml(tokens[idx]!.content)
+  md.renderer.rules['vsidian_inline_html'] = (tokens, idx) => paintInlineHtml(tokens[idx]!).html
   md.renderer.rules['list_item_open'] = (tokens, idx, _options, env) => {
     const map = (tokens[idx] as Token).map
     const bounds = env as unknown as ReadingRenderEnv | undefined

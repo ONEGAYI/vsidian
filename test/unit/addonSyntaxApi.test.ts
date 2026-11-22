@@ -179,6 +179,12 @@ describe('inlineAt：行内标记点位（code / formula / none）', () => {
     expect(addonSyntaxInlineAt(source, at(2, line.indexOf('$'))).kind).toBe('none')
     expect(addonSyntaxInlineAt(source, at(2, line.indexOf('$\\frac'))).kind).toBe('formula')
   })
+  it('快捷引用的标签外部不是公式，后续正常公式仍可查询', () => {
+    const line = '[price _$12], currency $ here and $x$'
+    const { source, at } = sourceOf([line, '', '[price _$12]: /url'])
+    expect(addonSyntaxInlineAt(source, at(1, line.indexOf('currency'))).kind).toBe('none')
+    expect(addonSyntaxInlineAt(source, at(1, line.indexOf('$x$') + 1)).kind).toBe('formula')
+  })
   const sample = sourceOf(SAMPLE_LINES)
   it('探针点位：行内代码/行内公式/高亮/普通文本（#408 基线迁移）', () => {
     const line = SAMPLE_LINES[7]!

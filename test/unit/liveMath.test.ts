@@ -90,6 +90,35 @@ describe('live 公式装饰：显形与渲染切换', () => {
     expect(collect(build(formulaFirst, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\texttt{<https://example.org/}`])
     expect(collect(build(linkFirst, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\frac{a}{b}`])
   })
+  it.each([
+    '[price _$12](https://example.test), currency $ here',
+    '![price _$12](image.png), currency $ here',
+    '[price _$12 ![a](image.png)](https://example.test), currency $ here',
+    '[price $12](https://example.test), currency $_ here',
+  ])(
+    '未闭合的下划线公式不能吞掉链接和后续公式：%s', (doc) => {
+      expect(collect(build(doc + ' 后面 $x$', 0)).map(item => item.widget?.tex)).toEqual(['x'])
+    },
+  )
+  it.each([
+    '[price _$12](), currency $ here',
+    '[price _$12][ref], currency $ here\n\n[ref]: https://example.test',
+    '![price _$12][ref], currency $ here\n\n[ref]: image.png',
+    '[price _$12], currency $ here\n\n[Price   _$12]: https://example.test',
+    '![price _$12], currency $ here\n\n[price _$12]: image.png',
+  ])('下划线公式同样不跨空目标或引用式标签：%s', (doc) => {
+    expect(collect(build(doc, 0))).toEqual([])
+  })
+  it('下划线公式可以完全位于链接标签内，也可以先于内部链接样式的 TeX 文本', () => {
+    const doc = '前 [_$x_1$_](https://example.test) 与 _$[x](url)$_ 后'
+    expect(collect(build(doc, 0)).map(item => item.widget?.tex)).toEqual(['x_1', '[x](url)'])
+  })
+  it('没有引用定义的方括号不截断公式；代码块和 frontmatter 不提供定义', () => {
+    const line = '[price _$12], currency $ here'
+    for (const doc of [line, line + '\n\n```md\n[price _$12]: /url\n```', '---\nkey: value\n\n[price _$12]: /url\n---\n\n' + line]) {
+      expect(collect(build(doc, 0)).map(item => item.widget?.tex)).toEqual(['12], currency '])
+    }
+  })
   it('表格公式只在渲染输入上解码格内管道，保留源码区间', () => {
     const tex = String.raw`P(A\|B)`
     const withTicks = '\\texttt{`A\\|B`}'
@@ -107,6 +136,16 @@ describe('live 公式装饰：显形与渲染切换', () => {
     expect(items[0]!.widget!.tex).toBe('x^2')
     expect(items[0]!.widget!.displayMode).toBe(false)
   })
+
+  it.each(['__$x_1$__', '_$x_1$_', '___$x_1$___', '__文字 $x_1$__', '_$x_1$ 文字_'])(
+    '下划线围栏 %s 不阻断行内公式；显形时仍只覆盖公式范围', (source) => {
+      const from = source.indexOf('$')
+      const to = source.lastIndexOf('$') + 1
+      const [rendered] = collect(build(source, 0))
+      expect(rendered).toMatchObject({ from, to, widget: { tex: 'x_1', displayMode: false } })
+      expect(collect(build(source, from + 1))).toEqual([{ from, to, cls: MATH_CLASS_NAMES.mathSource }])
+    },
+  )
 
   it('光标进入公式范围（含两端边界）→ 源码态 mark', () => {
     for (const at of [3, 5, 8]) {
