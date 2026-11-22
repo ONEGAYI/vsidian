@@ -104,7 +104,9 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **#600 blankRow 接管域归一重锚理由（2026-10-20）**：#599 期间的用户裁决范围例外收口——空白表格行首笔规范化（`blankRowInputPlan` 命中）的键入路径同样只以原始输入驱动（`inputText` 为原始键入字符、`replaced` 恒 null、快照为规范化后文档，内置补全兜底经落点重映射照常落地，组件接管即让位）。运行时（载体注解 `blankRowRawInput`、重建事务保全 effect、pending 重映射、出站等价暂缓）、红绿回归（symbolTypedPath 七面契约 + tableCells insertAt）与契约文档（catalog/developer-guide/CHANGELOG-API/ADR-0020/symbol-input/api-reference 重生成）进入功能提交 `fae90952`。公开变化为 `behaviors-register` 条目 semantics.modes 键入路径子句的语义文本改写（接管域例外句改统一口径），签名与类型形状零变化；旧基线（锚 `b12d3ad937866d15ac060a63c24ae86358befea1`，#599 的口径收口提交）复验可信，候选比较如实拒绝该文本改写（`semantics-text-changed` 单项，重锚前失败证据 `out/test/600-compat-pre-reanchor.log`）。按字节冻结规则执行 `--emit-baseline --anchor fae90952` 从已提交对象显式发射（36 条目 / 3 条发行台账 / 22 签名模块），基线复验与完整兼容检查随后通过（`out/test/600-compat-post-reanchor.log`）；基线与本说明随另笔提交在其后。不改检查器、不加豁免、不伪造发行状态。
 
-**Bridge 行内公式槽重锚理由（2026-11-22）**：功能、声明和真实剪贴板回归进入提交 `38e585ca26ba76c38de846cd4b139a54a72c026d`。这次只给 `AddonPasteSlot` 增加可选 `inlineMath` 字段；原模板字段及 `AddonPasteRuleOutput` 的两个判别分支不变，旧消费者仍可穷尽处理。原基线（锚 `2c5d4763`）校验只报告这一处签名文本变化（`out/test/agent-bridge-compat-final-before.json`）。从已提交对象显式重锚，保留检查器、完整性清单和发行台账；新增能力记入 API Unreleased，随下次 API 次版本发行。
+**Bridge 行内公式槽重锚理由（2026-11-22）**：功能、声明和真实剪贴板回归进入提交 `38e585ca26ba76c38de846cd4b139a54a72c026d`。这次只给 `AddonPasteSlot` 增加可选 `inlineMath` 字段；原模板字段及 `AddonPasteRuleOutput` 的两个判别分支不变，旧消费者仍可穷尽处理。原基线（锚 `2c5d4763`）校验只报告这一处签名文本变化（`out/test/agent-bridge-compat-final-before.json`）。从已提交对象显式重锚，保留检查器、完整性清单和发行台账。
+
+**1.5.0 发行重锚（2026-11-22）**：Vsidian 1.8.0 发行行内公式槽，宿主的 `ADDON_API_VERSION` 从 1.4.0 升到 1.5.0，发行台账只追加新记录。常量声明受字节冻结校验，从含新声明的发布提交 `36e318c54ba8f57086a9617b36b74a103dedb396` 重锚；保留旧签名、历史台账与既有检查规则。
 
 ## CI 接线（代码侧，已交付）
 
