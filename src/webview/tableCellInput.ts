@@ -8,6 +8,8 @@ import { planTableCellInput, tableCellInputView } from '../shared/tableCellInput
 import { tableCellBreaks } from '../shared/tableCells'
 import { bindLocale } from './localeDom'
 
+export const TABLE_CELL_INPUT_CLASS = 'vsidian-table-cell-input'
+
 /** 编码前的整格文本；空白行首笔规范化据此保留原始输入载荷。 */
 export const independentTableInput = Annotation.define<{ text: string }>()
 export const independentTableKey = new WeakSet<EditorState>()
@@ -41,7 +43,7 @@ export function createTableCellInput({ editableGridCellAt, deleteGridCellBreak }
     pointerSelecting = false
     contentRange: { from: number; to: number } | null = null
     constructor(readonly view: EditorView) {
-      this.input.className = 'vsidian-table-cell-input'
+      this.input.className = TABLE_CELL_INPUT_CLASS
       bindLocale(this.input, 'aria-label', 'decor.tableCellInput')
       this.input.spellcheck = false
       this.input.wrap = 'off'

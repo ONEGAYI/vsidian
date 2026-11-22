@@ -191,6 +191,74 @@ try {
     await page.keyboard.press('Backspace')
     assert.equal((await page.evaluate(() => window.keyState())).text, '', '提示不抢焦点或收起选区')
   }
+
+  const content = page.locator('.cm-content')
+  await page.evaluate(() => window.initKeys('abcd'))
+  await content.focus()
+  await page.keyboard.press('Control+Home')
+  await page.keyboard.press('ArrowRight')
+  await page.waitForFunction(() => window.keyState().cursor === 1)
+  const replayWindowFocus = () => page.evaluate(() => {
+    // 真宿主记录：切出时仍记得正文焦点；切回先自动还焦，随后宿主再把
+    // 焦点送回 webview 时只落在 body。这里只重放焦点事件，不改编辑选区。
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+    document.activeElement.blur()
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+  })
+  await replayWindowFocus()
+  assert.equal((await page.evaluate(() => window.keyState())).cursor, 1, '回焦不移动原光标')
+  await page.keyboard.type('Q')
+  assert.equal((await page.evaluate(() => window.keyState())).text, 'aQbcd',
+    '宿主只还焦到 webview 页面时，应在原正文光标处继续输入')
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+  })
+  await page.keyboard.press('Control+f')
+  const search = page.locator('.vsidian-find input').first()
+  assert.equal(await search.evaluate(input => input === document.activeElement), true)
+  await page.evaluate(() => {
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+  })
+  await page.keyboard.type('needle')
+  assert.equal(await search.inputValue(), 'needle', '切回不应抢走查找框的输入焦点')
+  assert.equal((await page.evaluate(() => window.keyState())).text, 'aQbcd')
+
+  await content.focus()
+  await page.evaluate(() => {
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+    document.querySelector('.vsidian-find input').focus()
+    document.activeElement.blur()
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+  })
+  assert.equal(await page.evaluate(() => document.activeElement === document.body), true,
+    '期间已经把焦点交给查找框，即使宿主随后只还焦到页面，也不能再聚焦旧正文')
+
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => window.initKeys('| A | B |\n| --- | --- |\n| left | right |'))
+  await page.getByText('right', { exact: true }).click()
+  await page.waitForFunction(() => document.activeElement.matches('.vsidian-table-cell-input'))
+  await page.keyboard.press('End')
+  await replayWindowFocus()
+  await page.keyboard.type('Q')
+  assert.equal((await page.evaluate(() => window.keyState())).text, '| A | B |\n| --- | --- |\n| left | rightQ |',
+    '表格的独立输入框也应恢复原焦点，首个字符写入原单元格')
+
+  await page.evaluate(() => {
+    // 附加组件可以在编辑器根节点直接挂载自己的输入框；它不是表格输入。
+    const addonInput = document.createElement('textarea')
+    document.querySelector('.cm-editor').append(addonInput)
+    addonInput.focus()
+  })
+  await replayWindowFocus()
+  assert.equal(await page.evaluate(() => document.activeElement === document.body), true,
+    '独立组件输入框失焦时，不能把后续输入重定向到 Markdown')
   await page.close()
-  console.log('[编辑器快捷键][PASS] 原生键盘绑定与转发；行内格式往返与绘制；跨空行引用块；跳转到行；不能成形的行内插入提示')
+  console.log('[编辑器快捷键][PASS] 原生键盘绑定与转发；行内格式和引用；跳转到行；行内插入提示；窗口还焦与原位输入')
 } finally { await browser.close() }

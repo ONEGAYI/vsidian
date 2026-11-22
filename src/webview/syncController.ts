@@ -373,6 +373,7 @@ import {
   standaloneBlockIdOf,
 } from '../shared/blockId'
 import { parseTableDelimiter, quoteDepthOfLine, tableRowCellsForColumns } from '../shared/tableCells'
+import { TABLE_CELL_INPUT_CLASS } from './tableCellInput'
 import { runCreateTable, runTableEdit, runTableEditAt, tableRowsAt } from './tableEditing'
 import { planTableRegionDelete, serializeTableRegion, type TableRegion } from './tableRegion'
 import { planTableQuoteLevel } from './tableStructure'
@@ -995,11 +996,38 @@ export class WebviewSyncController {
   private overlayAnchorObserver: ResizeObserver | null = null
   /** 主面板开关闪烁计时（重复按下重启动画；dispose 时清理） */
   private findFlashTimer: ReturnType<typeof setTimeout> | undefined
-  private readonly cancelKeybindingOnBlur = () => {
+  private liveFocusToRestore: { view: EditorView; embed: LiveEditorInstance | null; input: Element } | undefined
+  private readonly onWindowBlur = () => {
+    const input = document.activeElement
+    // VS Code 可能先还焦到编辑器，再重新聚焦 webview。第二次失焦若只剩
+    // body，沿用切出前的编辑器及输入面；CM6 一直保有原选区。
+    if (input !== document.body) {
+      const target = this.actionTarget()
+      const isTableInput = target && input instanceof HTMLTextAreaElement &&
+        input.parentElement === target.view.dom && input.classList.contains(TABLE_CELL_INPUT_CLASS)
+      this.liveFocusToRestore = target &&
+        (input === target.view.contentDOM || isTableInput) &&
+        this.targetEditable(target.view, target.embed) ? { ...target, input } : undefined
+    }
     this.keybindingRouter.cancel()
     this.setLinkModActive(false) // 窗口失焦：修饰键态不可信，回落（keyup 可能丢失）
     // #238 编辑器失焦结束会话（VSCode 口径）：选项条随会话淡出
     this.endOccurrenceSession()
+  }
+
+  private readonly onWindowFocus = () => {
+    const target = this.liveFocusToRestore
+    if (!target || document.activeElement !== document.body || !document.hasFocus()) return
+    this.liveFocusToRestore = undefined
+    // 表格的 textarea 由编辑器焦点触发重投影，不直接唤回旧输入内容。
+    if (target.input.isConnected && this.targetEditable(target.view, target.embed)) target.view.focus()
+  }
+
+  /** 切回后已点击别处或焦点已进入其他控件，撤销正文还焦。 */
+  private readonly cancelLiveFocusRestore = (event: Event) => {
+    if (event.type === 'pointerdown' || event.target !== this.liveFocusToRestore?.input) {
+      this.liveFocusToRestore = undefined
+    }
   }
 
   /** #217 验收反馈：Ctrl/Cmd 修饰键激活态类维护（body.vsidian-mod-link）
@@ -1644,7 +1672,10 @@ export class WebviewSyncController {
       }
     }
     document.addEventListener('keyup', this.docKeyup, true)
-    window.addEventListener('blur', this.cancelKeybindingOnBlur)
+    window.addEventListener('blur', this.onWindowBlur)
+    window.addEventListener('focus', this.onWindowFocus)
+    document.addEventListener('focusin', this.cancelLiveFocusRestore, true)
+    document.addEventListener('pointerdown', this.cancelLiveFocusRestore, true)
     // 宿主明暗主题热跟随：body class 由 VSCode 随主题实时更新
     this.hostThemeObserver = new MutationObserver(() => this.applyHostTheme())
     this.hostThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] })
@@ -2151,7 +2182,11 @@ export class WebviewSyncController {
       this.docKeyup = undefined
     }
     this.setLinkModActive(false)
-    window.removeEventListener('blur', this.cancelKeybindingOnBlur)
+    window.removeEventListener('blur', this.onWindowBlur)
+    window.removeEventListener('focus', this.onWindowFocus)
+    document.removeEventListener('focusin', this.cancelLiveFocusRestore, true)
+    document.removeEventListener('pointerdown', this.cancelLiveFocusRestore, true)
+    this.liveFocusToRestore = undefined
     this.keybindingRouter.cancel()
     // P2-02：主正文实例销毁（flush 计时清零 + EditorView destroy，DOM
     // 随 destroy 移除）；根 chrome 各自独立释放
@@ -11011,7 +11046,7 @@ export class WebviewSyncController {
           }
         }
       }
-      const input = view.dom.querySelector('.vsidian-table-cell-input')
+      const input = view.dom.querySelector(`.${TABLE_CELL_INPUT_CLASS}`)
       const drawn = view.dom.querySelector<HTMLElement>('.vsidian-table-cell-input-caret:not([hidden])')
       if (input === document.activeElement && drawn) {
         const rect = drawn.getBoundingClientRect(), style = getComputedStyle(drawn)
