@@ -232,6 +232,65 @@ try {
       })
   }
 
+  for (const formula of ['$OBS$', '$$OBS$$']) {
+    const at = formula.length
+    await scenario(`同行公式 ${formula} 后 IME 句号：定稿后才恢复渲染`,
+      { doc: formula + '是', cursor: at }, async (page) => {
+        const source = page.locator('.cm-content .vsidian-math-source')
+        const rendered = page.locator('.cm-content .vsidian-math .katex-html')
+        assert.equal(await source.innerText(), formula, '闭合定界符后显示源码')
+        await cdpSession.send('Input.imeSetComposition', { text: '，', selectionStart: 1, selectionEnd: 1 })
+        await check(page, formula + '，是', at + 1, '候选光标已移出公式')
+        assert.ok(await source.isVisible(), '候选选区移出公式时源码仍可见')
+        assert.equal(await rendered.isVisible(), false, '候选期间不同时渲染公式')
+        await cdpSession.send('Input.insertText', { text: '。' })
+        await rendered.waitFor({ state: 'visible' })
+        await check(page, formula + '。是', at + 1, '定稿光标应在句号后')
+        await page.keyboard.type('X')
+        await check(page, formula + '。X是', at + 2, '后续输入应落在句号与原文之间')
+      })
+  }
+
+  for (const [source, rendered] of [
+    ['**粗体**', '粗体'],
+    ['**粗\n体**', '粗\n体'],
+    ['*斜体*', '斜体'],
+    ['~~删除线~~', '删除线'],
+    ['==高亮==', '高亮'],
+    ['[链接](note.md)', '链接'],
+    ['[含空格链接](note one.md)', '含空格链接'],
+    ['<https://example.com>', 'https://example.com'],
+    ['[[目标|别名]]', '别名'],
+  ]) {
+    const at = source.length
+    await scenario(`行内标记 ${source.replaceAll('\n', '↵')} 后 IME 句号：保留源码至定稿`,
+      { doc: source + '是', cursor: at }, async (page) => {
+        await cdpSession.send('Input.imeSetComposition', { text: '，', selectionStart: 0, selectionEnd: 1 })
+        const candidate = await read(page)
+        assert.deepEqual([candidate.from, candidate.to], [at, at + 1], '候选选区完全在标记范围外')
+        assert.equal(await page.locator('.cm-content').innerText(), source + '，是', '候选期间保持完整源码')
+        await cdpSession.send('Input.insertText', { text: '。' })
+        await page.waitForFunction((text) => document.querySelector('.cm-content')?.innerText === text, rendered + '。是')
+        await check(page, source + '。是', at + 1, '定稿光标应在句号后')
+        await page.keyboard.type('X')
+        await check(page, source + '。X是', at + 2, '后续输入应落在句号与原文之间')
+      })
+  }
+
+  await scenario('双链与公式相邻时，定稿前保留两侧源码',
+    { doc: '[[目标|别名]]$OBS$是', cursor: 9 }, async (page) => {
+      await cdpSession.send('Input.imeSetComposition', { text: '，', selectionStart: 0, selectionEnd: 1 })
+      const candidate = await read(page)
+      assert.deepEqual([candidate.from, candidate.to], [9, 10], '候选选区在两侧语法范围外')
+      assert.equal(await page.locator('.cm-content').innerText(), '[[目标|别名]]，$OBS$是')
+      await cdpSession.send('Input.insertText', { text: '。' })
+      // 定稿光标仍贴右侧公式，因此只有左侧双链恢复预览。
+      await page.waitForFunction(() => document.querySelector('.cm-content')?.innerText === '别名。$OBS$是')
+      await check(page, '[[目标|别名]]。$OBS$是', 10, '定稿光标应在句号后')
+      await page.keyboard.type('X')
+      await check(page, '[[目标|别名]]。X$OBS$是', 11, '后续输入不跳到任一语法内')
+    })
+
   // ---- 代码上下文 ----
   for (const symbols of [true, false]) {
     await scenario(`行内代码后 IME 句号：组合期保留反引号、结束恢复隐藏（符号辅助 ${symbols}）`,

@@ -1053,6 +1053,22 @@ export function selectionTouchesRange(selection: EditorSelection, from: number, 
   return false
 }
 
+export interface InlineCompositionSelection {
+  readonly left: EditorSelection
+  readonly right: EditorSelection
+}
+
+/** 支持 IME 显形保护的行内语法同时看当前选区和组合起点两侧。 */
+export function inlineSourceTouchesRange(
+  selection: EditorSelection, from: number, to: number, compositionSelection?: InlineCompositionSelection | null,
+): boolean {
+  return selectionTouchesRange(selection, from, to) ||
+    (compositionSelection != null && (
+      selectionTouchesRange(compositionSelection.left, from, to) ||
+      selectionTouchesRange(compositionSelection.right, from, to)
+    ))
+}
+
 /** 选区端点（head/anchor）是否落入范围（#296 三轮）：折叠光标与
  *  selectionTouchesRange 同判定（head 即端点）；非空选区只在端点进入
  *  范围时算触及——拖选跨格的选区区间覆盖表格行前缀是拖选常态，区间
@@ -1153,7 +1169,7 @@ function emitForRange(
   containerRender = true,
   metrics: TableReadabilityInput | null = null,
   overrides: ReadonlyMap<number, TableGridOverride> | null = null,
-  compositionSelection: EditorSelection | null = null,
+  compositionSelection: InlineCompositionSelection | null = null,
   calloutWrapped = false,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
@@ -1174,6 +1190,8 @@ function emitForRange(
     set.add(cls)
   }
   const touches = (from: number, to: number): boolean => selectionTouchesRange(selection, from, to)
+  const touchesInlineSource = (from: number, to: number): boolean =>
+    inlineSourceTouchesRange(selection, from, to, compositionSelection)
   const endpointTouches = (from: number, to: number): boolean => selectionEndpointsTouchRange(selection, from, to)
   const markerEnd = (node: SyntaxNode): number =>
     node.to < doc.length && doc.sliceString(node.to, node.to + 1) === ' ' ? node.to + 1 : node.to
@@ -1555,7 +1573,7 @@ function emitForRange(
       }
       case 'EmphasisMark': {
         const scope = path[path.length - 1]
-        if (!scope || !touches(scope.from, scope.to)) {
+        if (!scope || !touchesInlineSource(scope.from, scope.to)) {
           out.push(hideDeco.range(node.from, node.to))
         }
         return
@@ -1563,7 +1581,7 @@ function emitForRange(
       case 'StrikethroughMark': {
         // #483：控制域 = 删除线节点范围，同 EmphasisMark 口径
         const scope = path[path.length - 1]
-        if (!scope || !touches(scope.from, scope.to)) {
+        if (!scope || !touchesInlineSource(scope.from, scope.to)) {
           out.push(hideDeco.range(node.from, node.to))
         }
         return
@@ -1577,7 +1595,7 @@ function emitForRange(
         if (empty) {
           return
         }
-        if (!scope || !touches(scope.from, scope.to)) {
+        if (!scope || !touchesInlineSource(scope.from, scope.to)) {
           out.push(hideDeco.range(node.from, node.to))
         }
         return
@@ -1586,8 +1604,7 @@ function emitForRange(
         // 仅行内代码的反引号隐藏；围栏 ``` 保留可见
         if (path[path.length - 1]?.name === 'InlineCode') {
           const scope = path[path.length - 1]!
-          if (!touches(scope.from, scope.to) &&
-              !(compositionSelection && selectionTouchesRange(compositionSelection, scope.from, scope.to))) {
+          if (!touchesInlineSource(scope.from, scope.to)) {
             out.push(hideDeco.range(node.from, node.to))
           }
         }
@@ -1873,11 +1890,13 @@ interface ChangedRange4 {
   toB: number
 }
 
+const INLINE_SOURCE_SCOPE_NAMES = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'Highlight', 'InlineCode'])
+
 /** 选区驱动的重建行：旧选区行映射 + 新选区行。from/to 归一防御——
  *  被替换区间整体吞没的选区经 CM6 映射可得 from > to 的反向 Range
  *  （replaceDoc 已归一主路径；此处兜底其余来源），直接建区间会产出
  *  倒置 span 使 emitForRange 分配负长数组。 */
-function selectionSpans(tr: Transaction): LineSpan[] {
+function selectionSpans(tr: Transaction, oldTree: Tree): LineSpan[] {
   const doc = tr.state.doc
   const spans: LineSpan[] = []
   const push = (from: number, to: number): void => {
@@ -1885,14 +1904,32 @@ function selectionSpans(tr: Transaction): LineSpan[] {
     const hi = Math.max(from, to)
     spans.push({ fromLine: doc.lineAt(lo).number, toLine: doc.lineAt(hi).number })
   }
+  const pushOld = (from: number, to: number): void =>
+    push(tr.changes.mapPos(from, -1), tr.changes.mapPos(to, 1))
   for (const r of tr.startState.selection.ranges) {
-    push(tr.changes.mapPos(r.from, -1), tr.changes.mapPos(r.to, 1))
+    pushOld(r.from, r.to)
   }
   for (const r of tr.state.selection.ranges) {
     push(r.from, r.to)
   }
-  for (const r of tr.startState.field(inlineCodeComposition)?.ranges ?? []) {
-    push(tr.changes.mapPos(r.from, -1), tr.changes.mapPos(r.to, 1))
+  const composition = tr.startState.field(inlineCompositionSelection)
+  if (composition) {
+    const settling = tr.state.field(inlineCompositionSelection) === null
+    const origins = composition.left === composition.right ? [composition.left] : [composition.left, composition.right]
+    for (const origin of origins) {
+      for (const r of origin.ranges) {
+        pushOld(r.from, r.to)
+        if (!settling) continue
+        // 清除起点时，范围中间的标记已由选区行覆盖；向外补齐与端点
+        // 相交的格式范围，否则跨行标记只会重绘光标所在的一端。
+        for (const [pos, side] of [[r.from, 1], [r.to, -1]] as const) {
+          for (let node: SyntaxNode | null = oldTree.resolve(pos, side); node; node = node.parent) {
+            if (INLINE_SOURCE_SCOPE_NAMES.has(node.name)) pushOld(node.from, node.to)
+          }
+        }
+      }
+    }
+    if (settling) mergeSpans(spans, doc.lines)
   }
   return spans
 }
@@ -2047,7 +2084,7 @@ function planRebuildSpans(
   }
   // 选区显式变化才扩展重建行（编辑事务的默认选区映射不触发）
   if (tr.selection !== undefined) {
-    spans.push(...selectionSpans(tr))
+    spans.push(...selectionSpans(tr, oldTree))
   }
 
   // callout 身份翻转扩展（#653/T02）：首行声明区间的编辑可翻转容器的
@@ -2261,18 +2298,22 @@ function changedCovers(changed: readonly ChangedRange4[], from: number, to: numb
 
 // ---- StateField ----
 
-const clearInlineCodeComposition = StateEffect.define<null>()
+const clearInlineCompositionSelection = StateEffect.define<null>()
 
-// IME 会把闭合反引号后的光标扩成代码范围外的候选选区。保留组合起点
-// 的显形范围，避免组合中隐藏反引号、改写 DOM 后让 IME 回读出错误光标。
-const inlineCodeComposition = StateField.define<EditorSelection | null>({
+// IME 的候选选区可能移出已经显形的行内语法。保留组合起点的选区，
+// 让消费它的装饰在定稿前继续显示源码，避免 DOM 改动扰动光标。
+export const inlineCompositionSelection = StateField.define<InlineCompositionSelection | null>({
   create: () => null,
   update(value, tr) {
-    if (tr.effects.some((effect) => effect.is(clearInlineCodeComposition))) return null
-    const selection = tr.isUserEvent('input.type.compose.start')
-      ? tr.startState.selection
-      : value ?? (tr.isUserEvent('input.type.compose') ? tr.startState.selection : null)
-    return selection?.map(tr.changes, -1) ?? null
+    if (tr.effects.some((effect) => effect.is(clearInlineCompositionSelection))) return null
+    if (tr.isUserEvent('input.type.compose.start') || (!value && tr.isUserEvent('input.type.compose'))) {
+      const selection = tr.startState.selection
+      value = { left: selection, right: selection }
+    }
+    if (!value || !tr.docChanged) return value
+    // 空光标可能同时触及左侧闭合标记和右侧开始标记。插入候选后
+    // 分别跟随两侧，而不是把候选文字本身变成一段受保护的选区。
+    return { left: value.left.map(tr.changes, -1), right: value.right.map(tr.changes, 1) }
   },
 })
 
@@ -2347,7 +2388,7 @@ function applyHeightPlans(
       filter: () => false,
       add: emitForRange(next.tree, doc, state.selection, next.fm, first, last, gridPlans, next.fmModel,
         state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
-        state.facet(tableContainerRenderFacet), metrics, gridOverrides, state.field(inlineCodeComposition),
+        state.facet(tableContainerRenderFacet), metrics, gridOverrides, state.field(inlineCompositionSelection),
         state.facet(calloutWrapFacet) === true),
       sort: true,
     })
@@ -2382,7 +2423,7 @@ function buildLiveDecoState(
     emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
       state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
       state.facet(tableContainerRenderFacet), state.facet(tableMetricsFacet), prevOverrides,
-      state.field(inlineCodeComposition), state.facet(calloutWrapFacet) === true), true)
+      state.field(inlineCompositionSelection), state.facet(calloutWrapFacet) === true), true)
   return {
     decos,
     tree,
@@ -2426,7 +2467,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     // 折叠切换检测（零写回 effect 事务）：头区装饰随折叠态重建
     const fmFoldChanged =
       (tr.startState.field(fmFoldField, false) ?? false) !== (tr.state.field(fmFoldField, false) ?? false)
-    const compositionChanged = tr.startState.field(inlineCodeComposition) !== tr.state.field(inlineCodeComposition)
+    const compositionChanged = tr.startState.field(inlineCompositionSelection) !== tr.state.field(inlineCompositionSelection)
     if (!tr.docChanged && tr.selection === undefined && !hitRevealChanged && !fmFoldChanged && !compositionChanged &&
         sameTableRegion(tr.startState.field(tableRegionField, false), tr.state.field(tableRegionField, false))) {
       return value
@@ -2448,7 +2489,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, 1, fmLast, value.gridPlans,
             value.fmModel, tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), fmFolded,
             tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-            tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
+            tr.state.field(inlineCompositionSelection), tr.state.facet(calloutWrapFacet) === true),
           sort: true,
         })
         return {
@@ -2515,7 +2556,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, updatedPlans, value.fmModel,
                   tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
                   tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-                  tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
+                  tr.state.field(inlineCompositionSelection), tr.state.facet(calloutWrapFacet) === true),
                 sort: true,
               })
               return {
@@ -2543,7 +2584,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
               tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
               tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-              tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
+              tr.state.field(inlineCompositionSelection), tr.state.facet(calloutWrapFacet) === true),
             sort: true,
           })
           return {
@@ -2562,7 +2603,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
       let decos = value.decos
       let scanned = 0
       const rebuilt: Array<{ from: number; to: number }> = []
-      for (const span of [...selectionSpans(tr), ...regionSpans(tr, doc), ...hitRevealSpans(tr, doc)]) {
+      for (const span of [...selectionSpans(tr, value.tree), ...regionSpans(tr, doc), ...hitRevealSpans(tr, doc)]) {
         const from = doc.line(span.fromLine).from
         const to = doc.line(span.toLine).to
         rebuilt.push({ from, to })
@@ -2573,7 +2614,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
             tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
             tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), value.gridOverrides,
-            tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
+            tr.state.field(inlineCompositionSelection), tr.state.facet(calloutWrapFacet) === true),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -2641,7 +2682,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
           tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
           tr.state.facet(tableContainerRenderFacet), tr.state.facet(tableMetricsFacet), gridOverrides,
-          tr.state.field(inlineCodeComposition), tr.state.facet(calloutWrapFacet) === true),
+          tr.state.field(inlineCompositionSelection), tr.state.facet(calloutWrapFacet) === true),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1
@@ -2665,7 +2706,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     }
   },
   provide: (f) => [
-    inlineCodeComposition,
+    inlineCompositionSelection,
     // #150 格位共存：mark 装饰源经 Prec.low 排到全部 widget 装饰源之后
     // （decorations facet 的输入序即 RangeSet.spans 的 rank 序）。CM6 构建
     // 行 DOM 时，replace widget 只会被 rank 不低于自己的活跃 mark 嵌套
@@ -2937,10 +2978,10 @@ const viewportLivePlugin = ViewPlugin.fromClass(
         clearTimeout(this.compositionTimer)
       },
       compositionend(_event: CompositionEvent, view: EditorView) {
-        // 与符号输入同口径：等 CM6 的组合定稿 flush 完成，再恢复反引号
-        // 显隐。同步 dispatch 会打断组合定稿；销毁时撤销待执行的刷新。
+        // 等 CM6 的组合定稿 flush 完成，再恢复通常的行内语法显隐。
+        // 同步 dispatch 会打断组合定稿；销毁时撤销待执行的刷新。
         this.compositionTimer = setTimeout(() => {
-          view.dispatch({ effects: clearInlineCodeComposition.of(null) })
+          view.dispatch({ effects: clearInlineCompositionSelection.of(null) })
         }, 0)
       },
       mouseup(event: MouseEvent, view: EditorView) {
