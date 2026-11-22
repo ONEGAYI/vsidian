@@ -18,6 +18,7 @@ import type { Text } from '@codemirror/state'
 import { markdownLanguage } from '@codemirror/lang-markdown'
 import type { InlineContext, MarkdownParser } from '@lezer/markdown'
 import type { Input, SyntaxNode, Tree } from '@lezer/common'
+import { scanMathInLine } from './math'
 
 /** 源文本区间（UTF-16 offset，end 不含）——与协议 SerChange 坐标同构 */
 export interface SourceRange {
@@ -156,6 +157,24 @@ export function visitRange(
     }
   }
   rec(tree.topNode, [])
+}
+
+/** 供公式扫描识别的实际链接目标。裸 GFM URL 不先于公式消费。 */
+export function mathLinkTargets(line: string, base: number, tree?: Tree): { from: number; to: number }[] {
+  if (!line.includes('$') || (!tree && !line.includes('](') && !line.includes('<'))) return []
+  const targets: { from: number; to: number }[] = []
+  const offset = tree ? base : 0
+  visitRange(tree ?? markdownTreeParser.parse(line), offset, offset + line.length, (node, path) => {
+    const owner = path.at(-1)?.name
+    if (node.name === 'URL' && (owner === 'Link' || owner === 'Image' || owner === 'Autolink')) {
+      targets.push({ from: base + Math.max(node.from - offset, 0), to: base + Math.min(node.to - offset, line.length) })
+    }
+  })
+  return targets
+}
+
+export function scanMathInMarkdownLine(line: string, base: number, tree?: Tree) {
+  return scanMathInLine(line, base, mathLinkTargets(line, base, tree))
 }
 
 /**

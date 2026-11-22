@@ -26,12 +26,13 @@
 import { EditorSelection, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { Tree } from '@lezer/common'
-import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
+import { chainAt, scanMathInMarkdownLine, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
-import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathInLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
+import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
 import { t } from '../shared/i18n'
+import { isEscapedAt } from '../shared/tableCells'
 
 export { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml }
 
@@ -310,7 +311,7 @@ export function buildMathDecorationRanges(
       const line = doc.lineAt(pos)
       if (!seenLines.has(line.number)) {
         seenLines.add(line.number)
-        for (const hit of scanMathInLine(line.text, line.from)) {
+        for (const hit of scanMathInMarkdownLine(line.text, line.from, tree)) {
           emitMathHit(out, doc, tree, hit, selection, fm, hits)
         }
       }
@@ -340,7 +341,11 @@ function emitMathHit(
       (hit.kind === 'block' && hitIntersectsRange(hits, hit.from, hit.to))) {
     out.push(mathSourceDeco.range(hit.from, hit.to))
   } else {
-    out.push(mathWidgetDeco(hit.tex, hit.kind === 'block').range(hit.from, hit.to))
+    const inCell = hit.kind === 'inline' && hit.tex.includes('\\|') &&
+      chainAt(tree, hit.from).some(node => node.name === 'TableCell' && hit.to <= node.to)
+    // 已识别为 TeX：反引号是公式内容，不是 Markdown 代码边界。
+    const tex = inCell ? hit.tex.replace(/\\\|/g, (pipe, at: number) => isEscapedAt(hit.tex, at + 1) ? '|' : pipe) : hit.tex
+    out.push(mathWidgetDeco(tex, hit.kind === 'block').range(hit.from, hit.to))
   }
 }
 

@@ -128,6 +128,7 @@ import {
   type AddonPasteNestedRule,
   type AddonPastePredicate,
   type AddonPasteRuleDeclaration,
+  type AddonPasteRuleOutput,
   type AddonPasteRulesRegisterResult,
   type AddonPasteRulesSnapshot,
 } from '../../src/shared/addonPasteRules'
@@ -279,6 +280,14 @@ export const pasteRuleDeclarationSample: AddonPasteRuleDeclaration = {
   },
 }
 export const pasteRulesSnapshotSample: AddonPasteRulesSnapshot = { version: 1, rules: [] }
+export const pasteRuleInlineMathSample: AddonPasteRuleDeclaration = {
+  id: 'sample-inline-math',
+  match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex' }] },
+  output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } } },
+}
+// 既有消费者仍只需区分 discard 与 template。
+export const pasteRuleTemplate = (output: AddonPasteRuleOutput): string =>
+  output.kind === 'discard' ? '' : output.template
 
 /** #542 T02 高级声明的编译期消费：条件树、正则谓词与捕获组、嵌套子规则 */
 export const pasteRuleConditionSample: AddonPasteCondition = {

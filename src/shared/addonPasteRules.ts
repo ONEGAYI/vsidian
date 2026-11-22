@@ -131,6 +131,8 @@ export type AddonPasteSlotSource =
 export interface AddonPasteSlot {
   readonly source: AddonPasteSlotSource
   readonly url?: boolean
+  /** 只可用于独占模板的文本槽（非 URL）：从非块级 MathML 取 TeX 并写入行内围栏。 */
+  readonly inlineMath?: true
 }
 
 /** 产出：Markdown 结构模板或显式丢弃（空产出只有显式丢弃才算成功） */
@@ -430,7 +432,7 @@ function validateOutput(value: unknown, budget: OutputBudget): { ok: true; outpu
       return { ok: false, detail: `槽名非法：${name}` }
     }
     if (!isObject(rawSlot)) return { ok: false, detail: `槽 '${name}' 须为对象` }
-    const unknownSlot = hasOnlyKeys(rawSlot, ['source', 'url'])
+    const unknownSlot = hasOnlyKeys(rawSlot, ['source', 'url', 'inlineMath'])
     if (unknownSlot) return { ok: false, detail: `槽 '${name}' 不支持字段 '${unknownSlot}'` }
     if (rawSlot.url !== undefined && typeof rawSlot.url !== 'boolean') {
       return { ok: false, detail: `槽 '${name}' 的 url 须为布尔` }
@@ -485,7 +487,11 @@ function validateOutput(value: unknown, budget: OutputBudget): { ok: true; outpu
     if (rawSlot.url === true && source.kind === 'children') {
       return { ok: false, detail: `槽 '${name}' children 来源无 URL 语义` }
     }
-    slots[name] = rawSlot.url === true ? { source, url: true } : { source }
+    if (!isInlineMathSlotShape(rawSlot, parts, name)) {
+      return { ok: false, detail: `槽 '${name}' 的 inlineMath 仅接受 true，且须为独占模板的非 URL 文本槽` }
+    }
+    slots[name] = rawSlot.inlineMath === true ? { source, inlineMath: true }
+      : rawSlot.url === true ? { source, url: true } : { source }
   }
   for (const name of referenced) {
     if (!Object.hasOwn(slots, name)) return { ok: false, detail: `模板引用未定义槽 '${name}'` }
@@ -697,6 +703,14 @@ function isSlotSourceShape(value: unknown, depth: number): boolean {
   return false
 }
 
+/** 行内公式槽须是整个模板唯一的占位，沿共享校验口径广播。 */
+function isInlineMathSlotShape(slot: Record<string, unknown>, parts: readonly AddonPasteTemplatePart[], name: string): boolean {
+  return slot.inlineMath === undefined || (
+    slot.inlineMath === true && slot.url !== true && isObject(slot.source) && slot.source.kind === 'text' &&
+    parts.length === 1 && 'slot' in parts[0]! && parts[0].slot === name
+  )
+}
+
 /** 规则形状检查（守卫用；顶层要求 addonId，嵌套规则不要求） */
 function isRuleShape(value: unknown, depth: number): boolean {
   if (!isObject(value)) return false
@@ -714,11 +728,12 @@ function isRuleShape(value: unknown, depth: number): boolean {
   if (output.kind === 'discard') return true
   if (output.kind !== 'template') return false
   if (typeof output.template !== 'string' || output.template === '') return false
-  if (parseAddonPasteTemplate(output.template) === null) return false
+  const parts = parseAddonPasteTemplate(output.template)
+  if (parts === null) return false
   if (!isObject(output.slots)) return false
   return Object.entries(output.slots).every(([name, slot]) =>
     SLOT_NAME_PATTERN.test(name) && isObject(slot) && isSlotSourceShape(slot.source, depth) &&
-    (slot.url === undefined || typeof slot.url === 'boolean'),
+    (slot.url === undefined || typeof slot.url === 'boolean') && isInlineMathSlotShape(slot, parts, name),
   )
 }
 

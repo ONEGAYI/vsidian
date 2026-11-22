@@ -77,6 +77,27 @@ function collect(ranges: ReturnType<typeof build>): Item[] {
 }
 
 describe('live 公式装饰：显形与渲染切换', () => {
+  it('只跳过链接目标中的美元，不跳过标签和正文公式', () => {
+    const doc = '[$t$](https://example.com/$x) ' + String.raw`$\frac{a}{b}$ 尾`
+    const items = collect(build(doc, 0))
+    expect(items.map(item => item.widget?.tex)).toEqual(['t', String.raw`\frac{a}{b}`])
+  })
+  it('完整链接或公式先出现的一方消费其内容，跨行目标同样有效', () => {
+    const ordinary = String.raw`A < $\texttt{https://example.org/}$ 尾`
+    const formulaFirst = String.raw`A $\texttt{<https://example.org/}$> 尾`
+    const linkFirst = '[source](\nhttps://example.com/$x) ' + String.raw`$\frac{a}{b}$ 尾`
+    expect(collect(build(ordinary, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\texttt{https://example.org/}`])
+    expect(collect(build(formulaFirst, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\texttt{<https://example.org/}`])
+    expect(collect(build(linkFirst, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\frac{a}{b}`])
+  })
+  it('表格公式只在渲染输入上解码格内管道，保留源码区间', () => {
+    const tex = String.raw`P(A\|B)`
+    const withTicks = '\\texttt{`A\\|B`}'
+    const doc = `| 例 |\n| --- |\n| $${tex}$ |\n| $${withTicks}$ |\n\n正文 $${tex}$`
+    const items = collect(build(doc, 0))
+    expect(items.map(item => item.widget?.tex)).toEqual(['P(A|B)', '\\texttt{`A|B`}', tex])
+    expect(items.map(item => doc.slice(item.from, item.to))).toEqual([`$${tex}$`, `$${withTicks}$`, `$${tex}$`])
+  })
   it('光标在公式范围外 → 整体替换为 KaTeX widget', () => {
     const items = collect(build('价格 $x^2$ 元', 0))
     expect(items).toHaveLength(1)

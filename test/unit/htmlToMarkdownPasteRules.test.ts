@@ -19,6 +19,7 @@
 // 预算，超限确定性停用）。
 import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown } from '../../src/webview/htmlToMarkdown'
+import { scanMathInLine } from '../../src/shared/math'
 import * as pasteRulesModule from '../../src/shared/addonPasteRules'
 import {
   ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
@@ -50,6 +51,118 @@ const promptLinkRule = (override: Partial<AddonPasteRule> = {}): AddonPasteRule 
   })
 
 const convert = (html: string, rules: readonly AddonPasteRule[]) => htmlToMarkdown(html, { addonPasteRules: rules })
+
+describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
+  const declarations = [{
+    id: 'inline-math',
+    match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex' }] },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } } },
+  }]
+  const markup = (tex: string, display = '') =>
+    `<span class="katex"><span class="katex-mathml"><math ${display}><semantics><mrow><mi>a</mi></mrow>${tex}</semantics></math></span><span class="katex-html" aria-hidden="true">视觉副本</span></span>`
+  const annotate = (tex: string) => `<annotation encoding="application/x-tex">${tex}</annotation>`
+  function snapshot() {
+    const result = pasteRulesModule.validateAddonPasteRuleDeclarations(declarations)
+    if (!result.ok) throw new Error(result.detail)
+    return { version: 1, rules: result.rules.map(r => ({ ...r, addonId: 'fixture.demo' })) }
+  }
+
+  it('注册和接收快照后，从 annotation 取源码而不是渲染文字', () => {
+    const registered = snapshot()
+    expect(pasteRulesModule.isAddonPasteRulesSnapshot(registered)).toBe(true)
+    const tex = String.raw`\frac{a_1}{b}`
+    expect(convert(markup(annotate(tex)), registered.rules)).toEqual({
+      markdown: `$${tex}$`,
+      hasFormatting: true,
+      inlineMath: [{ from: 0, to: tex.length + 2 }],
+    })
+  })
+
+  it('没有行内 TeX、含未转义的定界符或块公式时回到原转换', () => {
+    const { rules } = snapshot()
+    const invalid = [
+      markup('<annotation encoding="other">x</annotation>'),
+      markup(annotate('')),
+      markup(annotate('a$b')),
+      markup(annotate('x\\')),
+      markup(annotate('a\nb')),
+      markup(annotate('x'), 'display="block"'),
+    ]
+    for (const html of invalid) expect(convert(html, rules)).toEqual(convert(html, []))
+  })
+
+  it('只在行内定界符无法紧贴的位置插入分隔空格', () => {
+    const { rules } = snapshot()
+    const formula = (tex: string) => markup(annotate(tex))
+    const { markdown } = convert(`字${formula('t')}字 x${formula('y')}z ${formula('a')}${formula('b')}`, rules)
+    expect(markdown).toBe('字$t$字 x $y$ z $a$ $b$')
+    expect(scanMathInLine(markdown, 0).map(hit => hit.tex)).toEqual(['t', 'y', 'a', 'b'])
+  })
+
+  it('行内公式槽必须独占模板，不能兼做 URL 槽', () => {
+    const [rule] = declarations
+    expect(pasteRulesModule.validateAddonPasteRuleDeclarations([
+      { ...rule, output: { ...rule!.output, template: 'x{{tex}}' } },
+    ])).toMatchObject({ ok: false, reason: 'invalid-declaration' })
+    expect(pasteRulesModule.validateAddonPasteRuleDeclarations([
+      { ...rule, output: { ...rule!.output, slots: { tex: { ...rule!.output.slots.tex, url: true } } } },
+    ])).toMatchObject({ ok: false, reason: 'invalid-declaration' })
+  })
+
+  it('children 模板内的公式仍与模板及外层文字正确分隔', () => {
+    const { rules: [math] } = snapshot()
+    const nested = rule({
+      id: 'wrap-math',
+      match: { tag: 'SPAN', attributes: [{ name: 'data-wrap' }] },
+      output: { kind: 'template', template: '{{body}}', slots: {
+        body: { source: { kind: 'children', rules: [math!] } },
+      } },
+    })
+    const result = convert(`x<span data-wrap>${markup(annotate('t'))}</span>y`, [nested])
+    expect(result.markdown).toBe('x $t$ y')
+    expect(scanMathInLine(result.markdown).map(hit => hit.tex)).toEqual(['t'])
+  })
+
+  it('表格保留普通管道公式；不能无损编码的转义管道回内置', () => {
+    const { rules } = snapshot()
+    const table = (tex: string) => `<table><tr><th>例</th></tr><tr><td>${markup(annotate(tex))}</td></tr></table>`
+    expect(convert(table('P(A|B)'), rules).markdown).toBe('| 例 |\n| --- |\n| $P(A\\|B)$ |')
+    const ambiguous = table(String.raw`\left\|x\right\|`)
+    expect(convert(ambiguous, rules)).toEqual(convert(ambiguous, []))
+  })
+
+  it('只在有恢复公式的行保护来源正文里的字面美元', () => {
+    const { rules } = snapshot()
+    const result = convert(`<p>price $5 ${markup(annotate(String.raw`\frac{a}{b}`))}</p><p>other $6</p>`, rules)
+    expect(result.markdown).toBe(String.raw`price \$5 $\frac{a}{b}$` + '\n\nother $6')
+    expect(scanMathInLine(result.markdown.split('\n')[0]!).map(hit => hit.tex)).toEqual([String.raw`\frac{a}{b}`])
+  })
+
+  it('规则的模板字面量不能引用内部公式占位', () => {
+    const { rules } = snapshot()
+    const template = rule({
+      id: 'static-text', match: { tag: 'SPAN', attributes: [{ name: 'data-static' }] },
+      output: { kind: 'template', template: 'left\u0000m0\u0000right', slots: {} },
+    })
+    const result = convert(`<span data-static>text</span> ${markup(annotate('t'))}`, [template, ...rules])
+    expect(result.markdown).toBe('left\u0000m0\u0000right $t$')
+    expect(result.inlineMath).toHaveLength(1)
+  })
+
+  it('包含公式的模板按 LF 写出，并按归一后的源码记录公式坐标', () => {
+    const { rules: [math] } = snapshot()
+    const nested = rule({
+      id: 'wrap-crlf',
+      match: { tag: 'SPAN', attributes: [{ name: 'data-wrap' }] },
+      output: { kind: 'template', template: 'line\r\n{{body}}', slots: {
+        body: { source: { kind: 'children', rules: [math!] } },
+      } },
+    })
+    const result = convert(`<span data-wrap>${markup(annotate('t'))}</span>`, [nested])
+    expect(result.markdown).toBe('line\n$t$')
+    expect(result.inlineMath).toEqual([{ from: 5, to: 8 }])
+  })
+})
 
 describe('粘贴规则转换：命中与回退', () => {
   it('命中：来源特化 span 恢复为可点击链接', () => {

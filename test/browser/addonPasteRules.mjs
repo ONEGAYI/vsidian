@@ -263,4 +263,163 @@ try {
   await selectAll(); await page.keyboard.press('Control+V')
   await waitBoth('[D16]')
   console.log('[PASS] 16 层条件组合快照穿过协议守卫并被生产控制器接纳')
+
+  // 反重力实际剪贴板双载荷，HTML 仅去掉 Windows CF_HTML 外壳。
+  const antiGravityPlain = "一个诊断问题实例（DPI）由五元组 \n(\n𝑆\n𝐷\n，\n𝐶\n𝑂\n𝑀\n𝑃\n𝑆\n，\n𝑂\n𝐵\n𝑆\n，\n𝑃\n，\n𝑁\n)\n(SD，COMPS，OBS，P，N) 构成"
+  const antiGravityHtml = [
+    "一个<strong>诊断问题实例（DPI）</strong>由五元组 <span>",
+    "<span class=\"katex\">",
+    "<span class=\"katex-mathml\">",
+    "<math xmlns=\"http://www.w3.org/1998/Math/MathML\">",
+    "<semantics>",
+    "<mrow>",
+    "<mo stretchy=\"false\">(</mo>",
+    "<mi>S</mi>",
+    "<mi>D</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>C</mi>",
+    "<mi>O</mi>",
+    "<mi>M</mi>",
+    "<mi>P</mi>",
+    "<mi>S</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>O</mi>",
+    "<mi>B</mi>",
+    "<mi>S</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>P</mi>",
+    "<mo separator=\"true\">，</mo>",
+    "<mi>N</mi>",
+    "<mo stretchy=\"false\">)</mo>",
+    "</mrow>",
+    "<annotation encoding=\"application/x-tex\">(SD, COMPS, OBS, P, N)</annotation>",
+    "</semantics>",
+    "</math>",
+    "</span>",
+    "<span class=\"katex-html\" aria-hidden=\"true\">",
+    "<span class=\"katex-base\">",
+    "<span class=\"katex-strut\" style=\"height: 1em; vertical-align: -0.25em;\">",
+    "</span>",
+    "<span class=\"mopen\">(</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0576em;\">S</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0278em;\">D</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0715em;\">C</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0278em;\">O</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">M</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.1389em;\">P</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0576em;\">S</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0278em;\">O</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0502em;\">B</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.0576em;\">S</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.1389em;\">P</span>",
+    "<span class=\"mpunct\">，</span>",
+    "<span class=\"mspace\" style=\"margin-right: 0.1667em;\">",
+    "</span>",
+    "<span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">N</span>",
+    "<span class=\"mclose\">)</span>",
+    "</span>",
+    "</span>",
+    "</span>",
+    "</span> 构成",
+  ].join('')
+  const formulaRules = [{
+    addonId: 'ONEGAYI.vsidian-codex-bridge',
+    id: 'katex-inline-math',
+    priority: 0,
+    match: { tag: 'SPAN', condition: { kind: 'attribute-regex', name: 'class', regex: { pattern: '(?:^|\\s)katex(?:\\s|$)' } } },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } } },
+  }]
+  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 7, rules: formulaRules })
+  await write(antiGravityPlain, antiGravityHtml)
+  await selectAll(); await page.keyboard.press('Control+V')
+  // “）”紧贴粗体结束符，宿主已有序列化规则把相邻的“由”写成等价字符实体。
+  await waitBoth('一个**诊断问题实例（DPI）**&#30001;五元组 $(SD, COMPS, OBS, P, N)$ 构成')
+  assert.strictEqual(await editor.locator('.cm-strong').first().textContent(), '诊断问题实例（DPI）')
+  const renderedMath = editor.locator('.vsidian-math .katex-html')
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.strictEqual(await renderedMath.count(), 1)
+
+  const katexSpan = tex => `<span class="katex"><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>`
+  await page.evaluate(() => {
+    window.replace('wordSuffix')
+    window.selectRanges([{ anchor: 4, head: 4 }])
+  })
+  await write('$x$', katexSpan('x'))
+  await page.keyboard.press('Control+V'); await waitBoth('word $x$ Suffix')
+  await renderedMath.waitFor({ state: 'visible' })
+  await page.keyboard.press('Control+Z'); await waitBoth('word$x$Suffix')
+  console.log('[PASS] 即使两个载荷等值，公式也只在富文本阶段隔开已有英文')
+
+  const withTicks = '\\texttt{`A|B`}'
+  await write('例\nP(A|B)\nA|B', `<table><tr><th>例</th></tr><tr><td>${katexSpan('P(A|B)')}</td></tr><tr><td>${katexSpan(withTicks)}</td></tr></table>`)
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('| 例 |\n| --- |\n| $P(A\\|B)$ |\n| $' + withTicks.replace('|', '\\|') + '$ |')
+  await renderedMath.first().waitFor({ state: 'visible' })
+  await renderedMath.nth(1).waitFor({ state: 'visible' })
+  assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['P(A|B)', withTicks])
+  console.log('[PASS] HTML 表格中的公式：源码保护格边界，Live 实际渲染仍使用原 TeX')
+
+  await page.evaluate(() => window.replace('原文'))
+  const url = 'https://example.com/$x'
+  await write('source y 尾', `<a href="${url}">source</a> ${katexSpan('y')} 尾`)
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth(`[source](${url}) $y$ 尾`)
+  await renderedMath.waitFor({ state: 'visible' })
+  await editor.locator('[data-vsidian-rendered-link="true"]').click()
+  await page.waitForFunction(url => window.sent().some(m => m.kind === 'link.activate' && m.href === url), url)
+  console.log('[PASS] 含美元的链接目标不参与公式配对，点击时发出原地址')
+
+  await page.evaluate(() => {
+    window.replace('$a$ end')
+    window.selectRanges([{ anchor: 0, head: 0 }])
+  })
+  await write('x USD', katexSpan('x') + ' USD')
+  await page.keyboard.press('Control+V')
+  const adjacent = '$x$ USD $a$ end'
+  await waitBoth(adjacent)
+  await page.evaluate(end => window.selectRanges([{ anchor: end, head: end }]), adjacent.length)
+  await renderedMath.nth(1).waitFor({ state: 'visible' })
+  assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['x', 'a'])
+  await page.keyboard.press('Control+Z'); await waitBoth('x USD$a$ end')
+  console.log('[PASS] 新公式和尾随英文不破坏旧公式；撤销格式仍恢复原剪贴板纯文本')
+
+  await page.evaluate(() => window.pasteRules({ version: 8, rules: [] }))
+  await page.evaluate(() => window.replace('原文'))
+  await write(antiGravityPlain, antiGravityHtml)
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('一个**诊断问题实例（DPI）**&#30001;五元组 (SD, COMPS, OBS, P, N) 构成')
+  console.log('[PASS] 反重力双载荷：粗体与单个可见行内公式保留；撤回规则后按旧链路粘贴')
+
+  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 9, rules: formulaRules })
+  const blockSource = '$$\na+b\n$$\n\nend'
+  await page.evaluate(source => {
+    window.replace(source)
+    window.selectRanges([{ anchor: 0, head: 0 }])
+  }, blockSource)
+  await write('x USD\n\n', katexSpan('x') + ' USD')
+  await page.keyboard.press('Control+V')
+  const preservedBlock = 'x USD\n\n' + blockSource
+  await waitBoth(preservedBlock)
+  await page.evaluate(end => window.selectRanges([{ anchor: end, head: end }]), preservedBlock.length)
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), ['a+b'])
+  console.log('[PASS] 富文本会破坏旧块公式时，用原剪贴板纯文本保留换行')
+
+  const blockEnd = preservedBlock.lastIndexOf('$$') + 2
+  await page.evaluate(at => window.selectRanges([{ anchor: at, head: at }]), blockEnd)
+  const closingPlain = '\n\nUSD x'
+  await write(closingPlain, 'USD ' + katexSpan('x'))
+  await page.keyboard.press('Control+V')
+  await waitBoth(preservedBlock.slice(0, blockEnd) + closingPlain + preservedBlock.slice(blockEnd))
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), ['a+b'])
+  console.log('[PASS] 块公式闭合行后的新内容保持独立段落，不被闭合行吞掉')
 } finally { await browser.close() }
