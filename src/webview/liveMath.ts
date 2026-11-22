@@ -32,6 +32,7 @@ import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathInLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
 import { t } from '../shared/i18n'
+import { decodeCellView } from '../shared/tableCellEmbed'
 
 export { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml }
 
@@ -340,7 +341,10 @@ function emitMathHit(
       (hit.kind === 'block' && hitIntersectsRange(hits, hit.from, hit.to))) {
     out.push(mathSourceDeco.range(hit.from, hit.to))
   } else {
-    out.push(mathWidgetDeco(hit.tex, hit.kind === 'block').range(hit.from, hit.to))
+    const inCell = hit.kind === 'inline' && hit.tex.includes('\\|') &&
+      chainAt(tree, hit.from).some(node => node.name === 'TableCell' && hit.to <= node.to)
+    const tex = inCell ? decodeCellView(hit.tex).text : hit.tex
+    out.push(mathWidgetDeco(tex, hit.kind === 'block').range(hit.from, hit.to))
   }
 }
 

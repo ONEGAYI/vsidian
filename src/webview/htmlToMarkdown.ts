@@ -1,5 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import { clipboardPlainText } from './clipboardPaste'
+import { inlineMathNeedsSpace } from '../shared/math'
+import { isEscapedAt } from '../shared/tableCells'
 import {
   ADDON_PASTE_RULES_EVAL_STEP_BUDGET,
   ADDON_PASTE_RULES_REGEX_INPUT_LIMIT,
@@ -13,7 +15,12 @@ import {
 } from '../shared/addonPasteRules'
 
 const urlPolicy = new MarkdownIt()
-export interface ConvertedHtml { markdown: string; hasFormatting: boolean }
+export interface ConvertedHtml {
+  markdown: string
+  hasFormatting: boolean
+  /** 本次由规则恢复的公式在 Markdown 中的定界符区间（含美元符）。 */
+  inlineMath?: readonly { from: number; to: number }[]
+}
 /** 转换选项：addonPasteRules 为本次粘贴开始时捕获的有效规则序（快照） */
 export interface HtmlToMarkdownOptions {
   addonPasteRules?: readonly AddonPasteRule[]
@@ -27,7 +34,7 @@ const escapeEntityPrefixes = (value: string) => value.replace(/&(?=(?:#(?:\d+|x[
 const escapeText = (text: string) => escapeEntityPrefixes(text).replace(/\\/g, '\\\\').replace(/([`*_~{}\[\]<>#])/g, '\\$1')
   .replace(/^(\s{0,3})([-+])(?=\s|[-+]{2})/gm, '$1\\$2').replace(/^(\s{0,3}\d+)([.)])(?=\s)/gm, '$1\\$2')
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
-interface InlineRun extends Marks { text: string; inlineMath?: boolean }
+interface InlineRun extends Marks { text: string }
 const unmarked: Marks = { bold:false, italic:false, strike:false }
 const markKeys: Array<keyof Marks> = ['strike','italic','bold']
 
@@ -56,6 +63,8 @@ function safeUrl(value: string): string | null {
 const ADDON_PASTE_RULES_BUDGET_EXHAUSTED = { sentinel: 'addon-paste-rules-eval-budget' }
 
 interface AddonPasteRuleEvaluationDeps {
+  /** 格式化阶段保留公式身份；最终序列化后才写入真实定界符。 */
+  inlineMath(tex: string): string | null
   templateCache: Map<string, readonly AddonPasteTemplatePart[]>
   /** 正则编译缓存（本次粘贴结束即释放；编译失败缓存 null——单条失败回退） */
   regexCache: Map<string, RegExp | null>
@@ -173,7 +182,7 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
       const tex = annotation?.textContent?.trim()
       // 公式槽独占模板：裸 $ 会提前闭合，尾部反斜杠会改变结束定界符语义。
       if (!tex || /[\r\n]|(^|[^\\])(?:\\\\)*\$|\\$/u.test(tex)) return null
-      return `$${tex}$`
+      return deps.inlineMath(tex)
     }
     // 取值：属性缺失（null）、文本/子内容为空串、正则不匹配、捕获组
     // 未参与与捕获空串、正则输入超上限，都是必需取值缺失——本规则失败
@@ -226,6 +235,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   template.innerHTML = html
   let hasFormatting = false
   const literalBlocks: string[] = []
+  const mathLiterals: string[] = []
   let visited = 0
   // #541 T01 / #542 T02 附加组件粘贴规则：本次粘贴使用开始时捕获的有效
   // 快照（调用方传入），转换中不拼接两个注册代次；入口统一应用确定性排
@@ -250,6 +260,11 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       try {
         spendAddonRuleStep()
         const output = evaluateAddonPasteRule(rule, el, {
+          inlineMath: (tex) => {
+            // 两端只能同义表示“加一枚反斜杠后仍为转义管道”的 TeX。
+            if (table && Array.from(tex.matchAll(/\|/g)).some(hit => isEscapedAt(tex, hit.index))) return null
+            return `\u0000m${mathLiterals.push(table ? tex.replace(/\|/g, '\\|') : tex) - 1}\u0000`
+          },
           templateCache,
           regexCache,
           spendStep: spendAddonRuleStep,
@@ -269,8 +284,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
           // 脱离父层粗体等标记。
           const slots = rule.output.kind === 'template' ? Object.values(rule.output.slots) : []
           const convertedChildren = slots.some(slot => slot.source.kind === 'children')
-          return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)),
-            text: output, inlineMath: slots.some(slot => slot.inlineMath) }
+          return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)), text: output }
         }
       } catch (error) {
         // 求值步预算耗尽：停用全部组件规则（本元素回内置，后续元素跳过）
@@ -338,14 +352,8 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const merged: InlineRun[]=[]
     for (const run of runs) {
       const last=merged.at(-1)
-      if (last && last.bold===run.bold && last.italic===run.italic && last.strike===run.strike) {
-        // 跟随行内公式解析器的定界符边界：x$x$、$x$y 与 $x$$y$ 都不能正确显示。
-        if ((last.inlineMath && /^[\w$]/u.test(run.text)) || (run.inlineMath && /[\w$\\]$/u.test(last.text))) {
-          last.text += ' '
-        }
-        last.text += run.text
-        if (run.text) last.inlineMath = run.inlineMath ?? false
-      } else merged.push({...run})
+      if (last && last.bold===run.bold && last.italic===run.italic && last.strike===run.strike) last.text+=run.text
+      else merged.push({...run})
     }
     // CommonMark 标点两侧的 delimiter flanking 会受邻接文字影响。
     // 仅把必要的邻接文字写成字符实体，呈现正文不增空格、不插 HTML 标签。
@@ -354,7 +362,9 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const entity = (character: string) => `&#${character.codePointAt(0)};`
     for (let index = 0; index < merged.length - 1; index++) {
       const before = merged[index]!, after = merged[index + 1]!
-      const last = Array.from(before.text).at(-1) ?? '', first = Array.from(after.text)[0] ?? ''
+      // 行内公式占位两端在最终 Markdown 中都是标点 `$`。
+      const last = before.text.endsWith('\u0000') ? '$' : Array.from(before.text).at(-1) ?? ''
+      const first = after.text.startsWith('\u0000') ? '$' : Array.from(after.text)[0] ?? ''
       if (markKeys.some(key => before[key] && !after[key]) && punctuation.test(last) && literal.test(first)) {
         after.text = entity(first) + after.text.slice(first.length)
       }
@@ -472,7 +482,23 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   }
   const paragraphs = template.content.querySelectorAll('p')
   if (paragraphs.length > 1) hasFormatting = true
-  const markdown = render(template.content).replace(/\n{3,}/g, '\n\n').trim()
-    .replace(/\u0000(\d+)\u0000/g, (_match, index: string) => literalBlocks[Number(index)] ?? '')
-  return { markdown, hasFormatting }
+  const output = render(template.content).replace(/\n{3,}/g, '\n\n').trim()
+  const inlineMath: { from: number; to: number }[] = []
+  let markdown = '', end = 0
+  // DOM 解析不会保留来自 HTML 的 NUL；这里只消费转换器自己生成的占位。
+  for (const match of output.matchAll(/\u0000(m?)(\d+)\u0000/g)) {
+    markdown += output.slice(end, match.index)
+    end = match.index + match[0].length
+    if (match[1] === 'm') {
+      if (inlineMathNeedsSpace(markdown.at(-1), 'before')) markdown += ' '
+      const from = markdown.length
+      markdown += `$${mathLiterals[Number(match[2])]}$`
+      inlineMath.push({ from, to: markdown.length })
+      if (inlineMathNeedsSpace(output[end], 'after')) markdown += ' '
+    } else {
+      markdown += literalBlocks[Number(match[2])]
+    }
+  }
+  markdown += output.slice(end)
+  return { markdown, hasFormatting, ...(inlineMath.length ? { inlineMath } : {}) }
 }

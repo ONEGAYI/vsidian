@@ -346,7 +346,28 @@ try {
   const renderedMath = editor.locator('.vsidian-math .katex-html')
   await renderedMath.waitFor({ state: 'visible' })
   assert.strictEqual(await renderedMath.count(), 1)
+
+  const katexSpan = tex => `<span class="katex"><math><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>`
+  await page.evaluate(() => {
+    window.replace('wordSuffix')
+    window.selectRanges([{ anchor: 4, head: 4 }])
+  })
+  await write('x', katexSpan('x'))
+  await page.keyboard.press('Control+V'); await waitBoth('word $x$ Suffix')
+  await renderedMath.waitFor({ state: 'visible' })
+  await page.keyboard.press('Control+Z'); await waitBoth('wordxSuffix')
+  console.log('[PASS] 向已有英文中粘贴公式：分隔符只随富文本阶段写入')
+
+  await write('例\nP(A|B)', `<table><tr><th>例</th></tr><tr><td>${katexSpan('P(A|B)')}</td></tr></table>`)
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('| 例 |\n| --- |\n| $P(A\\|B)$ |')
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.equal(await editor.locator('.vsidian-math annotation').textContent(), 'P(A|B)')
+  console.log('[PASS] HTML 表格中的公式：源码保护格边界，Live 实际渲染仍使用原 TeX')
+
   await page.evaluate(() => window.pasteRules({ version: 8, rules: [] }))
+  await page.evaluate(() => window.replace('原文'))
+  await write(antiGravityPlain, antiGravityHtml)
   await selectAll(); await page.keyboard.press('Control+V')
   await waitBoth('一个**诊断问题实例（DPI）**&#30001;五元组 (SD, COMPS, OBS, P, N) 构成')
   console.log('[PASS] 反重力双载荷：粗体与单个可见行内公式保留；撤回规则后按旧链路粘贴')

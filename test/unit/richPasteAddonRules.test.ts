@@ -63,6 +63,21 @@ const PROMPT_LINK_SNAPSHOT = (version: number) => ({
 })
 
 describe('粘贴规则控制器消费链', () => {
+  it('公式贴到选区两端的英文旁时仅在富文本阶段插入分隔', async () => {
+    const { view, sent } = mount('foo…bar')
+    view.dispatch({ selection: { anchor: 3, head: 4 } })
+    const [link] = PROMPT_LINK_SNAPSHOT(1).rules
+    c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: {
+      version: 1, rules: [{ ...link!, match: { tag: 'SPAN' }, output: {
+        kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } },
+      } }],
+    } })
+    paste(view, '<span><math><semantics><mi>x</mi><annotation encoding="application/x-tex">x</annotation></semantics></math></span>', 'x')
+    await settle()
+    expect(view.state.doc.toString()).toBe('foo $x$ bar')
+    const edit = sent.find((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')!
+    expect(edit.changes).toEqual([{ offset: 3, length: 1, text: 'x' }])
+  })
   it('命中规则的双载荷粘贴：链接恢复、分步撤销两阶段携带 text/format', async () => {
     const { view, sent } = mount()
     c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: PROMPT_LINK_SNAPSHOT(1) })

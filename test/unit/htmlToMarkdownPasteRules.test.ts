@@ -74,6 +74,7 @@ describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
     expect(convert(markup(annotate(tex)), registered.rules)).toEqual({
       markdown: `$${tex}$`,
       hasFormatting: true,
+      inlineMath: [{ from: 0, to: tex.length + 2 }],
     })
   })
 
@@ -106,6 +107,28 @@ describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
     expect(pasteRulesModule.validateAddonPasteRuleDeclarations([
       { ...rule, output: { ...rule!.output, slots: { tex: { ...rule!.output.slots.tex, url: true } } } },
     ])).toMatchObject({ ok: false, reason: 'invalid-declaration' })
+  })
+
+  it('children 模板内的公式仍与模板及外层文字正确分隔', () => {
+    const { rules: [math] } = snapshot()
+    const nested = rule({
+      id: 'wrap-math',
+      match: { tag: 'SPAN', attributes: [{ name: 'data-wrap' }] },
+      output: { kind: 'template', template: '{{body}}', slots: {
+        body: { source: { kind: 'children', rules: [math!] } },
+      } },
+    })
+    const result = convert(`x<span data-wrap>${markup(annotate('t'))}</span>y`, [nested])
+    expect(result.markdown).toBe('x $t$ y')
+    expect(scanMathInLine(result.markdown).map(hit => hit.tex)).toEqual(['t'])
+  })
+
+  it('表格保留普通管道公式；不能无损编码的转义管道回内置', () => {
+    const { rules } = snapshot()
+    const table = (tex: string) => `<table><tr><th>例</th></tr><tr><td>${markup(annotate(tex))}</td></tr></table>`
+    expect(convert(table('P(A|B)'), rules).markdown).toBe('| 例 |\n| --- |\n| $P(A\\|B)$ |')
+    const ambiguous = table(String.raw`\left\|x\right\|`)
+    expect(convert(ambiguous, rules)).toEqual(convert(ambiguous, []))
   })
 })
 

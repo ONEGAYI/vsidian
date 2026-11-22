@@ -155,8 +155,9 @@ function isWordChar(ch: string | undefined): boolean {
   return ch !== undefined && /[\w\d]/u.test(ch)
 }
 
-function isWsChar(ch: string | undefined): boolean {
-  return ch !== undefined && /\s/u.test(ch)
+/** 相邻字符会阻止单美元定界符识别时，粘贴需要在这一侧插入空格。 */
+export function inlineMathNeedsSpace(ch: string | undefined, side: 'before' | 'after'): boolean {
+  return isWordChar(ch) || ch === '$' || (side === 'before' && ch === '\\')
 }
 
 /** pos 处的 `$` 是否被前置反斜杠转义（奇数个连续 `\` 前置） */
@@ -238,7 +239,7 @@ export function scanMathInLine(line: string, base = 0): MathOccurrence[] {
       continue
     }
     // 单 `$…$`：开定界符贴字判定（$、\ 与词字符之后不开启）
-    if (prev === '$' || prev === '\\' || (prev !== undefined && !isWsChar(prev) && isWordChar(prev))) {
+    if (inlineMathNeedsSpace(prev, 'before')) {
       at += 1
       continue
     }
@@ -266,7 +267,7 @@ function findClosingDollar(line: string, from: number): number {
       continue
     }
     const next = line[at + 1]
-    if (next === '$' || (next !== undefined && !isWsChar(next) && isWordChar(next))) {
+    if (inlineMathNeedsSpace(next, 'after')) {
       return -1 // 与插件一致：首个候选不可闭合即放弃本次开启
     }
     return at
