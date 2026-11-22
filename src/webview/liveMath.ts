@@ -28,7 +28,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } fr
 import type { Tree } from '@lezer/common'
 import { chainAt, scanMathInMarkdownLine, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
-import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+import { inlineCompositionSelection, inlineSourceTouchesRange, liveDecorationsField, type InlineCompositionSelection } from './liveDecorations'
 import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
 import { t } from '../shared/i18n'
@@ -289,6 +289,7 @@ function mathSuppressed(doc: Text, tree: Tree, hit: MathOccurrence, fm: SourceRa
  * 构建视口内行内公式装饰（#59 契约入口；纯数据输入，可单测直驱）：
  * 行内 `$…$`、段内 `$$…$$`、行首单行 `$$x$$` 限视口行（屏外不物化）；
  * 光标/选区触及公式范围 → 源码态 mark；范围外 → replace widget。
+ * 单行公式在 IME 定稿前也保留组合起点触及的源码态；跨行块不消费组合起点。
  * #251 命中显形：块级（displayMode）公式的替换区间与活跃命中相交时
  * 回源码态（widget 上的背景式命中 mark 画不出来——回源后命中高亮自然
  * 可见）；行内 `$…$` 刻意不参与（票面覆盖清单钉住块级，不顺手放宽）。
@@ -302,6 +303,7 @@ export function buildMathDecorationRanges(
   visibleRanges: ReadonlyArray<{ from: number; to: number }>,
   fm: SourceRange | null,
   hits: readonly HitRange[] = [],
+  compositionSelection?: InlineCompositionSelection | null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seenLines = new Set<number>()
@@ -312,7 +314,7 @@ export function buildMathDecorationRanges(
       if (!seenLines.has(line.number)) {
         seenLines.add(line.number)
         for (const hit of scanMathInMarkdownLine(line.text, line.from, tree)) {
-          emitMathHit(out, doc, tree, hit, selection, fm, hits)
+          emitMathHit(out, doc, tree, hit, selection, fm, hits, compositionSelection)
         }
       }
       if (line.to >= range.to) {
@@ -333,11 +335,12 @@ function emitMathHit(
   selection: EditorSelection,
   fm: SourceRange | null,
   hits: readonly HitRange[] = [],
+  compositionSelection?: InlineCompositionSelection | null,
 ): void {
   if (mathSuppressed(doc, tree, hit, fm)) {
     return
   }
-  if (selectionTouchesRange(selection, hit.from, hit.to) ||
+  if (inlineSourceTouchesRange(selection, hit.from, hit.to, compositionSelection) ||
       (hit.kind === 'block' && hitIntersectsRange(hits, hit.from, hit.to))) {
     out.push(mathSourceDeco.range(hit.from, hit.to))
   } else {
@@ -428,6 +431,7 @@ export const liveMath: Extension = [
       }
       update(update: import('@codemirror/view').ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.viewportChanged ||
+            update.startState.field(inlineCompositionSelection, false) !== update.state.field(inlineCompositionSelection, false) ||
             update.startState.field(hitRevealField, false) !== update.state.field(hitRevealField, false)) {
           this.decorations = this.build(update.view)
         }
@@ -445,6 +449,7 @@ export const liveMath: Extension = [
             view.visibleRanges,
             field.fm,
             hitRangesOf(view.state),
+            view.state.field(inlineCompositionSelection),
           ),
           true,
         )

@@ -24,7 +24,7 @@ import { EditorSelection, EditorState, RangeSet, Text, type Extension, type Rang
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
-import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+import { inlineCompositionSelection, inlineSourceTouchesRange, liveDecorationsField, selectionTouchesRange, type InlineCompositionSelection } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { applyPercentWidthOnImageLoad, IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
 import { imageSizeAttrs, sameImageSize, splitAliasAndSize, type ImageSize } from '../shared/imageSize'
@@ -520,6 +520,7 @@ export function buildLinkImageDecorationRanges(
   visibleRanges: ReadonlyArray<{ from: number; to: number }>,
   images?: ImageResourceManager,
   hits: readonly HitRange[] = [],
+  compositionSelection?: InlineCompositionSelection | null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seen = new Set<SyntaxNode>()
@@ -541,11 +542,11 @@ export function buildLinkImageDecorationRanges(
       if (seen.has(node)) {
         return
       }
-      const active = selectionTouchesRange(selection, node.from, node.to)
       switch (node.name) {
         case 'Autolink': {
           seen.add(node)
           const url = childNamed(node, 'URL')
+          const active = inlineSourceTouchesRange(selection, node.from, node.to, compositionSelection)
           if (url && url.to > url.from) {
             out.push((active ? linkMarkDeco : renderedLinkMarkDeco).range(url.from, url.to))
           }
@@ -567,6 +568,7 @@ export function buildLinkImageDecorationRanges(
           if (!opener || !closer || closer.from <= opener.to) {
             return
           }
+          const active = inlineSourceTouchesRange(selection, node.from, node.to, compositionSelection)
           // 内容 span：扣除内部图片（其自身是替换装饰，mark 不得跨越）
           const innerCuts = imageRanges.filter((r) => r.from >= opener.to && r.to <= closer.from)
           for (const run of subtractIntervals(opener.to, closer.from, innerCuts)) {
@@ -589,7 +591,7 @@ export function buildLinkImageDecorationRanges(
           // #251 命中显形：独行图片的替换区间与活跃命中相交时回源码
           // （widget 上的命中 mark 画不出来）。行内混排图片刻意不参与
           // （票面覆盖清单钉住独行形态，不顺手放宽）
-          if (active ||
+          if (selectionTouchesRange(selection, node.from, node.to) ||
               (soloImageLine(doc, node.from, node.to) &&
                 hitIntersectsRange(hits, node.from, node.to))) {
             return // 光标进入该图片范围，显示源码供编辑
@@ -667,6 +669,7 @@ export function buildWikilinkDecorationRanges(
   selection: EditorSelection,
   visibleRanges: ReadonlyArray<{ from: number; to: number }>,
   fm: SourceRange | null,
+  compositionSelection?: InlineCompositionSelection | null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seenLines = new Set<number>()
@@ -685,7 +688,7 @@ export function buildWikilinkDecorationRanges(
             continue // 防御：扫描已过滤非法形态
           }
           out.push(
-            selectionTouchesRange(selection, hit.from, hit.to)
+            inlineSourceTouchesRange(selection, hit.from, hit.to, compositionSelection)
               ? wikilinkMarkDeco.range(hit.from, hit.to)
               : wikilinkWidgetDeco(parsed.display).range(hit.from, hit.to),
           )
@@ -749,6 +752,7 @@ export function buildLooseLinkDecorationRanges(
   fm: SourceRange | null,
   images?: ImageResourceManager,
   hits: readonly HitRange[] = [],
+  compositionSelection?: InlineCompositionSelection | null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seenLines = new Set<number>()
@@ -786,7 +790,7 @@ export function buildLooseLinkDecorationRanges(
             )
             continue
           }
-          const active = selectionTouchesRange(selection, hit.from, hit.to)
+          const active = inlineSourceTouchesRange(selection, hit.from, hit.to, compositionSelection)
           out.push(
             (active ? linkMarkDeco : renderedLinkMarkDeco).range(hit.labelFrom, hit.labelTo),
           )
@@ -1060,6 +1064,7 @@ export function createLinkInteractions(opts: {
       }
       update(update: import('@codemirror/view').ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.viewportChanged ||
+            update.startState.field(inlineCompositionSelection, false) !== update.state.field(inlineCompositionSelection, false) ||
             update.startState.field(hitRevealField, false) !== update.state.field(hitRevealField, false)) {
           this.decorations = this.build(update.view)
         }
@@ -1075,6 +1080,7 @@ export function createLinkInteractions(opts: {
           return RangeSet.empty
         }
         const hits = hitRangesOf(view.state)
+        const compositionSelection = view.state.field(inlineCompositionSelection)
         // #11：链接/图片（树驱动）与双链（行扫描）的区间合并为同一装饰集
         // ——两类语法不重叠，RangeSet.of 排序去重即可；#152 宽松链接同为
         // 行扫描来源，与树驱动/双链语法均不重叠（仅接管标准层拒绝的形态）
@@ -1087,6 +1093,7 @@ export function createLinkInteractions(opts: {
               view.visibleRanges,
               opts.images,
               hits,
+              compositionSelection,
             ),
             ...buildWikilinkDecorationRanges(
               view.state.doc,
@@ -1094,6 +1101,7 @@ export function createLinkInteractions(opts: {
               view.state.selection,
               view.visibleRanges,
               field.fm,
+              compositionSelection,
             ),
             ...buildLooseLinkDecorationRanges(
               view.state.doc,
@@ -1103,6 +1111,7 @@ export function createLinkInteractions(opts: {
               field.fm,
               opts.images,
               hits,
+              compositionSelection,
             ),
           ],
           true,

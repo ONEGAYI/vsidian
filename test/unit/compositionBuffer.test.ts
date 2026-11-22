@@ -98,6 +98,105 @@ describe('行内代码边界的 IME 显形', () => {
   })
 })
 
+it.each(['$OBS$', '$$OBS$$'])('同行公式 %s 后的 IME 句号：定稿前保留源码', async (formula) => {
+  const { bridge } = makeBridge()
+  const c = mount(bridge)
+  const at = formula.length
+  try {
+    init(c, formula + '是')
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: at } })
+    startComposition(c)
+    view.dispatch({ changes: { from: at, insert: '，' },
+      selection: { anchor: at, head: at + 1 }, userEvent: 'input.type.compose.start' })
+    expect(view.contentDOM.querySelector('.vsidian-math-source')?.textContent).toBe(formula)
+
+    endComposition(c)
+    await Promise.resolve()
+    view.dispatch({ changes: { from: at, to: at + 1, insert: '。' },
+      selection: { anchor: at + 1 }, userEvent: 'input.type.compose' })
+    expect(view.contentDOM.querySelector('.vsidian-math-source')?.textContent).toBe(formula)
+    await waitFlush()
+    expect(view.contentDOM.querySelector('.vsidian-math .katex')).not.toBeNull()
+    expect(view.state.doc.toString()).toBe(formula + '。是')
+    expect(view.state.selection.main.head).toBe(at + 1)
+  } finally {
+    c.dispose()
+  }
+})
+
+it.each([
+  ['**粗体**', '粗体', '是'],
+  ['**粗\n体**', '粗\n体', '是'],
+  ['*斜体*', '斜体', '是'],
+  ['__粗体__', '粗体', ' 是'],
+  ['_斜体_', '斜体', ' 是'],
+  ['~~删除线~~', '删除线', '是'],
+  ['==高亮==', '高亮', '是'],
+  ['[链接](note.md)', '链接', '是'],
+  ['[含空格链接](note one.md)', '含空格链接', '是'],
+  ['<https://example.com>', 'https://example.com', '是'],
+  ['[[目标|别名]]', '别名', '是'],
+])('行内标记 %s 后的 IME 句号：定稿前保留源码', async (source, rendered, tail) => {
+  const { bridge } = makeBridge()
+  const c = mount(bridge)
+  const at = source.length
+  try {
+    init(c, source + tail)
+    const view = c.getView()!
+    const visibleText = () =>
+      Array.from(view.contentDOM.querySelectorAll('.cm-line'), (line) => line.textContent).join('\n')
+    view.dispatch({ selection: { anchor: at } })
+    expect(visibleText()).toBe(source + tail)
+
+    startComposition(c)
+    view.dispatch({ changes: { from: at, insert: '，' },
+      selection: { anchor: at, head: at + 1 }, userEvent: 'input.type.compose.start' })
+    expect(visibleText()).toBe(source + '，' + tail)
+
+    endComposition(c)
+    await Promise.resolve()
+    view.dispatch({ changes: { from: at, to: at + 1, insert: '。' },
+      selection: { anchor: at + 1 }, userEvent: 'input.type.compose' })
+    expect(visibleText()).toBe(source + '。' + tail)
+
+    await waitFlush()
+    expect(visibleText()).toBe(rendered + '。' + tail)
+    expect(view.state.doc.toString()).toBe(source + '。' + tail)
+    expect(view.state.selection.main.head).toBe(at + 1)
+  } finally {
+    c.dispose()
+  }
+})
+
+it('相邻语法之间的 IME 句号：候选选区不让任一侧提前恢复预览', async () => {
+  const { bridge } = makeBridge()
+  const c = mount(bridge)
+  const link = '[[目标|别名]]'
+  const tail = '$OBS$是'
+  const at = link.length
+  try {
+    init(c, link + tail)
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: at } })
+    startComposition(c)
+    view.dispatch({ changes: { from: at, insert: '，' },
+      selection: { anchor: at, head: at + 1 }, userEvent: 'input.type.compose.start' })
+    expect(view.contentDOM.textContent).toBe(link + '，' + tail)
+
+    endComposition(c)
+    await Promise.resolve()
+    view.dispatch({ changes: { from: at, to: at + 1, insert: '。' },
+      selection: { anchor: at + 1 }, userEvent: 'input.type.compose' })
+    expect(view.contentDOM.textContent).toBe(link + '。' + tail)
+    await waitFlush()
+    expect(view.contentDOM.textContent).toBe('别名。' + tail)
+    expect(view.state.selection.main.head).toBe(at + 1)
+  } finally {
+    c.dispose()
+  }
+})
+
 describe('矩形格区 IME 写回', () => {
   it('零宽首格开始组合后取消，不清区域内容且不写回', async () => {
     const { bridge, sent } = makeBridge()
