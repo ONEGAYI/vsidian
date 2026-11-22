@@ -134,6 +134,37 @@ describe('粘贴规则控制器消费链', () => {
     expect(edits.map(edit => edit.changes)).toEqual([[{ offset: 0, length: 0, text: plain }]])
   })
 
+  it.each([
+    { prefix: 'USD ', suffix: '', plain: '\n\nUSD x', visible: 'USD x' },
+    { prefix: '<p>USD</p><p>', suffix: '</p>', plain: '\n\nUSD\n\nx', visible: 'USD' },
+  ])('阅读视图会吞掉块公式结束行上的新文字时回退原纯文本：$prefix', async ({ prefix, suffix, plain, visible }) => {
+    const doc = 'start\n\n$$\na+b\n$$'
+    const { view, sent } = mount(doc)
+    view.dispatch({ selection: { anchor: doc.length } })
+    pasteMath(view, 'x', plain, prefix, suffix)
+    await settle()
+    const finalSource = view.state.doc.toString()
+    const readingText = splitReadingBlocks(finalSource)
+      .map(block => createReadingBlockElement(block, finalSource).textContent).join('\n')
+    expect(readingText).toContain(visible)
+    expect(readingTexOf(finalSource)).toEqual(['a+b'])
+    expect(view.state.field(mathBlocksField).map(hit => hit.tex.trim())).toEqual(['a+b'])
+    expect(finalSource).toBe(doc + plain)
+    const edits = sent.filter((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')
+    expect(edits.map(edit => edit.changes)).toEqual([[{ offset: doc.length, length: 0, text: plain }]])
+  })
+
+  it('在块公式之后独立成段时保留富文本中的新公式', async () => {
+    const doc = 'start\n\n$$\na+b\n$$\n\n'
+    const { view } = mount(doc)
+    view.dispatch({ selection: { anchor: doc.length } })
+    pasteMath(view, 'x', 'USD x', 'USD ')
+    await settle()
+    const finalSource = view.state.doc.toString()
+    expect(finalSource).toBe(doc + 'USD $x$')
+    expect(readingTexOf(finalSource)).toEqual(['a+b', 'x'])
+  })
+
   it('旧块公式边界不变时仍可富文本粘贴行内公式', async () => {
     const doc = '前文\n\n$$\na+b\n$$\n\n尾'
     const { view } = mount(doc)

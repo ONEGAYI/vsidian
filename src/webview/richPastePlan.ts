@@ -24,7 +24,7 @@ function pasteTransaction(state: EditorState, text: string, insertions?: readonl
   return state.update({ ...pasteChanges(state, text, insertions), userEvent: 'input.paste', scrollIntoView: true })
 }
 
-/** 计算富文本选区的实际插入内容。既有文档会抢占公式定界符时返回 null，
+/** 计算富文本选区的实际插入内容。既有文档会抢占公式定界符或吞掉新内容时返回 null，
  *  让调用方沿纯文本路径回退，而不是为修正格式改动选区之外的源码。 */
 export function prepareMathPaste(state: EditorState, text: string, inlineMath: NonNullable<ConvertedHtml['inlineMath']>, blocks: readonly MathOccurrence[]): {
   insertions: string[]; spaced: boolean
@@ -100,6 +100,7 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
   const doc = changes.apply(state.doc)
   // 只检查选区端点所在线的旧公式；被选区替换的公式不参与校验。
   const existing = existingInline.concat([...boundaryBlocks]).sort((a, b) => a.from - b.from)
+  const closingTails: { from: number; to: number }[] = []
   let selectionIndex = 0
   for (const hit of existing) {
     while (selectionIndex < ranges.length && ranges[selectionIndex]!.to <= hit.from) selectionIndex++
@@ -119,6 +120,25 @@ export function prepareMathPaste(state: EditorState, text: string, inlineMath: N
     if (!scanMathRanges(lines, first.from).some(block =>
       block.kind === 'block' && block.from === from && block.to === to && block.tex === hit.tex,
     )) return null
+    if (to < last.to) closingTails.push({ from: to, to: last.to })
+  }
+  // 阅读视图会消费整条闭合行。旧块仍可渲染，不代表同一行新增的正文也可见。
+  if (closingTails.length) {
+    let tailIndex = 0, hiddenInsertion = false
+    changes.iterChangedRanges((_fromA, _toA, from, to) => {
+      while (!hiddenInsertion && tailIndex < closingTails.length) {
+        const tail = closingTails[tailIndex]!
+        if (tail.from >= to) break
+        const start = Math.max(from, tail.from), end = Math.min(to, tail.to)
+        if (start < end && doc.sliceString(start, end).trim()) {
+          hiddenInsertion = true
+          break
+        }
+        if (tail.to > to) break
+        tailIndex++
+      }
+    })
+    if (hiddenInsertion) return null
   }
   expected.sort((a, b) => a.from - b.from)
   let checked = 0, actual = new Map<number, number>()

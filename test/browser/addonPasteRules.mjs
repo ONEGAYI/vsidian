@@ -413,4 +413,13 @@ try {
   await renderedMath.waitFor({ state: 'visible' })
   assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), ['a+b'])
   console.log('[PASS] 富文本会破坏旧块公式时，用原剪贴板纯文本保留换行')
+
+  const blockEnd = preservedBlock.lastIndexOf('$$') + 2
+  await page.evaluate(at => window.selectRanges([{ anchor: at, head: at }]), blockEnd)
+  const closingPlain = '\n\nUSD x'
+  await write(closingPlain, 'USD ' + katexSpan('x'))
+  await page.keyboard.press('Control+V')
+  await waitBoth(preservedBlock.slice(0, blockEnd) + closingPlain + preservedBlock.slice(blockEnd))
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), ['a+b'])
+  console.log('[PASS] 块公式闭合行后的新内容保持独立段落，不被闭合行吞掉')
 } finally { await browser.close() }
