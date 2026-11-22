@@ -82,8 +82,15 @@ try {
   passed++
   console.log('[嵌入Live][PASS] A 父 Live 默认继承：自动绑定 + 编辑器创建与绘制层')
 
-  // ---- 场景 B：真实键盘输入只写 B（refEdit.message 出站，A 零写回） ----
+  // ---- 场景 B：切窗回焦后，真实键盘输入仍只写 B（A 零写回） ----
   assert.equal(await page.evaluate(() => window.focusEmbedEditor()), true, '焦点进嵌入编辑器')
+  await page.evaluate(() => {
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+    document.activeElement.blur()
+    window.dispatchEvent(new FocusEvent('blur'))
+    window.dispatchEvent(new FocusEvent('focus'))
+  })
   const markB = await mark()
   await page.keyboard.type('X')
   await settle(250)
@@ -101,7 +108,7 @@ try {
   assert.equal(await page.evaluate(() => window.embedDirtyDotPresent()), true, 'dirty 推送后圆点在场')
   assert.equal(await page.evaluate(() => window.embedSaveBtnVisible()), true, '保存入口可见')
   passed++
-  console.log('[嵌入Live][PASS] B 真实键入只写 B：refEdit.message + dirty 圆点')
+  console.log('[嵌入Live][PASS] B 窗口回焦后真实键入仍只写 B：refEdit.message + dirty 圆点')
 
   // ---- 场景 C：外部增量同步（B 其他视图修改 → 增量推送无回声） ----
   const markC = await mark()
