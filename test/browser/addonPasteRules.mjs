@@ -452,6 +452,18 @@ try {
   await waitBoth('前文' + listPlain + '后文')
   console.log('[PASS] 段中粘贴仅富文本阶段保留列表的前后段界')
 
+  await page.evaluate(() => {
+    window.replace('前文后文')
+    window.selectRanges([{ anchor: 2, head: 2 }])
+  })
+  await write('甲\n乙\n引文', '<ul><li>甲</li><li>乙</li></ul><blockquote>引文</blockquote>')
+  await page.keyboard.press('Control+V')
+  await waitBoth('前文\n\n- 甲\n- 乙\n\n> 引文\n\n后文')
+  assert.equal(await editor.locator('.vsidian-list-bullet').count(), 2)
+  await page.keyboard.press('Control+Z'); await waitBoth('前文甲\n乙\n引文后文')
+  await page.keyboard.press('Control+Z'); await waitBoth('前文后文')
+  console.log('[PASS] 外层列表和尾部引用各保住段界；两次撤销分别恢复纯文本和原文')
+
   const newlineEntitySource = 'A&NewLine;B\nA&#10;B\n普通行'
   await page.evaluate(source => {
     window.replace(source)
@@ -474,6 +486,16 @@ try {
   await renderedMath.waitFor({ state: 'visible' })
   assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['abxc'])
   console.log('[PASS] 恢复独立列表时不会把正在编辑的旧公式拆成多个段落')
+
+  await page.evaluate(() => window.selectRanges([{ anchor: 4, head: 4 }]))
+  await write('y', '<strong>y</strong>')
+  await page.keyboard.press('Control+V')
+  await waitBoth('$abxyc$ tail')
+  await page.keyboard.press('Control+End')
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.deepEqual(await editor.locator('.vsidian-math annotation').allTextContents(), ['abxyc'])
+  await page.keyboard.press('Control+Z'); await waitBoth('$abxc$ tail')
+  console.log('[PASS] 普通粗体粘贴到旧行内公式时只写入 TeX 原文，一次撤销恢复')
 
   const blockSource = '$$\na+b\n$$\n\nend'
   await page.evaluate(source => {

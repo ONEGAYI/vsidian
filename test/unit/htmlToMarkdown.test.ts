@@ -25,7 +25,7 @@ describe('剪贴板HTML可表达格式', () => {
     ['<li>甲</li>\n  <li>乙<ul><li>子项</li></ul></li>', '- 甲\n- 乙\n  - 子项'],
     ['<p>前文</p><li><input type="checkbox" checked>完成</li><p>后文</p>', '前文\n\n- [x] 完成\n\n后文'],
   ])('独立条目保留列表结构：%s', (html, markdown) => {
-    expect(htmlToMarkdown(html)).toEqual({ markdown, hasFormatting: true, hasOrphanList: true })
+    expect(htmlToMarkdown(html)).toEqual({ markdown, hasFormatting: true })
   })
   it.each(['<p>*星号*</p>', '<span style="color:red;font-size:30px">*星号*</span>', '<b style="font-weight:normal">*星号*</b>'])('普通包装与不支持外观不当作格式：%s', (html) => {
     expect(htmlToMarkdown(html).hasFormatting).toBe(false)

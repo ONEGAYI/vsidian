@@ -1,8 +1,7 @@
 import { EditorSelection, type EditorState, type Text, type Transaction } from '@codemirror/state'
-import type { SyntaxNode } from '@lezer/common'
 import type { PasteSelection, PasteStage } from '../shared/protocol'
 import { inlineMathNeedsSpace, scanMathRanges, type MathOccurrence } from '../shared/math'
-import { markdownTreeParser, scanMathInMarkdownLine } from '../shared/markdownDoc'
+import { markdownTreeParser, scanMathInMarkdownLine, type MarkdownMathSource } from '../shared/markdownDoc'
 import type { ConvertedHtml } from './htmlToMarkdown'
 
 export function pasteSelection(selection: EditorSelection): PasteSelection {
@@ -26,7 +25,7 @@ function pasteTransaction(state: EditorState, text: string, insertions?: readonl
 }
 
 /** 在已有正文与粘贴的块之间补齐一条空行，不改选区外的文本。 */
-function listBreak(doc: Text, at: number, side: 'before' | 'after'): string {
+function paragraphBreak(doc: Text, at: number, side: 'before' | 'after'): string {
   const line = doc.lineAt(at)
   const before = side === 'before'
   const neighbor = line.number + (before ? -1 : 1)
@@ -36,51 +35,35 @@ function listBreak(doc: Text, at: number, side: 'before' | 'after'): string {
   return ''
 }
 
-function isBulletListBlock(node: SyntaxNode | null): boolean {
-  if (node?.name === 'BulletList') return true
-  if (node?.name !== 'Blockquote') return false
-  // 引用中的列表与整个外层引用共享块边界。
-  let found = false
-  node.cursor().iterate(part => {
-    if (part.name === 'BulletList') found = true
-    return !found && part.name === 'Blockquote'
-  })
-  return found
-}
+const independentPasteBlocks = new Set(['BulletList', 'OrderedList', 'Blockquote'])
 
-function orphanListBreaks(state: EditorState, input: Text, distribute: boolean): readonly { before: string; after: string }[] {
+function blockPasteBreaks(state: EditorState, input: Text, distribute: boolean): readonly { before: string; after: string }[] {
   const ranges = state.selection.ranges
   const edges = (text: string) => {
     const tree = markdownTreeParser.parse(text).topNode
-    return { before: isBulletListBlock(tree.firstChild), after: isBulletListBlock(tree.lastChild) }
+    return { before: independentPasteBlocks.has(tree.firstChild?.name ?? ''), after: independentPasteBlocks.has(tree.lastChild?.name ?? '') }
   }
   const parsed = distribute ? ranges.map((_, i) => edges(input.line(i + 1).text)) : [edges(input.toString())]
   return ranges.map((range, i) => {
     const edge = parsed[distribute ? i : 0]!
     const next = parsed[distribute ? i + 1 : 0]
     return {
-      before: edge.before ? (ranges[i - 1]?.to === range.from ? '\n\n' : listBreak(state.doc, range.from, 'before')) : '',
+      before: edge.before ? (ranges[i - 1]?.to === range.from ? '\n\n' : paragraphBreak(state.doc, range.from, 'before')) : '',
       // 相接选区共享一处分隔；后一个选区已有前缀时不在前一个尾部重复补。
       after: edge.after ? (ranges[i + 1]?.from === range.to
         ? (next?.before ? '' : '\n\n')
-        : listBreak(state.doc, range.to, 'after')) : '',
+        : paragraphBreak(state.doc, range.to, 'after')) : '',
     }
   })
 }
 
 /** 计算富文本选区的实际插入内容。既有文档会抢占公式定界符或吞掉新内容时返回 null，
  *  让调用方沿纯文本路径回退，而不是为修正格式改动选区之外的源码。 */
-export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, blocks: readonly MathOccurrence[]): {
+export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, blocks: readonly MathOccurrence[], source?: MarkdownMathSource): {
   insertions?: string[]; adjusted: boolean
 } | null {
   const ranges = state.selection.ranges
-  const { markdown: text, inlineMath = [], hasOrphanList } = converted
-  if (!inlineMath.length && !hasOrphanList) return { adjusted: false }
-  const input = state.toText(text)
-  const distribute = input.lines === ranges.length
-  const breaks = hasOrphanList ? orphanListBreaks(state, input, distribute) : []
-  // 即使剪贴板没有公式，新增段界也可能拆开目标文档里的旧公式。
-  if (!inlineMath.length && !breaks.some(edge => edge.before || edge.after)) return { adjusted: false }
+  const { markdown: text, inlineMath = [] } = converted
   const scanned = new Map<number, MathOccurrence[]>()
   const existingInline: MathOccurrence[] = []
   const boundaryBlocks = new Set<MathOccurrence>()
@@ -88,7 +71,7 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   for (const range of ranges) {
     for (const at of [range.from, range.to]) {
       const line = state.doc.lineAt(at)
-      // 光标或选区端点在已有公式内部：沿纯文本编辑，不新增一层美元定界符。
+      // 光标或选区端点在已有公式内部：沿纯文本编辑，不把 Markdown 定界符写入 TeX。
       while (blockIndex < blocks.length && blocks[blockIndex]!.to <= line.from) blockIndex++
       const block = blocks[blockIndex]
       if (block && block.from < line.to) {
@@ -97,13 +80,17 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
       }
       let hits = scanned.get(line.number)
       if (!hits) {
-        hits = scanMathInMarkdownLine(line.text, line.from)
+        hits = scanMathInMarkdownLine(line.text, line.from, source)
         scanned.set(line.number, hits)
         for (const hit of hits) if (hit.kind === 'inline') existingInline.push(hit)
       }
       if (hits.some(hit => hit.from < at && at < hit.to)) return null
     }
   }
+  const input = state.toText(text)
+  const distribute = input.lines === ranges.length
+  const breaks = blockPasteBreaks(state, input, distribute)
+  if (!inlineMath.length && !breaks.some(edge => edge.before || edge.after)) return { adjusted: false }
   const existingStarts = new Set(existingInline.map(hit => hit.from))
   const existingEnds = new Set(existingInline.map(hit => hit.to))
   const mathByLine = new Map<number, { from: number; to: number }[]>()
@@ -122,7 +109,7 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
     const chunk = line?.text ?? text
     const start = line?.from ?? 0
     const math = line ? mathByLine.get(line.number) ?? [] : inlineMath
-    const prefix = breaks[i]?.before ?? '', suffix = breaks[i]?.after ?? ''
+    const { before: prefix, after: suffix } = breaks[i]!
     if (ranges[i - 1]?.to !== range.from) {
       tail = range.from > 0 ? state.doc.sliceString(range.from - 1, range.from) : undefined
       tailIsMath = existingEnds.has(range.from)

@@ -8695,7 +8695,8 @@ export class WebviewSyncController {
     let plain: string
     try { plain = clipboardPlainText(snapshot) } catch { this.toast?.show(t('toast.pasteNoText'), 'error'); return }
     const state = target.view.state
-    const tree = state.field(liveDecorationsField, false)?.tree
+    const markdown = state.field(liveDecorationsField, false)
+    const tree = markdown?.tree
     const plainContext = state.selection.ranges.some((range) => tree && [range.from, range.to].some((pos) =>
       chainAt(tree, pos).some((node) => ['FencedCode', 'CodeBlock', 'InlineCode', 'Table', 'TableHeader', 'TableRow', 'TableDelimiter'].includes(node.name))))
     const enabled = this.settings?.[PASTE_PRESERVE_FORMATTING_KEY] !== false
@@ -8716,8 +8717,9 @@ export class WebviewSyncController {
       return
     }
     const distributionMatches = richPasteDistributionMatches(state, plain, converted.markdown)
-    const rich = distributionMatches
-      ? prepareRichPaste(state, converted, state.field(mathBlocksField, false) ?? [])
+    const rich = converted.hasFormatting && distributionMatches
+      ? prepareRichPaste(state, converted, state.field(mathBlocksField, false) ?? [],
+        markdown && { doc: state.doc, tree: markdown.tree, fm: markdown.fm })
       : undefined
     if (!converted.hasFormatting || rich === null || converted.markdown === plain && !rich?.adjusted) {
       if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)

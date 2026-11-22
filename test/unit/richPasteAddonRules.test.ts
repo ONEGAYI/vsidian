@@ -147,6 +147,63 @@ describe('粘贴规则控制器消费链', () => {
   })
 
   it.each([
+    ['<ul><li>one</li><li>two</li></ul>', 'one\ntwo', '\n\n- one\n- two\n\n', 'ul', ['one', 'two']],
+    ['<ol><li>one</li><li>two</li></ol>', 'one\ntwo', '\n\n1. one\n2. two\n\n', 'ol', ['one', 'two']],
+    ['<blockquote>quote</blockquote>', 'quote', '\n\n> quote\n\n', 'blockquote', []],
+    ['<li>one</li><blockquote>quote</blockquote>', 'one\nquote', '\n\n- one\n\n> quote\n\n', 'blockquote', ['one']],
+  ] as const)('真实 Markdown 列表和引用保住段中粘贴的边界：%s', async (html, plain, middle, tag, items) => {
+    const { view, sent } = mount('beforeAfter')
+    view.dispatch({ selection: { anchor: 6 } })
+    paste(view, html, plain)
+    await settle()
+    const source = view.state.doc.toString()
+    expect(source).toBe('before' + middle + 'After')
+    const rendered = splitReadingBlocks(source).map(block => createReadingBlockElement(block, source))
+    expect(rendered.flatMap(block => [...block.querySelectorAll(tag)])).toHaveLength(1)
+    expect(rendered.flatMap(block => [...block.querySelectorAll('li')]).map(li => li.textContent)).toEqual(items)
+    expect(rendered[0]?.textContent?.trim()).toBe('before')
+    expect(rendered.at(-1)?.textContent?.trim()).toBe('After')
+    const first = sent.find(message => message.kind === 'edit.request')
+    expect(first?.kind === 'edit.request' && first.changes).toEqual([{ offset: 6, length: 0, text: plain }])
+  })
+
+  it.each([
+    ['$ab+cd$ tail', 3, 'abx+cd'],
+    ['$$\na+b\n$$\nend', 5, 'a+xb'],
+  ] as const)('含粗体的普通富文本落在旧公式里面时只编辑 TeX 原文：%s', async (source, at, tex) => {
+    const { view, sent } = mount(source)
+    view.dispatch({ selection: { anchor: at } })
+    paste(view, '<strong>x</strong>', 'x')
+    await settle()
+    const result = view.state.doc.toString()
+    expect(result).toBe(source.slice(0, at) + 'x' + source.slice(at))
+    expect(readingTexOf(result)).toEqual([tex])
+    ack(sent); await settle()
+    const edits = sent.filter(message => message.kind === 'edit.request')
+    expect(edits.map(edit => edit.changes)).toEqual([[{ offset: at, length: 0, text: 'x' }]])
+  })
+
+  it('普通富文本仍可在旧公式之外恢复粗体', async () => {
+    const source = '$abc$ tail'
+    const { view } = mount(source)
+    view.dispatch({ selection: { anchor: source.length } })
+    paste(view, ' <strong>x</strong>', 'x')
+    await settle()
+    expect(view.state.doc.toString()).toBe('$abc$ tail**x**')
+    expect(readingTexOf(view.state.doc.toString())).toEqual(['abc'])
+  })
+
+  it('有效引用链接两侧的美元符不是公式，不阻止富文本粘贴', async () => {
+    const source = '[price _$12][ref], currency $ here\n\n[ref]: /ok'
+    const at = source.indexOf('currency')
+    const { view } = mount(source)
+    view.dispatch({ selection: { anchor: at } })
+    paste(view, '<strong>x</strong>', 'x')
+    await settle()
+    expect(view.state.doc.toString()).toBe(source.slice(0, at) + '**x**' + source.slice(at))
+  })
+
+  it.each([
     ['<blockquote><li>甲</li><li>乙</li></blockquote>', '> - 甲\n> - 乙'],
     ['<blockquote><p>引文</p><blockquote><li>甲</li><li>乙</li></blockquote></blockquote>',
       '> > - 甲\n> > - 乙'],

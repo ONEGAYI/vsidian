@@ -160,7 +160,7 @@ export function visitRange(
   rec(tree.topNode, [])
 }
 
-interface MarkdownMathSource {
+export interface MarkdownMathSource {
   doc: Text
   tree: Tree | undefined
   fm: SourceRange | null

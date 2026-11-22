@@ -18,8 +18,6 @@ const urlPolicy = new MarkdownIt()
 export interface ConvertedHtml {
   markdown: string
   hasFormatting: boolean
-  /** 从没有 ul/ol 的 li 保留下来的列表，粘贴落点需保住独立的块边界。 */
-  hasOrphanList?: true
   /** 本次由规则恢复的公式在 Markdown 中的定界符区间（含美元符）。 */
   inlineMath?: readonly { from: number; to: number }[]
 }
@@ -248,7 +246,6 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   const template = document.createElement('template')
   template.innerHTML = html
   let hasFormatting = false
-  let hasOrphanList = false
   const literalBlocks: string[] = []
   const mathLiterals: string[] = []
   let visited = 0
@@ -499,7 +496,6 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     if (tag === 'LI') {
       // 剪贴板可能只带选中的 li，未携带 ul/ol；保留条目，不猜原始编号。
       hasFormatting = true
-      hasOrphanList = true
       return '\n\n' + renderListItem(node, '- ', table, inherited) + '\n\n'
     }
     const content = children(node, table, inherited)
@@ -520,8 +516,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   // 公式坐标由 CM6 消费，必须在计数前统一 CRLF/CR；无公式保留既有输出。
   const normalizeLF = mathLiterals.length > 0 && containsMathToken(rendered)
   const output = (normalizeLF ? rendered.replace(/\r\n?/g, '\n') : rendered).replace(/\n{3,}/g, '\n\n').trim()
-  const formatting = { hasFormatting, ...(hasOrphanList ? { hasOrphanList: true as const } : {}) }
-  if (!output.includes('\u0000')) return { markdown: output, ...formatting }
+  if (!output.includes('\u0000')) return { markdown: output, hasFormatting }
   const inlineMath: { from: number; to: number }[] = []
   let markdown = ''
   for (const [index, line] of output.split('\n').entries()) {
@@ -547,5 +542,5 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     }
     markdown += line.slice(end)
   }
-  return { markdown, ...formatting, ...(inlineMath.length ? { inlineMath } : {}) }
+  return { markdown, hasFormatting, ...(inlineMath.length ? { inlineMath } : {}) }
 }
