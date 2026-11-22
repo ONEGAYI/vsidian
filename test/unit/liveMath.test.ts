@@ -82,6 +82,14 @@ describe('live 公式装饰：显形与渲染切换', () => {
     const items = collect(build(doc, 0))
     expect(items.map(item => item.widget?.tex)).toEqual(['t', String.raw`\frac{a}{b}`])
   })
+  it('完整链接或公式先出现的一方消费其内容，跨行目标同样有效', () => {
+    const ordinary = String.raw`A < $\texttt{https://example.org/}$ 尾`
+    const formulaFirst = String.raw`A $\texttt{<https://example.org/}$> 尾`
+    const linkFirst = '[source](\nhttps://example.com/$x) ' + String.raw`$\frac{a}{b}$ 尾`
+    expect(collect(build(ordinary, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\texttt{https://example.org/}`])
+    expect(collect(build(formulaFirst, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\texttt{<https://example.org/}`])
+    expect(collect(build(linkFirst, 0)).map(item => item.widget?.tex)).toEqual([String.raw`\frac{a}{b}`])
+  })
   it('表格公式只在渲染输入上解码格内管道，保留源码区间', () => {
     const tex = String.raw`P(A\|B)`
     const withTicks = '\\texttt{`A\\|B`}'

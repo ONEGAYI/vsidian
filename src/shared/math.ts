@@ -191,11 +191,20 @@ function findDollarPair(line: string, from: number): number {
  * 缺省 0）。反引号 span 内的 `$` 跳过；未闭合/非法形态不产出。
  * 纯函数，与跨行块扫描（scanMathRanges 的块模式）共用同一贴字/转义规则。
  */
-export function scanMathInLine(line: string, base = 0): MathOccurrence[] {
+export function scanMathInLine(line: string, base = 0, linkTargets: readonly Pick<MathOccurrence, 'from' | 'to'>[] = []): MathOccurrence[] {
   const out: MathOccurrence[] = []
   const len = line.length
   let at = 0
+  let targetIndex = 0
   while (at < len) {
+    while (targetIndex < linkTargets.length && linkTargets[targetIndex]!.to <= base + at) targetIndex++
+    const target = linkTargets[targetIndex]
+    // 链接目标只在外层扫描时消费。若公式定界符更早出现，查找闭合
+    // 时仍读完整 TeX，不让内部看似链接的内容抢走结束定界符。
+    if (target && target.from <= base + at) {
+      at = target.to - base
+      continue
+    }
     const ch = line[at]!
     if (ch === '`') {
       // 行内代码 span：配对反引号 run 内的 $ 不参与（与 markdown-it 的
@@ -339,7 +348,7 @@ export function stripInlineTexTicks(tex: string): string {
  * 某个未闭合块内时，本扫描以非块态起步，不会把窗口内的闭合定界符误配
  * 为新块（闭合判定要求先有开启行）。
  */
-export function scanMathRanges(lines: readonly string[], firstLineStart: number): MathOccurrence[] {
+export function scanMathRanges(lines: readonly string[], firstLineStart: number, linkTargets: readonly Pick<MathOccurrence, 'from' | 'to'>[] = []): MathOccurrence[] {
   if (!lines.some((line) => line.includes('$'))) {
     return []
   }
@@ -412,7 +421,7 @@ export function scanMathRanges(lines: readonly string[], firstLineStart: number)
             lineMap: [{ contentOffset: 0, lineStart, prefixLen: prefixLen + indent + 2 }],
           })
         } else if (pairs.length > 1) {
-          out.push(...scanMathInLine(bare, lineStart + prefixLen))
+          out.push(...scanMathInLine(bare, lineStart + prefixLen, linkTargets))
         }
         lineStart += line.length + 1
         continue
@@ -429,7 +438,7 @@ export function scanMathRanges(lines: readonly string[], firstLineStart: number)
       continue
     }
     // 行内路径不动：原行原坐标（引用前缀对该路径是普通字符）
-    out.push(...scanMathInLine(line, lineStart))
+    out.push(...scanMathInLine(line, lineStart, linkTargets))
     lineStart += line.length + 1
   }
   // 未闭合块不产出（稳定降级为源码）

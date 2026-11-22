@@ -25,7 +25,7 @@
 // 取数与拒绝分层，不复制判定逻辑。
 import type { Text } from '@codemirror/state'
 import type { Tree } from '@lezer/common'
-import { chainAt, type SourceRange } from './markdownDoc'
+import { chainAt, mathLinkTargets, type SourceRange } from './markdownDoc'
 import { MATH_CODE_CONTEXTS, scanMathRanges, type MathOccurrence } from './math'
 
 /** 行类型枚举（块级维度；callout 一期不入枚举——live 侧无识别管线，
@@ -216,7 +216,7 @@ export function addonSyntaxInlineAt(source: AddonSyntaxSource, pos: number): Add
     }
   }
   const line = source.doc.lineAt(pos)
-  for (const hit of scanMathRanges([line.text], line.from)) {
+  for (const hit of scanMathRanges([line.text], line.from, mathLinkTargets(line.text, line.from, source.tree))) {
     if (pos >= hit.from && pos < hit.to) {
       return { kind: 'formula', nodeNames }
     }

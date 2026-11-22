@@ -173,6 +173,12 @@ describe('lineTypeAt：#433 口径扩展矩阵', () => {
 })
 
 describe('inlineAt：行内标记点位（code / formula / none）', () => {
+  it('行内公式判定不消费跨行链接目标中的美元', () => {
+    const line = String.raw`https://example.com/$x) $\frac{a}{b}$`
+    const { source, at } = sourceOf(['[source](', line])
+    expect(addonSyntaxInlineAt(source, at(2, line.indexOf('$'))).kind).toBe('none')
+    expect(addonSyntaxInlineAt(source, at(2, line.indexOf('$\\frac'))).kind).toBe('formula')
+  })
   const sample = sourceOf(SAMPLE_LINES)
   it('探针点位：行内代码/行内公式/高亮/普通文本（#408 基线迁移）', () => {
     const line = SAMPLE_LINES[7]!
