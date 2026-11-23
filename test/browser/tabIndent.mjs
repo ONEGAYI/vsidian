@@ -40,6 +40,8 @@ const SIBLINGS = '1. parent\n- first\n- second\n- third\n- untouched'
 const NESTED = '1. parent\n   - first\n   - second\n   - third\n- untouched'
 const ORDERED_CHILDREN = '1. parent\n   1. first\n   2. second\n2. next\n10. gap\n1. explicit'
 const ORDERED_PROMOTED = '1. parent\n2. first\n3. second\n4. next\n10. gap\n1. explicit'
+const MISALIGNED = '- parent\n\n10. first\n   11. second\n       - owned'
+const ALIGNED = '- parent\n\n  10. first\n  11. second\n      - owned'
 
 // #420 降级 frontmatter 文档对（嵌套 map 源码态；Tab 前后互为镜像）
 const DEGRADED_FM = '---\nperm:\n  bash: deny\n---\nbody'
@@ -98,6 +100,12 @@ const scenarios = [
     doc: '1.     code\n- first\n  - child\n- second\n- untouched', range: [12, 39], keys: ['Tab'],
     text: '1.     code\n   - first\n     - child\n   - second\n- untouched', from: 15, to: 48,
     bullets: ['◦', '▪', '◦', '•'],
+  },
+  {
+    name: 'tab-selection-aligns-items-from-both-sides', doc: MISALIGNED,
+    range: [MISALIGNED.indexOf('10.'), MISALIGNED.length], keys: ['Tab'],
+    text: ALIGNED, from: ALIGNED.indexOf('10.'), to: ALIGNED.length,
+    bullets: ['•', '▪'],
   },
   {
     name: 'tab-table-nav-priority', doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('1') + 1,

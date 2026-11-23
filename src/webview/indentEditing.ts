@@ -2,8 +2,8 @@
 // 光标行（无选区）或选区覆盖各行的整行缩进。
 //
 // 行为（缩进单位的单一事实源在 shared/listPrefix.ts）：
-// - Tab：每受影响行在缩进落点插入一级宽度；Shift+Tab 从落点删除至多
-//   一级宽度的连续空白（不足全删）。列表行一级宽度对齐上方最近项的
+// - Tab：每受影响行调整到目标缩进列；Shift+Tab 从落点删除至多一级宽度
+//   的连续空白（不足全删）。列表行一级宽度对齐上方最近项的
 //   内容列（未达补齐、已达加深其标记宽，#121）；同一批连续的同级项
 //   沿用首项的目标列，不把一同移动的兄弟项当成父项；没有候选父项时整组不动。
 //   单光标的空有序项新建子列表时，从 1 开始。
@@ -33,7 +33,6 @@ import {
   indentUnitOf,
   parseLinePrefix,
   tabIndentWidthOf,
-  type LineIndentUnit,
   type LinePrefix,
 } from '../shared/listPrefix'
 import { liveDecorationsField } from './liveDecorations'
@@ -48,7 +47,7 @@ const TABLE_NODES = new Set([
 ])
 /** 代码块节点：围栏/缩进代码块内同普通行语义（不做列表智能对齐） */
 const CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock'])
-type IndentPlan = LineIndentUnit & { restartNumber?: { from: number; to: number } }
+type IndentPlan = { offset: number; delta: number; restartNumber?: { from: number; to: number } }
 
 /** 使用实际的语法树标记；一行可以同时容纳外层和内层标记。 */
 function listMarkCols(
@@ -133,12 +132,12 @@ function listUnitOf(
       }
     }
     if (self && onItemMark) batch.targets.set(self.from, column)
-    return { offset, width: column === null ? 0 : Math.max(0, column - cur), restartNumber }
+    return { offset, delta: column === null ? 0 : column - cur, restartNumber }
   }
   const parent = self?.parent?.parent
   const parentMark = parent?.name === 'ListItem' ? parent.getChild('ListMark') : null
   const parentCol = listMarkCols(state, parentMark)?.markCol ?? 0
-  return { offset, width: Math.max(0, cur - parentCol) }
+  return { offset, delta: Math.min(0, parentCol - cur) }
 }
 
 /** Tab/Shift+Tab 共用主体。dir 为 +1 缩进 / -1 反缩进 */
@@ -160,7 +159,7 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
   const changes: { from: number; to?: number; insert?: string }[] = []
   const promoted: SyntaxNode[] = []
   const batch = { lines: lineNumbers, targets: new Map<number, number | null>() }
-  let movedItem: { end: number; width: number; quoteDepth: number } | null = null
+  let movedItem: { end: number; delta: number; quoteDepth: number } | null = null
   const mathBlocks = state.field(mathBlocksField, false)
   for (const num of [...lineNumbers].sort((a, b) => a - b)) {
     const line = state.doc.line(num)
@@ -192,27 +191,28 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
       const offset = quoteIndentOffset(line.text, movedItem.quoteDepth)
       // 空行和省略外层引用前缀的惰性续行不必补缩进，其余行沿用所属项的位移。
       if (offset < 0 || /^[ \t]*$/u.test(line.text.slice(offset))) continue
-      unit = { offset, width: movedItem.width }
+      unit = { offset, delta: movedItem.delta }
     } else if (prefix?.mark) {
       unit = listUnitOf(state, line, listChain, prefix, dir, batch)
-      if (dir < 0 && unit.width && item?.parent?.parent?.name === 'ListItem') promoted.push(item)
+      if (dir < 0 && unit.delta && item?.parent?.parent?.name === 'ListItem') promoted.push(item)
       if (item && item.to > line.to) {
-        movedItem = { end: item.to, width: unit.width, quoteDepth: prefix.quote.split('>').length - 1 }
+        movedItem = { end: item.to, delta: unit.delta, quoteDepth: prefix.quote.split('>').length - 1 }
       }
     } else {
-      unit = indentUnitOf(prefix)
+      const { offset, width } = indentUnitOf(prefix)
+      unit = { offset, delta: dir * width }
     }
-    if (!unit.width) continue
-    const { offset, width } = unit
+    const { offset, delta } = unit
+    if (!delta) continue
     const indent = /^[ \t]*/u.exec(line.text.slice(offset))![0]
     if ((prefix?.mark || movedItem) && indent.includes('\t')) {
-      changes.push(resizeListIndent(line, offset, indent, dir * width))
-    } else if (dir > 0) {
+      changes.push(resizeListIndent(line, offset, indent, delta))
+    } else if (delta > 0) {
       // 裸 > 新增空白后第一格会成为引用分隔符，不计入列表的缩进量。
       const separator = (item || movedItem) && line.text[offset - 1] === '>' ? 1 : 0
-      changes.push({ from: line.from + offset, insert: ' '.repeat(width + separator) })
+      changes.push({ from: line.from + offset, insert: ' '.repeat(delta + separator) })
     } else {
-      const cut = dedentCutOf(line.text, unit)
+      const cut = dedentCutOf(line.text, { offset, width: -delta })
       if (cut) changes.push({ from: line.from + cut.from, to: line.from + cut.to })
     }
     if (unit.restartNumber) changes.push({ ...unit.restartNumber, insert: '1' })

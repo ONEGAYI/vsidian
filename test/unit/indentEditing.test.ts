@@ -249,6 +249,17 @@ describe('Tab 选区多行缩进', () => {
     }
   })
 
+  it('成组 Tab 前后都对齐首项目标列，偏右项及其已选子项一同左移', () => {
+    const doc = '- parent\n\n10. first\n   11. second\n       - owned'
+    const expected = '- parent\n\n  10. first\n  11. second\n      - owned'
+    let edits = 0
+    const view = makeEditView(doc, { anchor: doc.indexOf('10.'), head: doc.length }, [
+      EditorView.updateListener.of((update) => { if (update.docChanged) edits++ }),
+    ])
+    expect(typed(view)).toEqual({ text: expected, from: expected.indexOf('10.'), to: expected.length })
+    expect(edits).toBe(1)
+  })
+
   it('只移动选区内的内容，续段、围栏和子列表跟随各自的列表项', () => {
     const content = '- first\n\n  continued\n\n  \u00a0\n\n  ```txt\n  code\n  ```\n  - child\n- second'
     const doc = `10. parent\n${content}\n- untouched`
