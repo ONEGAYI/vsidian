@@ -98,6 +98,20 @@ describe('Tab 无选区光标行缩进', () => {
     expect(typed(makeEditView(doc, 8))).toEqual({ text: '10. p\n    11. c', from: 12, to: 12 })
   })
 
+  it('空有序项成为新子列表首项时，从 1 开始并保持光标在标记后', () => {
+    const doc = '1. 数字电路：受限于拓扑，扫一遍即可\n2. '
+    expect(typed(makeEditView(doc, doc.length))).toEqual({
+      text: '1. 数字电路：受限于拓扑，扫一遍即可\n   1. ', from: doc.length + 3, to: doc.length + 3,
+    })
+  })
+
+  it('空有序项进入已有同种子列表时，不重置编号', () => {
+    const doc = '1. parent\n   1. existing\n2. '
+    expect(typed(makeEditView(doc, doc.length))).toEqual({
+      text: '1. parent\n   1. existing\n   2. ', from: doc.length + 3, to: doc.length + 3,
+    })
+  })
+
   it('任务行：对齐上方项内容列（`- ` 2 格——任务标记属内容不计列宽）', () => {
     const doc = '- [ ] p\n- [ ] c'
     expect(typed(makeEditView(doc, doc.indexOf('c') + 1)))
@@ -260,6 +274,56 @@ describe('Tab 选区多行缩进', () => {
 
       pressTab(view, true)
       expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it.each([
+    ['裸引用标记', '> 1. p', '>', '> ', '>    '],
+    ['续行的引用制表符', '> 10. p', '>\t', '>\t', '>\t    '],
+    ['引用开行的额外制表符', '>\t1. p', '>\t', '>\t   ', '>\t      '],
+    ['列表行里的引用', '- > 1. p', '  > ', '  > ', '  >    '],
+  ])('同级项按实际引用前缀成组：%s', (_, parent, before, afterDedent, nested) => {
+    const doc = `${parent}\n${before}- first\n${before}- second`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(`${parent}\n${nested}- first\n${nested}- second`)
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(`${parent}\n${afterDedent}- first\n${afterDedent}- second`)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it('没有前置同级父候选时，连续按 Tab 不会把整组首批子项变成代码', () => {
+    const doc = '10. p\n- first\n- second'
+    const nested = '10. p\n    - first\n    - second'
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it('深层引用中缺一层标记的惰性续行保持原文，按键不被空白匹配拖慢', () => {
+    const quote = '> '.repeat(27)
+    const lazy = `${quote.slice(2)}lazy`
+    const doc = `${quote}1. p\n${quote}- first\n${lazy}\n${quote}- second`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      const start = performance.now()
+      pressTab(view)
+      // 旧量词回溯约需数秒；线性扫描只处理这四行，阈值不以机器微基准为准。
+      expect(performance.now() - start).toBeLessThan(1500)
+      expect(view.state.doc.toString()).toBe(`${quote}1. p\n${quote}   - first\n${lazy}\n${quote}   - second`)
     } finally {
       view.destroy()
     }

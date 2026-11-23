@@ -5,7 +5,8 @@
 // - Tab：每受影响行在缩进落点插入一级宽度；Shift+Tab 从落点删除至多
 //   一级宽度的连续空白（不足全删）。列表行一级宽度对齐上方最近项的
 //   内容列（未达补齐、已达加深其标记宽，#121）；同一批连续的同级项
-//   沿用首项的目标列，不把一同移动的兄弟项当成父项。
+//   沿用首项的目标列，不把一同移动的兄弟项当成父项；没有候选父项时整组不动。
+//   单光标的空有序项新建子列表时，从 1 开始。
 //   Shift+Tab 删至树父项标记列（顶级删全部缩进）。
 //   普通行（含纯引用行、代码围栏、缩进代码块与块级公式内）
 //   固定 2 空格
@@ -32,6 +33,7 @@ import {
   indentUnitOf,
   parseLinePrefix,
   tabIndentWidthOf,
+  type LineIndentUnit,
   type LinePrefix,
 } from '../shared/listPrefix'
 import { liveDecorationsField } from './liveDecorations'
@@ -46,6 +48,17 @@ const TABLE_NODES = new Set([
 const CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock'])
 // Markdown 的制表符固定使用四列制表位，与编辑器的显示设置无关。
 const MARKDOWN_TAB_SIZE = 4
+type IndentPlan = LineIndentUnit & { restartNumber?: { from: number; to: number } }
+
+/** 当前标记所在的最内层引用，其开行只吞一个空格，续行也吞一个制表符。 */
+function quoteContentEdge(line: Line, mark: SyntaxNode): number {
+  let quote = mark.parent
+  while (quote && quote.name !== 'Blockquote') quote = quote.parent
+  if (!quote) return 0
+  const end = line.text.lastIndexOf('>', mark.from - line.from - 1) + 1
+  const gap = line.text[end]
+  return end + (gap === ' ' || (gap === '\t' && quote.from < line.from) ? 1 : 0)
+}
 
 /** 使用实际的语法树标记；一行可以同时容纳外层和内层标记。 */
 function listMarkCols(
@@ -57,7 +70,7 @@ function listMarkCols(
   const start = mark.from - line.from
   const end = mark.to - line.from
   const content = end + /^[ \t]*/u.exec(line.text.slice(end))![0].length
-  const quoteCol = countColumn(line.text, MARKDOWN_TAB_SIZE, parseLinePrefix(line.text)?.quote.length ?? 0)
+  const quoteCol = countColumn(line.text, MARKDOWN_TAB_SIZE, quoteContentEdge(line, mark))
   const afterMark = countColumn(line.text, MARKDOWN_TAB_SIZE, end)
   const afterGap = countColumn(line.text, MARKDOWN_TAB_SIZE, content)
   // CommonMark / Lezer getListIndent：空项或超过四列的空白只记一列；
@@ -67,6 +80,20 @@ function listMarkCols(
     markCol: countColumn(line.text, MARKDOWN_TAB_SIZE, start) - quoteCol,
     contentCol: contentCol - quoteCol,
   }
+}
+
+/** 标记不同可形成紧邻的两棵列表，但它们的项仍然同层。 */
+function siblingListItem(item: SyntaxNode, dir: 1 | -1): SyntaxNode | null {
+  const step = (node: SyntaxNode) => dir === 1 ? node.nextSibling : node.prevSibling
+  let sibling = step(item)
+  while (sibling && sibling.name !== 'ListItem') sibling = step(sibling)
+  if (sibling) return sibling
+  let block = step(item.parent!)
+  while (block?.name === 'QuoteMark') block = step(block)
+  if (block?.name !== 'BulletList' && block?.name !== 'OrderedList') return null
+  sibling = dir === 1 ? block.firstChild : block.lastChild
+  while (sibling && sibling.name !== 'ListItem') sibling = step(sibling)
+  return sibling
 }
 
 /**
@@ -80,28 +107,27 @@ function listUnitOf(
   chain: SyntaxNode[],
   prefix: LinePrefix,
   dir: 1 | -1,
-  tabTargets: Map<number, number>,
-): { offset: number; width: number } {
-  const offset = prefix.quote.length
-  const cur = countColumn(line.text, MARKDOWN_TAB_SIZE, offset + prefix.indent.length) -
+  batch: { lines: ReadonlySet<number>; targets: Map<number, number | null> },
+): IndentPlan {
+  const mark = chain.at(-1)
+  const onItemMark = mark?.name === 'ListMark'
+  const offset = onItemMark ? quoteContentEdge(line, mark) : prefix.quote.length
+  const cur = countColumn(line.text, MARKDOWN_TAB_SIZE, prefix.quote.length + prefix.indent.length) -
     countColumn(line.text, MARKDOWN_TAB_SIZE, offset)
   const items = chain.filter((node) => node.name === 'ListItem')
   const self = items[items.length - 1]
   if (dir > 0) {
-    let prev = self?.prevSibling ?? null
-    while (prev && prev.name !== 'ListItem') prev = prev.prevSibling
-    if (!prev && self) {
-      // 有序/无序或点号不同会切成两棵列表，紧邻的前一棵仍处于同层。
-      let block = self.parent?.prevSibling
-      while (block?.name === 'QuoteMark') block = block.prevSibling
-      if (block?.name === 'BulletList' || block?.name === 'OrderedList') {
-        prev = block.lastChild
-        while (prev && prev.name !== 'ListItem') prev = prev.prevSibling
+    const prev = self ? siblingListItem(self, -1) : null
+    // 只从直接前驱兄弟继承同一批的目标。父子项与未选中的间隔不合组。
+    let column = onItemMark && prev ? batch.targets.get(prev.from) : undefined
+    let restartNumber
+    if (column === undefined && !prev && onItemMark && self) {
+      const nextMark = siblingListItem(self, 1)?.getChild('ListMark')
+      if (nextMark && batch.lines.has(state.doc.lineAt(nextMark.from).number)) {
+        // 没有能成为父项的上一同级项时，整组不移动；继续加空格可能变成代码块。
+        column = null
       }
     }
-    const onItemMark = chain[chain.length - 1]?.name === 'ListMark'
-    // 只从直接前驱兄弟继承同一批的目标。父子项与未选中的间隔不合组。
-    let column = onItemMark && prev ? tabTargets.get(prev.from) : undefined
     if (column === undefined) {
       let target: SyntaxNode | null = prev ?? items[items.length - 2] ?? null
       if (!target && self) {
@@ -111,13 +137,24 @@ function listUnitOf(
       }
       const cols = listMarkCols(state, target?.getChild('ListMark') ?? null)
       column = tabIndentWidthOf(cur, cols?.contentCol ?? null, cols ? cols.contentCol - cols.markCol : 0)
+      const list = prefix.list
+      if (prev && cols && cur < cols.contentCol && onItemMark && self && self.to <= line.to &&
+          list?.digits && list.digits !== '1' && !state.doc.sliceString(mark.to, line.to).trim() &&
+          state.selection.ranges.length === 1 && state.selection.main.empty) {
+        // 空项在当前位置新开有序子列表才从 1 开始，保留已有列表和非空编号。
+        const child = prev.lastChild
+        const lastMark = child?.name === 'OrderedList' ? child.lastChild?.getChild('ListMark') : null
+        if (!lastMark || state.doc.sliceString(lastMark.to - 1, lastMark.to) !== list.delim) {
+          restartNumber = { from: mark.from, to: mark.from + list.digits.length }
+        }
+      }
     }
-    if (self && onItemMark) tabTargets.set(self.from, column)
-    return { offset, width: Math.max(0, column - cur) }
+    if (self && onItemMark) batch.targets.set(self.from, column)
+    return { offset, width: column === null ? 0 : Math.max(0, column - cur), restartNumber }
   }
   const parent = self?.parent?.parent
-  const mark = parent?.name === 'ListItem' ? parent.getChild('ListMark') : null
-  const parentCol = listMarkCols(state, mark)?.markCol ?? 0
+  const parentMark = parent?.name === 'ListItem' ? parent.getChild('ListMark') : null
+  const parentCol = listMarkCols(state, parentMark)?.markCol ?? 0
   return { offset, width: Math.max(0, cur - parentCol) }
 }
 
@@ -138,8 +175,9 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     }
   }
   const changes: { from: number; to?: number; insert?: string }[] = []
-  const tabTargets = new Map<number, number>()
-  let movedItem: { end: number; width: number; quotePrefix: RegExp } | null = null
+  const batch = { lines: lineNumbers, targets: new Map<number, number | null>() }
+  let movedItem: { end: number; width: number; quoteDepth: number } | null = null
+  const quoteLayer = /[ \t]*>[ \t]?/y
   const mathBlocks = state.field(mathBlocksField, false)
   for (const num of [...lineNumbers].sort((a, b) => a - b)) {
     const line = state.doc.line(num)
@@ -158,25 +196,27 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     const plain = (mathBlocks?.some((b) => line.from < b.to && line.to > b.from) ?? false)
       || chain.some((node) => CODE_NODES.has(node.name))
     const prefix = plain ? null : parseLinePrefix(line.text)
-    // 引用行的首个非空白字符是 >，列表的祖先链须在实际标记处查询。
+    // 查标记的右侧，避免 >- 贴在一起时命中左侧的 QuoteMark。
     const quotedListChain = prefix?.mark && prefix.quote
-      ? chainAt(field.tree, line.from + prefix.quote.length + prefix.indent.length)
+      ? chainAt(field.tree, line.from + prefix.quote.length + prefix.indent.length + 1)
       : null
     const listChain = quotedListChain?.at(-1)?.name === 'ListMark' ? quotedListChain : chain
     const mark = listChain.at(-1)
     const item = mark?.name === 'ListMark' ? mark.parent : null
     if (movedItem && line.from >= movedItem.end) movedItem = null
-    let unit
+    let unit: IndentPlan
     if (movedItem) {
-      const quote = movedItem.quotePrefix.exec(line.text)?.[0]
+      quoteLayer.lastIndex = 0
+      let depth = 0
+      while (depth < movedItem.quoteDepth && quoteLayer.test(line.text)) depth++
+      const offset = quoteLayer.lastIndex
       // 空行和省略外层引用前缀的惰性续行不必补缩进，其余行沿用所属项的位移。
-      if (quote === undefined || line.text.slice(quote.length).trim() === '') continue
-      unit = { offset: quote.length, width: movedItem.width }
+      if (depth < movedItem.quoteDepth || line.text.slice(offset).trim() === '') continue
+      unit = { offset, width: movedItem.width }
     } else if (prefix?.mark) {
-      unit = listUnitOf(state, line, listChain, prefix, dir, tabTargets)
+      unit = listUnitOf(state, line, listChain, prefix, dir, batch)
       if (item && item.to > line.to) {
-        const depth = prefix.quote.split('>').length - 1
-        movedItem = { end: item.to, width: unit.width, quotePrefix: new RegExp(`^(?:[ \\t]*>[ \\t]?){${depth}}`) }
+        movedItem = { end: item.to, width: unit.width, quoteDepth: prefix.quote.split('>').length - 1 }
       }
     } else {
       unit = indentUnitOf(prefix)
@@ -194,11 +234,14 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
       changes.push({ from: line.from + keep, to: line.from + end,
         insert: ' '.repeat(goal - countColumn(line.text, MARKDOWN_TAB_SIZE, keep)) })
     } else if (dir > 0) {
-      changes.push({ from: line.from + offset, insert: ' '.repeat(width) })
+      // 裸 > 新增空白后第一格会成为引用分隔符，不计入列表的缩进量。
+      const separator = (item || movedItem) && line.text[offset - 1] === '>' ? 1 : 0
+      changes.push({ from: line.from + offset, insert: ' '.repeat(width + separator) })
     } else {
       const cut = dedentCutOf(line.text, unit)
       if (cut) changes.push({ from: line.from + cut.from, to: line.from + cut.to })
     }
+    if (unit.restartNumber) changes.push({ ...unit.restartNumber, insert: '1' })
   }
   if (changes.length > 0) {
     const changeSet = state.changes(changes)
