@@ -505,11 +505,10 @@ try {
   assert.ok(linkSpan >= 1, `显形态源文挂双链类 span（实际 ${linkSpan}）`)
   const activateBefore = await page.evaluate(() =>
     window.liveEmbedSent().filter((m) => m.kind === 'wikilink.activate').length)
-  const srcTop = await page.evaluate(() => window.liveEmbedTextTop('![[目'))
-  assert.ok(srcTop > 0, '源文文本在场可定位（点击目标）')
-  await page.keyboard.down('Control')
-  await page.mouse.click(100, srcTop + 8)
-  await page.keyboard.up('Control')
+  const sourceLink = page.locator('.cm-line').filter({ hasText: '![[目标笔记]]' })
+    .first().locator('.vsidian-wikilink').first()
+  // 纯选区事务只负责显形；源文可能在视口外，真实点击前由 locator 滚入。
+  await sourceLink.click({ modifiers: ['Control'] })
   await page.waitForTimeout(80)
   const activates = await page.evaluate(() =>
     window.liveEmbedSent().filter((m) => m.kind === 'wikilink.activate'))
