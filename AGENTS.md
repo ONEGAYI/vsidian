@@ -17,7 +17,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
 ### 领域落档指针（修改对应领域前必读目标章节）
 - **附加组件公开 API（1.1.0 已稳定）**：修改发现/调用、公开 API、台账或门禁前，必读 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)、[开发者指南](docs/addons/developer-guide.md)「文档维护入口」及 [API 门禁规格](docs/specs/addons-api-gate.md)；事实源在 `src/shared/addonApiCatalog.ts`，改后同步 `npm run gen:addonapi` / `check:addonapi` / `check:addoncompat`。
-- **公开样式契约**：修改 webview DOM、类名、CSS 变量、主题或片段加载路径前，加载技能 **style-contract**（`.agents/skills/style-contract/SKILL.md`）；结构化清单在 `src/shared/styleContract.ts`。修改检查器、历史基线或门禁工作流前，必读 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)（须先跑 `npm run check:stylecontract:baseline` 复验基线再跑 `npm run check:stylecontract`）。
+- **公开样式契约**：修改 webview DOM、类名、CSS 变量、主题、片段加载路径，或样式指南、样式兼容测试、历史基线及相关 CI 时，加载技能 **style-contract**（`.agents/skills/style-contract/SKILL.md`）；结构化清单在 `src/shared/styleContract.ts`。修改检查器、历史基线或门禁工作流前，必读 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)（须先跑 `npm run check:stylecontract:baseline` 复验基线再跑 `npm run check:stylecontract`）。
 - **UI 元素形态契约**：新增或修改自绘 UI 元素前，必读 [docs/specs/ui-patterns.md](docs/specs/ui-patterns.md) 并加载技能 **ui-patterns**（`.agents/skills/ui-patterns/SKILL.md`）。
 - **图形化代码块**：改支持语言、按钮组、弹窗或导出前，必读 [docs/specs/graphic-code-block-interaction.md](docs/specs/graphic-code-block-interaction.md)「扩展约定（落档）」。
 - **符号输入与行内围栏**：改符号对、成对行内标记、选区包裹、Tab 越界或 IME 组合输入前，必读 [docs/specs/symbol-input.md](docs/specs/symbol-input.md)。
