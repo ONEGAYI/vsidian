@@ -21,6 +21,10 @@ describe('剪贴板HTML可表达格式', () => {
   ])('%s -> Markdown', (html, markdown) => {
     expect(htmlToMarkdown(html)).toEqual({ markdown, hasFormatting: true })
   })
+  it('块间 HTML 缩进只留下一个空行，段内手动换行仍保留', () => {
+    const html = '<p><strong>标题</strong><br>续行</p>\n  <ul><li>条目</li></ul>'
+    expect(htmlToMarkdown(html).markdown).toBe('**标题**  \n续行\n\n- 条目')
+  })
   it.each([
     ['<li>甲</li>\n  <li>乙<ul><li>子项</li></ul></li>', '- 甲\n- 乙\n  - 子项'],
     ['<p>前文</p><li><input type="checkbox" checked>完成</li><p>后文</p>', '前文\n\n- [x] 完成\n\n后文'],

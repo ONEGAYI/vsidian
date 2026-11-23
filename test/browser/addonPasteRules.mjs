@@ -464,6 +464,16 @@ try {
   await page.keyboard.press('Control+Z'); await waitBoth('前文后文')
   console.log('[PASS] 外层列表和尾部引用各保住段界；两次撤销分别恢复纯文本和原文')
 
+  const spacedPlain = '段落\n续行\n\n条目 n'
+  await write(spacedPlain, '<p><strong>段落</strong><br>续行</p>\n  <ul><li>条目 ' + katexSpan('n') + '</li></ul>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('**段落**  \n续行\n\n- 条目 $n$')
+  await page.keyboard.press('Control+Home')
+  await renderedMath.waitFor({ state: 'visible' })
+  assert.equal(await editor.locator('.cm-line').count(), 4)
+  await page.keyboard.press('Control+Z'); await waitBoth(spacedPlain)
+  console.log('[PASS] HTML 块间缩进不制造额外空行；硬换行、公式和原纯文本阶段保留')
+
   const newlineEntitySource = 'A&NewLine;B\nA&#10;B\n普通行'
   await page.evaluate(source => {
     window.replace(source)

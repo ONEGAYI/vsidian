@@ -416,7 +416,11 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
         if (orphanItem && runs.every(run => !run.text.trim())) {
           // 两个相邻的独立 li 合成紧凑列表。两侧仍留段界，避免吸收正文。
           result = previousOrphanItem ? result.slice(0, -1) + block.slice(2) : result + block
-        } else result += serialize(runs) + block
+        } else {
+          // HTML 文本的缩进已折成空格；只在两侧都有段界时去掉它，不消费 <br>。
+          const blockIndent = result.endsWith('\n\n') && block.startsWith('\n\n') && runs.every(run => run.text === ' ')
+          result += (blockIndent ? '' : serialize(runs)) + block
+        }
         runs = []
         previousOrphanItem = orphanItem
       } else runs.push(...inline(node,marks,table))
