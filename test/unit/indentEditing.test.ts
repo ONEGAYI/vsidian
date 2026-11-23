@@ -382,6 +382,42 @@ describe('Shift+Tab 反向缩进', () => {
     expect(typed(makeEditView(doc, 12), true)).toEqual({ text: '10. p\n11. c', from: 8, to: 8 })
   })
 
+  it('有序子项整组退一级时接续外层编号，只顺延同一列表的后项', () => {
+    const doc = '03. parent\n    1) first\n    2) second\n04. next\n\nseparate\n\n9. other'
+    const expected = '03. parent\n04. first\n05. second\n06. next\n\nseparate\n\n9. other'
+    let edits = 0
+    const view = makeEditView(doc, { anchor: doc.indexOf('1)'), head: doc.indexOf('04.') }, [
+      EditorView.updateListener.of((update) => { if (update.docChanged) edits++ }),
+    ])
+    const out = typed(view, true)
+    expect(out).toEqual({ text: expected, from: expected.indexOf('04.'), to: expected.indexOf('06.') })
+    expect(edits).toBe(1)
+  })
+
+  it('后项编号跨过 9 时，所属子项保持在原后项下面', () => {
+    const doc = '8. parent\n   1. child\n9. next\n   - stays nested'
+    const expected = '8. parent\n9. child\n10. next\n    - stays nested'
+    expect(typed(makeEditView(doc, doc.indexOf('child')), true)).toEqual({
+      text: expected, from: expected.indexOf('child'), to: expected.indexOf('child'),
+    })
+  })
+
+  it('升上来的编号变宽时，不把剩余子项意外抬到外层', () => {
+    const doc = '9. p\n   1. moved\n   2. still nested\n10. q'
+    const expected = '9. p\n10. moved\n    2. still nested\n11. q'
+    expect(typed(makeEditView(doc, doc.indexOf('moved')), true)).toEqual({
+      text: expected, from: expected.indexOf('moved'), to: expected.indexOf('moved'),
+    })
+  })
+
+  it('续号不改被 Markdown 树误认成列表项的公式正文', () => {
+    const doc = '1. parent\n   1. child\n2. next\n$$\n1. math\n$$'
+    const expected = '1. parent\n2. child\n3. next\n$$\n1. math\n$$'
+    expect(typed(makeEditView(doc, doc.indexOf('child')), true)).toEqual({
+      text: expected, from: expected.indexOf('child'), to: expected.indexOf('child'),
+    })
+  })
+
   it('引用内列表：删引用前缀右端的缩进', () => {
     const doc = '> - p\n>   - c'
     // 删除 L2 内 [8,10)：光标 9 落在删除区间，坍到区间起点（'-' 前）

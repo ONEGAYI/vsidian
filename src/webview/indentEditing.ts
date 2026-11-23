@@ -23,7 +23,7 @@
 //
 // 装配顺序约定：置于 tableEditing 之后、defaultKeymap（extraExtensions）
 // 之前——表格上下文优先。变换单笔事务派发（一次撤销整体回退）。
-import { countColumn, EditorSelection, findColumn } from '@codemirror/state'
+import { countColumn, EditorSelection } from '@codemirror/state'
 import type { EditorState, Line } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import type { Command, EditorView } from '@codemirror/view'
@@ -39,6 +39,8 @@ import {
 import { liveDecorationsField } from './liveDecorations'
 import { mathBlocksField } from './liveMath'
 import { chainAt } from '../shared/markdownDoc'
+import { continuePromotedNumbers, listContentCol, MARKDOWN_TAB_SIZE,
+  quoteContentEdge, quoteIndentOffset, resizeListIndent } from './listEditing'
 
 /** 表格节点：行落在其中即不接管（单元格导航优先；边界放行不缩进表格行） */
 const TABLE_NODES = new Set([
@@ -46,19 +48,7 @@ const TABLE_NODES = new Set([
 ])
 /** 代码块节点：围栏/缩进代码块内同普通行语义（不做列表智能对齐） */
 const CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock'])
-// Markdown 的制表符固定使用四列制表位，与编辑器的显示设置无关。
-const MARKDOWN_TAB_SIZE = 4
 type IndentPlan = LineIndentUnit & { restartNumber?: { from: number; to: number } }
-
-/** 当前标记所在的最内层引用，其开行只吞一个空格，续行也吞一个制表符。 */
-function quoteContentEdge(line: Line, mark: SyntaxNode): number {
-  let quote = mark.parent
-  while (quote && quote.name !== 'Blockquote') quote = quote.parent
-  if (!quote) return 0
-  const end = line.text.lastIndexOf('>', mark.from - line.from - 1) + 1
-  const gap = line.text[end]
-  return end + (gap === ' ' || (gap === '\t' && quote.from < line.from) ? 1 : 0)
-}
 
 /** 使用实际的语法树标记；一行可以同时容纳外层和内层标记。 */
 function listMarkCols(
@@ -68,17 +58,10 @@ function listMarkCols(
   if (!mark) return null
   const line = state.doc.lineAt(mark.from)
   const start = mark.from - line.from
-  const end = mark.to - line.from
-  const content = end + /^[ \t]*/u.exec(line.text.slice(end))![0].length
   const quoteCol = countColumn(line.text, MARKDOWN_TAB_SIZE, quoteContentEdge(line, mark))
-  const afterMark = countColumn(line.text, MARKDOWN_TAB_SIZE, end)
-  const afterGap = countColumn(line.text, MARKDOWN_TAB_SIZE, content)
-  // CommonMark / Lezer getListIndent：空项或超过四列的空白只记一列；
-  // 多出来的空白可能是缩进代码的内容，不是列表标记的宽度。
-  const contentCol = content === line.length || afterGap - afterMark > 4 ? afterMark + 1 : afterGap
   return {
     markCol: countColumn(line.text, MARKDOWN_TAB_SIZE, start) - quoteCol,
-    contentCol: contentCol - quoteCol,
+    contentCol: listContentCol(line.text, mark.to - line.from) - quoteCol,
   }
 }
 
@@ -175,9 +158,9 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     }
   }
   const changes: { from: number; to?: number; insert?: string }[] = []
+  const promoted: SyntaxNode[] = []
   const batch = { lines: lineNumbers, targets: new Map<number, number | null>() }
   let movedItem: { end: number; width: number; quoteDepth: number } | null = null
-  const quoteLayer = /[ \t]*>[ \t]?/y
   const mathBlocks = state.field(mathBlocksField, false)
   for (const num of [...lineNumbers].sort((a, b) => a - b)) {
     const line = state.doc.line(num)
@@ -206,15 +189,13 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     if (movedItem && line.from >= movedItem.end) movedItem = null
     let unit: IndentPlan
     if (movedItem) {
-      quoteLayer.lastIndex = 0
-      let depth = 0
-      while (depth < movedItem.quoteDepth && quoteLayer.test(line.text)) depth++
-      const offset = quoteLayer.lastIndex
+      const offset = quoteIndentOffset(line.text, movedItem.quoteDepth)
       // 空行和省略外层引用前缀的惰性续行不必补缩进，其余行沿用所属项的位移。
-      if (depth < movedItem.quoteDepth || /^[ \t]*$/u.test(line.text.slice(offset))) continue
+      if (offset < 0 || /^[ \t]*$/u.test(line.text.slice(offset))) continue
       unit = { offset, width: movedItem.width }
     } else if (prefix?.mark) {
       unit = listUnitOf(state, line, listChain, prefix, dir, batch)
+      if (dir < 0 && unit.width && item?.parent?.parent?.name === 'ListItem') promoted.push(item)
       if (item && item.to > line.to) {
         movedItem = { end: item.to, width: unit.width, quoteDepth: prefix.quote.split('>').length - 1 }
       }
@@ -225,14 +206,7 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     const { offset, width } = unit
     const indent = /^[ \t]*/u.exec(line.text.slice(offset))![0]
     if ((prefix?.mark || movedItem) && indent.includes('\t')) {
-      // 保留仍落在目标列以内的制表符；仅跨过目标列的最后一个制表符改成空格。
-      const end = offset + indent.length
-      const goal = Math.max(countColumn(line.text, MARKDOWN_TAB_SIZE, offset),
-        countColumn(line.text, MARKDOWN_TAB_SIZE, end) + dir * width)
-      let keep = Math.min(end, findColumn(line.text, goal, MARKDOWN_TAB_SIZE))
-      if (countColumn(line.text, MARKDOWN_TAB_SIZE, keep) > goal) keep--
-      changes.push({ from: line.from + keep, to: line.from + end,
-        insert: ' '.repeat(goal - countColumn(line.text, MARKDOWN_TAB_SIZE, keep)) })
+      changes.push(resizeListIndent(line, offset, indent, dir * width))
     } else if (dir > 0) {
       // 裸 > 新增空白后第一格会成为引用分隔符，不计入列表的缩进量。
       const separator = (item || movedItem) && line.text[offset - 1] === '>' ? 1 : 0
@@ -244,7 +218,7 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     if (unit.restartNumber) changes.push({ ...unit.restartNumber, insert: '1' })
   }
   if (changes.length > 0) {
-    const changeSet = state.changes(changes)
+    const changeSet = continuePromotedNumbers(state, state.changes(changes), promoted)
     view.dispatch({
       changes: changeSet,
       selection: EditorSelection.create(

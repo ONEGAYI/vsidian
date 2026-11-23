@@ -20,7 +20,8 @@
 // 装配顺序约定：置于 tableEditing 之后、defaultKeymap（extraExtensions）
 // 之前——表格上下文优先（格内 Enter 仍为 <br> 语义），且先于通用键位
 // 拦截 Enter/Backspace。变换全部单笔事务派发（一次撤销整体回退）。
-import type { EditorState } from '@codemirror/state'
+import { ChangeSet, countColumn, findColumn } from '@codemirror/state'
+import type { EditorState, Line } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import type { Command } from '@codemirror/view'
 import { ViewPlugin } from '@codemirror/view'
@@ -161,6 +162,161 @@ export function parentIndentWidth(state: EditorState, chain: SyntaxNode[], prefi
   return width >= 0 ? width : null
 }
 
+// Markdown 的制表位是四列，与编辑器的显示设置无关。
+export const MARKDOWN_TAB_SIZE = 4
+
+/** 当前标记所在的最内层引用，其开行只吞一个空格，续行也吞一个制表符。 */
+export function quoteContentEdge(line: Line, mark: SyntaxNode): number {
+  let quote = mark.parent
+  while (quote && quote.name !== 'Blockquote') quote = quote.parent
+  if (!quote) return 0
+  const end = line.text.lastIndexOf('>', mark.from - line.from - 1) + 1
+  const gap = line.text[end]
+  return end + (gap === ' ' || (gap === '\t' && quote.from < line.from) ? 1 : 0)
+}
+
+/** 跨过指定的外层引用；缺少标记的惰性续行返回 -1。逐层扫描不回溯。 */
+export function quoteIndentOffset(text: string, depth: number): number {
+  const layer = /[ \t]*>[ \t]?/y
+  for (let i = 0; i < depth; i++) {
+    if (!layer.test(text)) return -1
+  }
+  return layer.lastIndex
+}
+
+/** CommonMark / Lezer getListIndent：空项或超过四列的空白只记一列。 */
+export function listContentCol(text: string, markEnd: number): number {
+  const end = markEnd + /^[ \t]*/u.exec(text.slice(markEnd))![0].length
+  const afterMark = countColumn(text, MARKDOWN_TAB_SIZE, markEnd)
+  const afterGap = countColumn(text, MARKDOWN_TAB_SIZE, end)
+  return end === text.length || afterGap - afterMark > 4 ? afterMark + 1 : afterGap
+}
+
+/** 保留仍落在目标列内的缩进字符，仅替换跨过目标列的制表符。 */
+export function resizeListIndent(line: Line, offset: number, indent: string, delta: number) {
+  const end = offset + indent.length
+  const goal = Math.max(countColumn(line.text, MARKDOWN_TAB_SIZE, offset),
+    countColumn(line.text, MARKDOWN_TAB_SIZE, end) + delta)
+  let keep = delta > 0 ? end : findColumn(line.text, goal, MARKDOWN_TAB_SIZE)
+  if (countColumn(line.text, MARKDOWN_TAB_SIZE, keep) > goal) keep--
+  return { from: line.from + keep, to: line.from + end,
+    insert: ' '.repeat(goal - countColumn(line.text, MARKDOWN_TAB_SIZE, keep)) }
+}
+
+/** Backspace / Shift+Tab 共用：升上来的有序项接续同一外层列表。 */
+export function continuePromotedNumbers(state: EditorState, base: ChangeSet, items: readonly SyntaxNode[]): ChangeSet {
+  if (!items.length) return base
+  const { doc } = state
+  const mathBlocks = state.field(mathBlocksField, false)
+  const moved = new Set(items.map((item) => item.from))
+  const lists = new Map<number, { first: SyntaxNode; children: Map<number, SyntaxNode[]> }>()
+  const promotedEnds = new Map<number, number>()
+  const previousByParent = new Map<number, number>()
+  for (const item of items) {
+    const parent = item.parent?.parent
+    if (parent?.name !== 'ListItem') continue
+    // 退层后，原父项末尾尚未退层的行可能跟在升格项下面。编号变宽时，
+    // 调整到下一个升格项之前，避免仅因编号变宽再把那些行抬高一级。
+    const previous = previousByParent.get(parent.from)
+    if (previous !== undefined) promotedEnds.set(previous, doc.lineAt(item.from).from)
+    previousByParent.set(parent.from, item.from)
+    promotedEnds.set(item.from, parent.to)
+    if (item.parent?.name !== 'OrderedList' || parent.parent?.name !== 'OrderedList') continue
+    let list = lists.get(parent.parent.from)
+    if (!list) {
+      list = { first: parent, children: new Map() }
+      lists.set(parent.parent.from, list)
+    }
+    const children = list.children.get(parent.from)
+    if (children) children.push(item)
+    else list.children.set(parent.from, [item])
+  }
+  if (!lists.size) return base
+
+  const numbering: Array<{ item: SyntaxNode; mark: SyntaxNode; insert: string }> = []
+  for (const { first, children } of lists.values()) {
+    const edits: typeof numbering = []
+    const firstMark = first.getChild('ListMark')!
+    const format = doc.sliceString(firstMark.from, firstMark.to)
+    const delim = format.at(-1)!
+    const pad = format.length - 1
+    let number: number | undefined
+    for (let item: SyntaxNode | null = first; item; item = item.nextSibling) {
+      if (item.name !== 'ListItem' || moved.has(item.from)) continue
+      const mark = item.getChild('ListMark')!
+      // 块级公式的文本可能被 GFM 树误判为列表；跨过时不承接此前的编号。
+      if (mathBlocks?.some((block) => block.from <= mark.from && mark.from < block.to)) {
+        number = undefined
+        continue
+      }
+      const promoted = children.get(item.from)
+      if (number === undefined && !promoted) continue
+      const literal = doc.sliceString(mark.from, mark.to)
+      // 不压缩作者已写下的跳号，只向后推被插入项占用的编号。
+      const original = Number(literal.slice(0, -1))
+      number = number === undefined ? original : Math.max(number + 1, original)
+      const updated = String(number).padStart(literal.length - 1, '0') + delim
+      if (literal !== updated) edits.push({ item, mark, insert: updated })
+      for (const child of promoted ?? []) {
+        const childMark = child.getChild('ListMark')!
+        const insert = String(++number).padStart(pad, '0') + delim
+        if (doc.sliceString(childMark.from, childMark.to) !== insert) edits.push({ item: child, mark: childMark, insert })
+      }
+    }
+    // Markdown 有序标记限九位数字；无法续号时保留这组原编号。
+    if (edits.every((edit) => edit.insert.length <= 10)) {
+      for (const edit of edits) numbering.push(edit)
+    }
+  }
+  if (!numbering.length) return base
+
+  // 编号位数变化也会改变所属内容的缩进列。先按退层后的坐标修补仍属于
+  // 该项的内容，最后与退层合为一笔事务。
+  const after = base.apply(doc)
+  const edits: Array<{ from: number; to: number; insert: string }> = []
+  const shifts = new Map<number, { line: Line; offset: number; indent: string; delta: number }>()
+  for (const { item, mark, insert } of numbering) {
+    const from = base.mapPos(mark.from, 1)
+    const to = base.mapPos(mark.to, -1)
+    edits.push({ from, to, insert })
+    if (insert.length === to - from) continue
+    const line = after.lineAt(from)
+    const end = base.mapPos(promotedEnds.get(item.from) ?? item.to, -1)
+    if (end <= line.to) continue
+    const body = listContentCol(line.text, to - line.from)
+    const updated = line.text.slice(0, from - line.from) + insert + line.text.slice(to - line.from)
+    const delta = listContentCol(updated, from - line.from + insert.length) - body
+    if (!delta) continue
+    const oldLine = doc.lineAt(mark.from)
+    const relativeBody = body - countColumn(line.text, MARKDOWN_TAB_SIZE, quoteContentEdge(oldLine, mark))
+    let depth = 0
+    for (let ancestor = mark.parent; ancestor; ancestor = ancestor.parent) {
+      if (ancestor.name === 'Blockquote') depth++
+    }
+    for (let pos = line.to + 1; pos < end;) {
+      const row = after.lineAt(pos)
+      pos = row.to + 1
+      const offset = quoteIndentOffset(row.text, depth)
+      if (offset < 0) continue
+      const rest = row.text.slice(offset)
+      const indent = /^[ \t]*/u.exec(rest)![0]
+      if (indent.length === rest.length) continue
+      const col = countColumn(row.text, MARKDOWN_TAB_SIZE, offset + indent.length) -
+        countColumn(row.text, MARKDOWN_TAB_SIZE, offset)
+      if (col < relativeBody) continue
+      const key = row.from + offset
+      const shift = shifts.get(key)
+      if (shift) shift.delta += delta
+      else shifts.set(key, { line: row, offset, indent, delta })
+    }
+  }
+  for (const { line, offset, indent, delta } of shifts.values()) {
+    if (delta) edits.push(resizeListIndent(line, offset, indent, delta))
+  }
+  edits.sort((a, b) => a.from - b.from || a.to - b.to)
+  return base.compose(ChangeSet.of(edits, after.length))
+}
+
 /** 引用内围栏行的 Enter 延续（PR678-003）：只延续容器引用前缀（quote
  *  规范补一空格），代码字面内容中的列表/任务标记不参与 Markdown 续写 */
 function quoteOnlyContinuation(prefix: LinePrefix): string {
@@ -266,9 +422,15 @@ export const stripListLayer: Command = (view) => {
     return true
   }
   if (plan.kind === 'dedent') {
+    const { state } = view
+    const markStart = ctx.prefixEnd - ctx.prefix.mark.length
+    const base = state.changes({ from: ctx.lineFrom, to: markStart,
+      insert: plan.insert.slice(0, -ctx.prefix.mark.length) })
+    const item = ctx.chain.find((node) => node.name === 'ListItem' && node.getChild('ListMark')?.from === markStart)
+    const changes = item ? continuePromotedNumbers(state, base, [item]) : base
     view.dispatch({
-      changes: { from: ctx.lineFrom, to: ctx.prefixEnd, insert: plan.insert },
-      selection: { anchor: ctx.lineFrom + plan.insert.length },
+      changes,
+      selection: { anchor: changes.mapPos(ctx.prefixEnd, 1) },
       userEvent: 'delete.backward', scrollIntoView: true,
     })
     return true

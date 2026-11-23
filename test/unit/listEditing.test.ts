@@ -161,6 +161,14 @@ describe('Enter 空项退出', () => {
 // ---- Backspace：退格清层 ----
 
 describe('Backspace 退格清层', () => {
+  it('光标在有序子项标记后退一级时接着外层编号', () => {
+    const doc = '1. parent\n   1. child\n2. next'
+    const expected = '1. parent\n2. child\n3. next'
+    expect(typed(makeEditView(doc, doc.indexOf('child')), 'Backspace')).toEqual({
+      text: expected, head: expected.indexOf('child'),
+    })
+  })
+
   it('顶级项一次清除整段标记变普通段落', () => {
     expect(typed(makeEditView('- item', 2), 'Backspace')).toEqual({ text: 'item', head: 0 })
     expect(typed(makeEditView('1. item', 3), 'Backspace')).toEqual({ text: 'item', head: 0 })

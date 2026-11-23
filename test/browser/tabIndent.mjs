@@ -38,6 +38,8 @@ await build({ entryPoints: [path.join(root, 'test/browser/tabIndentFixture.ts')]
 const TABLE_DOC = '| a | b |\n| --- | --- |\n| 1 | 2 |\npara'
 const SIBLINGS = '1. parent\n- first\n- second\n- third\n- untouched'
 const NESTED = '1. parent\n   - first\n   - second\n   - third\n- untouched'
+const ORDERED_CHILDREN = '1. parent\n   1. first\n   2. second\n2. next'
+const ORDERED_PROMOTED = '1. parent\n2. first\n3. second\n4. next'
 
 // #420 降级 frontmatter 文档对（嵌套 map 源码态；Tab 前后互为镜像）
 const DEGRADED_FM = '---\nperm:\n  bash: deny\n---\nbody'
@@ -85,6 +87,11 @@ const scenarios = [
     range: [NESTED.indexOf('- first'), NESTED.indexOf('- untouched')], keys: ['Shift+Tab'],
     text: SIBLINGS, from: SIBLINGS.indexOf('- first'), to: SIBLINGS.indexOf('- untouched'),
     bullets: ['•', '•', '•', '•'],
+  },
+  {
+    name: 'shift-selection-continues-outer-numbering', doc: ORDERED_CHILDREN,
+    range: [ORDERED_CHILDREN.indexOf('1. first'), ORDERED_CHILDREN.indexOf('2. next')], keys: ['Shift+Tab'],
+    text: ORDERED_PROMOTED, from: ORDERED_PROMOTED.indexOf('2. first'), to: ORDERED_PROMOTED.indexOf('4. next'),
   },
   {
     name: 'tab-selection-list-keeps-child',
