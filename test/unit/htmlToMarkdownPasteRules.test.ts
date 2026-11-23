@@ -397,6 +397,16 @@ describe('粘贴规则转换：边界与既有管线兼容', () => {
     expect(convert('<div data-card>one</div>\n  <div data-card>two</div>', [card]).markdown).toBe('one two')
   })
 
+  it('段首只清理 HTML 原文空白，不清理组件模板的字面缩进', () => {
+    const code = rule({
+      id: 'literal-indent',
+      match: { tag: 'SPAN', attributes: [{ name: 'data-code' }] },
+      output: { kind: 'template', template: '    B', slots: {} },
+    })
+    const html = '<p>A</p>\n  <span data-code></span><ul><li>C</li></ul>'
+    expect(convert(html, [code]).markdown).toBe('A\n\n    B\n\n- C')
+  })
+
   it('显式丢弃算成功（产出空串）；模板解析为空串不算成功回内置', () => {
     const discard = rule({ id: 'discard-all', match: { tag: 'SPAN', attributes: [{ name: 'data-copy-button' }] }, output: { kind: 'discard' } })
     const result = convert('<p>文字<span data-copy-button>复制</span>结尾</p>', [discard])

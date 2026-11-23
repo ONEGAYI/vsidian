@@ -44,7 +44,7 @@ function containsMathToken(text: string): boolean {
   return false
 }
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
-interface InlineRun extends Marks { text: string }
+interface InlineRun extends Marks { text: string; leadingHtmlSpace?: boolean }
 const unmarked: Marks = { bold:false, italic:false, strike:false }
 const markKeys: Array<keyof Marks> = ['strike','italic','bold']
 
@@ -324,7 +324,10 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   }
   function inline(node: Node, inherited: Marks, table: boolean): InlineRun[] {
     if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
-    if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeSourceText((node.textContent ?? '').replace(/\s+/g,' '))}]
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? ''
+      return [{ ...inherited, text: escapeSourceText(text.replace(/\s+/g, ' ')), leadingHtmlSpace: /^[\t\n\f\r ]/.test(text) }]
+    }
     if (!(node instanceof Element) || ignored.has(node.tagName) || node.tagName === 'INPUT') return []
     const addonOutput = addonRuleOutput(node, table, inherited)
     if (addonOutput !== null) {
@@ -363,12 +366,18 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     }
     return runs
   }
-  function serialize(runs: InlineRun[]): string {
+  function serialize(runs: InlineRun[], trimHtmlIndent = false): string {
     const merged: InlineRun[]=[]
     for (const run of runs) {
+      let text = run.text
+      if (trimHtmlIndent) {
+        if (run.leadingHtmlSpace) text = text.slice(1)
+        if (!text) continue
+        trimHtmlIndent = false
+      }
       const last=merged.at(-1)
-      if (last && last.bold===run.bold && last.italic===run.italic && last.strike===run.strike) last.text+=run.text
-      else merged.push({...run})
+      if (last && last.bold===run.bold && last.italic===run.italic && last.strike===run.strike) last.text+=text
+      else merged.push({ ...run, text })
     }
     // CommonMark 标点两侧的 delimiter flanking 会受邻接文字影响。
     // 只在定界符会失效时处理邻接文字；默认用等价实体保留原有间距。
@@ -405,28 +414,31 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     }
     return encode(merged,markKeys)
   }
-  function children(el: Node, table = false, inherited: Marks = unmarked): string {
+  function children(el: Node, table = false, inherited: Marks = unmarked, startsParagraph = false): string {
     const marks=el instanceof Element ? effectiveMarks(el,inherited) : inherited
     let result='',runs:InlineRun[]=[]
     let previousOrphanItem = false
-    const onlyIndent = () => runs.every(run => run.text === '' || run.text === ' ')
+    const onlyIndent = () => runs.every(run => !run.text || (run.leadingHtmlSpace && run.text === ' '))
+    const atParagraphStart = () => result ? result.endsWith('\n\n') : startsParagraph
     for (const node of Array.from(el.childNodes)) {
       if (node instanceof Element && isBlockContainer(node)) {
-        const block = render(node, table, marks)
+        // 透明包装继承外侧段首，但不能越过包装之前的可见行内内容。
+        const trimLeading = atParagraphStart()
+        const indent = onlyIndent()
+        const block = render(node, table, marks, trimLeading && indent)
         const orphanItem = node.tagName === 'LI' && block.startsWith('\n\n- ') && block.endsWith('\n\n')
         if (orphanItem && runs.every(run => !run.text.trim())) {
           // 两个相邻的独立 li 合成紧凑列表。两侧仍留段界，避免吸收正文。
           result = previousOrphanItem ? result.slice(0, -1) + block.slice(2) : result + block
         } else {
-          // 缩进已折成空格，遇到真实段界才略过；透明包装逐层处理，不吞 <br> 或行内空格。
-          const separated = result.endsWith('\n\n') || block.startsWith('\n\n') || (!result && block.endsWith('\n\n'))
-          result += (separated && onlyIndent() ? '' : serialize(runs)) + block
+          const separated = block.startsWith('\n\n') || (!result && block.endsWith('\n\n'))
+          result += (separated && indent ? '' : serialize(runs, trimLeading)) + block
         }
         runs = []
         previousOrphanItem = orphanItem
       } else runs.push(...inline(node,marks,table))
     }
-    return result.endsWith('\n\n') && onlyIndent() ? result : result + serialize(runs)
+    return result + serialize(runs, atParagraphStart())
   }
   function mark(text: string, marker: string): string {
     if (!text.trim()) return text
@@ -448,11 +460,11 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       .map(part => indent + part).join('\n')).join('')
     return prefix + task + content.replace(/\n/g, '\n' + indent) + tail
   }
-  function render(node: Node, table = false, inherited: Marks = unmarked): string {
+  function render(node: Node, table = false, inherited: Marks = unmarked, startsParagraph = false): string {
     if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
     if (node.nodeType === Node.TEXT_NODE) return serialize(inline(node,inherited,table))
     if (!(node instanceof Element) && !(node instanceof DocumentFragment)) return ''
-    if (node instanceof DocumentFragment) return children(node, table, inherited)
+    if (node instanceof DocumentFragment) return children(node, table, inherited, true)
     const tag = node.tagName
     if (ignored.has(tag)) return ''
     if (blockTags.has(tag) || isBlockContainer(node)) {
@@ -462,7 +474,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
         return serialize([addonOutput])
       }
     }
-    if (!blockTags.has(tag)) return isBlockContainer(node) ? children(node,table,inherited) : serialize(inline(node,inherited,table))
+    if (!blockTags.has(tag)) return isBlockContainer(node) ? children(node, table, inherited, startsParagraph) : serialize(inline(node,inherited,table))
     if (tag === 'PRE') {
       const text = node.textContent ?? ''
       if (!text) return ''

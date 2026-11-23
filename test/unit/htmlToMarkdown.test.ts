@@ -39,6 +39,20 @@ describe('剪贴板HTML可表达格式', () => {
     const html = '<p>A</p>\n  <img src="file:///a.png" alt="">\n  <ul><li>B</li></ul>'
     expect(htmlToMarkdown(html).markdown).toBe('A\n\n- B')
   })
+  it.each([false, true])('段首 HTML 缩进和行内正文同批时仍保留段落（包装：%s）', (wrapped) => {
+    const tail = '\n<!--a-->\n<!--b-->\n<!--c-->\n<span>B</span> <em>正文</em><br>续行\n<ul><li>C</li></ul>'
+    const html = '<p>A</p>' + (wrapped ? '<section>' + tail + '</section>' : tail)
+    const { markdown } = htmlToMarkdown(html)
+    const rendered = document.createElement('template')
+    rendered.innerHTML = new MarkdownIt().render(markdown)
+    expect(rendered.content.querySelector('pre')).toBeNull()
+    expect(rendered.content.querySelectorAll('p')[1]?.innerHTML).toBe('B <em>正文</em><br>\n续行')
+    expect(rendered.content.querySelector('ul li')?.textContent).toBe('C')
+  })
+  it('透明包装未另起段时保留前后行内内容之间的空格', () => {
+    const html = '<p>A</p><span>one</span><section>\n  <span>two</span><ul><li>C</li></ul></section>'
+    expect(htmlToMarkdown(html).markdown).toBe('A\n\none two\n\n- C')
+  })
   it.each([
     ['<li>甲</li>\n  <li>乙<ul><li>子项</li></ul></li>', '- 甲\n- 乙\n  - 子项'],
     ['<p>前文</p><li><input type="checkbox" checked>完成</li><p>后文</p>', '前文\n\n- [x] 完成\n\n后文'],
