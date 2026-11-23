@@ -91,14 +91,28 @@ export function mapContentOffsetToDoc(
   return seg.lineStart + seg.prefixLen + (offset - seg.contentOffset)
 }
 
-/** 剥除行首全部引用前缀（#674 T06）：每层 `>` + 可选一个空格（CommonMark
- *  blockquote 标记消耗口径；Tab 不属前缀，`>` 后直接 Tab 时该 Tab 保留在
- *  裸行中）。返回裸行、层数（`>` 个数）与剥除字符数。纯字符扫描无分配。 */
-export function stripQuotePrefix(line: string): { bare: string; depth: number; prefixLen: number } {
+/** 全文坐标：只有 Markdown 语法树确认的 `>` 才能把标记前的空格算入前缀。 */
+export type QuoteMarkAt = (pos: number) => boolean
+
+function quoteMarkerAt(line: string, from: number, lineStart: number, quoteMarkAt?: QuoteMarkAt): number {
+  if (line[from] === '>') return from
+  if (quoteMarkAt && line[from] === ' ') {
+    let at = from + 1
+    while (line[at] === ' ') at++
+    if (line[at] === '>' && quoteMarkAt(lineStart + at)) return at
+  }
+  return -1
+}
+
+/** 剥除行首全部引用前缀（#674 T06）：每层 `>` + 可选一个空格。
+ *  缩进中的引用标记只在有语法证据时剥除；Tab 仍不属于前缀。 */
+export function stripQuotePrefix(line: string, quoteMarkAt?: QuoteMarkAt, lineStart = 0): { bare: string; depth: number; prefixLen: number } {
   let at = 0
   let depth = 0
-  while (line[at] === '>') {
-    at += 1
+  for (;;) {
+    const mark = quoteMarkerAt(line, at, lineStart, quoteMarkAt)
+    if (mark < 0) break
+    at = mark + 1
     if (line[at] === ' ') {
       at += 1
     }
@@ -110,13 +124,12 @@ export function stripQuotePrefix(line: string): { bare: string; depth: number; p
 /** 剥除行首恰好 layers 层引用前缀；层数不足（行不在同等深度的引用容器内）
  *  返回 null——容器断开信号。与 stripQuotePrefix 的层计数同构（每层独立
  *  消耗 `>` 与可选空格，开闭行前缀形态不同但层等价时仍可剥）。 */
-export function stripQuoteLayers(line: string, layers: number): string | null {
+export function stripQuoteLayers(line: string, layers: number, quoteMarkAt?: QuoteMarkAt, lineStart = 0): string | null {
   let at = 0
   for (let i = 0; i < layers; i++) {
-    if (line[at] !== '>') {
-      return null
-    }
-    at += 1
+    const mark = quoteMarkerAt(line, at, lineStart, quoteMarkAt)
+    if (mark < 0) return null
+    at = mark + 1
     if (line[at] === ' ') {
       at += 1
     }
@@ -368,7 +381,7 @@ export function stripInlineTexTicks(tex: string): string {
  * 某个未闭合块内时，本扫描以非块态起步，不会把窗口内的闭合定界符误配
  * 为新块（闭合判定要求先有开启行）。
  */
-export function scanMathRanges(lines: readonly string[], firstLineStart: number, links?: MathLinkRanges): MathOccurrence[] {
+export function scanMathRanges(lines: readonly string[], firstLineStart: number, links?: MathLinkRanges, quoteMarkAt?: QuoteMarkAt): MathOccurrence[] {
   if (!lines.some((line) => line.includes('$'))) {
     return []
   }
@@ -385,11 +398,9 @@ export function scanMathRanges(lines: readonly string[], firstLineStart: number,
     contentLen: number
   } | null = null
   for (const line of lines) {
-    const { bare, depth, prefixLen } = stripQuotePrefix(line)
-    const trimmed = bare.trim()
     if (blockOpen) {
       // 剥开启层数：层数足够剥至容器内；不足（引用断开）剥 0 层原样吃进
-      const consumed = stripQuoteLayers(line, blockOpen.depth) ?? line
+      const consumed = stripQuoteLayers(line, blockOpen.depth, quoteMarkAt, lineStart) ?? line
       const segStart = line.length - consumed.length
       const consumedTrim = consumed.trim()
       if (!consumedTrim.includes('$$')) {
@@ -420,6 +431,8 @@ export function scanMathRanges(lines: readonly string[], firstLineStart: number,
       lineStart += line.length + 1
       continue
     }
+    const { bare, depth, prefixLen } = stripQuotePrefix(line, quoteMarkAt, lineStart)
+    const trimmed = bare.trim()
     const indent = bare.length - bare.trimStart().length
     if (trimmed.startsWith('$$')) {
       const rest = trimmed.slice(2)

@@ -510,6 +510,55 @@ try {
   await page.keyboard.press('Control+Z'); await waitBoth('$abxc$ tail')
   console.log('[PASS] 普通粗体粘贴到旧行内公式时只写入 TeX 原文，一次撤销恢复')
 
+  const displayRule = {
+    addonId: 'ONEGAYI.vsidian-codex-bridge', id: 'katex-block-math', priority: 0,
+    match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex-display' }] },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, blockMath: true } } },
+  }
+  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 10, rules: [...formulaRules, displayRule] })
+  await page.evaluate(() => {
+    window.replace('前文后文')
+    window.selectRanges([{ anchor: 2, head: 2 }])
+  })
+  const displayTex = String.raw`q = \underbrace{x}_{\text{空间}}`
+  await write('q = x', '<span class="katex-display">' +
+    katexSpan(displayTex).replace('<math>', '<math display="block">') + '</span>')
+  await page.keyboard.press('Control+V')
+  await waitBoth('前文\n\n$$\n' + displayTex + '\n$$\n\n后文')
+  await page.keyboard.press('Control+End')
+  await editor.locator('.vsidian-math .katex-display').waitFor({ state: 'visible' })
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), [displayTex])
+  await page.keyboard.press('Control+Z'); await waitBoth('前文q = x后文')
+  await page.keyboard.press('Control+Z'); await waitBoth('前文后文')
+  console.log('[PASS] KaTeX 块公式以独立块粘贴、显示并分步撤销')
+
+  const quotedTex = 'x+1\n+y'
+  await write('x+1\n+y\n后项', '<ul><li><blockquote><span class="katex-display">' +
+    katexSpan(quotedTex).replace('<math>', '<math display="block">') + '</span></blockquote></li><li>后项</li></ul>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('-\n  > $$\n  > x+1\n  > +y\n  > $$\n- 后项')
+  await page.keyboard.press('Control+End')
+  await editor.locator('.vsidian-math .katex-display').waitFor({ state: 'visible' })
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), [quotedTex])
+  console.log('[PASS] 列表首块为引用时，保留列表层级并显示原多行公式')
+
+  const quoteInCode = 'Lead\n\n    A\n\n    B\n\n    C\n\n    > $$\n    > x+1\n    > $$'
+  await page.evaluate(source => {
+    window.replace(source)
+    window.selectRanges([{ anchor: 0, head: 0 }])
+  }, quoteInCode)
+  const quotedDisplay = editor.locator('.vsidian-math .katex-display')
+  await quotedDisplay.waitFor({ state: 'detached' })
+  await page.keyboard.insertText('12. ')
+  await waitBoth('12. ' + quoteInCode)
+  await quotedDisplay.waitFor({ state: 'visible' })
+  assert.equal((await editor.locator('.vsidian-math annotation').textContent()).trim(), 'x+1')
+  await page.evaluate(() => window.selectRanges([{ anchor: 0, head: 4 }]))
+  await page.keyboard.press('Backspace')
+  await waitBoth(quoteInCode)
+  await quotedDisplay.waitFor({ state: 'detached' })
+  console.log('[PASS] 编辑远处列表父标记立即显示或移除引用公式')
+
   const blockSource = '$$\na+b\n$$\n\nend'
   await page.evaluate(source => {
     window.replace(source)

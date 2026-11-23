@@ -9,7 +9,7 @@
 // - 纯文本粘贴（总开关关闭/代码上下文）不经过规则。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
-import { EditorSelection } from '@codemirror/state'
+import { EditorSelection, EditorState, Text } from '@codemirror/state'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { mathBlocksField } from '../../src/webview/liveMath'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -19,6 +19,8 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 import type { WebviewToHost } from '../../src/shared/protocol'
 import type { SettingsPayload } from '../../src/shared/settings'
 import * as conversion from '../../src/webview/htmlToMarkdown'
+import { prepareRichPaste } from '../../src/webview/richPastePlan'
+import { docInput, markdownTreeParser } from '../../src/shared/markdownDoc'
 
 if (!Range.prototype.getClientRects) { Range.prototype.getClientRects = () => [] as unknown as DOMRectList; Range.prototype.getBoundingClientRect = () => new DOMRect() }
 let c: WebviewSyncController
@@ -83,7 +85,177 @@ function readingTexOf(source: string): (string | null)[] {
   )
 }
 
+function pasteDisplayMath(view: EditorView, tex: string, plain: string, prefix = '', suffix = '') {
+  c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: { version: 1, rules: [{
+    addonId: 'fixture.demo', id: 'display-math', priority: 0, match: { tag: 'SPAN' },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, blockMath: true } } },
+  }] } })
+  paste(view, prefix + `<span class="katex-display"><math display="block"><semantics><mi>q</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>` + suffix, plain)
+}
+
 describe('粘贴规则控制器消费链', () => {
+  it.each(['', '$$\n未闭合\n'])('段中粘贴块公式不破坏前后正文或未闭合块：%j', async (prefix) => {
+    const { view, sent } = mount(prefix + '前文后文')
+    const at = prefix.length + 2
+    view.dispatch({ selection: { anchor: at } })
+    const tex = String.raw`q = \underbrace{x}_{\text{空间}}`
+    pasteDisplayMath(view, tex, 'q = x')
+    await settle()
+    const source = view.state.doc.toString()
+    expect(source).toBe(prefix ? prefix + '前文q = x后文' : '前文\n\n$$\n' + tex + '\n$$\n\n后文')
+    if (!prefix) expect(readingTexOf(source)).toEqual([tex])
+    const first = sent.find(m => m.kind === 'edit.request')
+    expect(first?.kind === 'edit.request' && first.changes).toEqual([{ offset: at, length: 0, text: 'q = x' }])
+  })
+  it('块公式落点在已保留的 YAML 头块内时，规划只用纯文本', () => {
+    const source = '---\ntitle: sample\n---\n\nbody'
+    const at = source.indexOf('sample') + 2
+    const state = EditorState.create({ doc: source, selection: { anchor: at } })
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, []))
+      .toBeNull()
+  })
+  it('在现有列表条目中间粘贴块公式不拆分条目，改用原纯文本', async () => {
+    const { view, sent } = mount('- 前后\n- 次项')
+    view.dispatch({ selection: { anchor: 3 } })
+    pasteDisplayMath(view, 'x', 'X')
+    await settle()
+    expect(view.state.doc.toString()).toBe('- 前X后\n- 次项')
+    expect(sent.filter(m => m.kind === 'edit.request')).toHaveLength(1)
+  })
+  it.each([true, false])('可在完整列表外侧粘贴独立公式（前侧：%s）', async (before) => {
+    const list = '- 甲\n- 乙'
+    const { view } = mount(list)
+    view.dispatch({ selection: { anchor: before ? 0 : list.length } })
+    pasteDisplayMath(view, 'x', 'X')
+    await settle()
+    const source = view.state.doc.toString()
+    const formula = '$$\nx\n$$'
+    expect(source).toBe((before ? [formula, list] : [list, formula]).join('\n\n'))
+    expect(readingTexOf(source)).toEqual(['x'])
+    expect(splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+      .flatMap(block => [...block.querySelectorAll('ul > li')]).map(li => li.textContent?.trim()))
+      .toEqual(['甲', '乙'])
+  })
+  it('引用内的列表起点不是独立落点，只插入原纯文本', async () => {
+    const { view, sent } = mount('> - 甲\n> - 乙')
+    view.dispatch({ selection: { anchor: 2 } })
+    pasteDisplayMath(view, 'x', 'X ')
+    await settle()
+    expect(view.state.doc.toString()).toBe('> X - 甲\n> - 乙')
+    expect(sent.filter(m => m.kind === 'edit.request')).toHaveLength(1)
+  })
+  it('在远离旧块的长文档末尾保留公式，不复制全文为字符串', () => {
+    const doc = Text.of(['$$', 'old', '$$', '', ...'段落\n\n'.repeat(20_000).split('\n')])
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const source = { doc, tree: markdownTreeParser.parse(docInput(doc)), fm: null }
+    const copies = vi.spyOn(Text.prototype, 'toString')
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source))
+      .toMatchObject({ insertions: [markdown] })
+    expect(copies.mock.contexts.some(value => (value as Text).length >= doc.length)).toBe(false)
+  })
+  it('草稿需要重新解析超长的旧段落时使用纯文本，不在粘贴中重解析整段', () => {
+    const doc = Text.of(Array.from({ length: 1024 }, () => '旧'.repeat(512)))
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const source = { doc, tree: markdownTreeParser.parse(docInput(doc)), fm: null }
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source))
+      .toBeNull()
+  })
+  it.each([false, true])('定界符回查不越过读取预算（附近有可确定的闭合行：%s）', (nearClose) => {
+    const doc = Text.of([...Array.from({ length: 1_024 }, () => ['旧'.repeat(512), '']).flat(),
+      ...(nearClose ? ['$$', 'a$$', '', ''] : [''])])
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const source = { doc, tree: markdownTreeParser.parse(docInput(doc)), fm: null }
+    const iter = vi.spyOn(Text.prototype, 'iterRange')
+    const markdown = '$$\nx\n$$'
+    const prepared = prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source)
+    const reverseRanges = iter.mock.calls.filter(([from, to]) => to !== undefined && from > to)
+    expect(reverseRanges).not.toHaveLength(0)
+    expect(reverseRanges.every(([from, to]) => from - to! <= 256 * 1024)).toBe(true)
+    if (nearClose) expect(prepared?.insertions).toEqual([markdown])
+    else expect(prepared).toBeNull()
+  })
+  it('远处的未闭合块仍不能吞入新公式的开符', () => {
+    const doc = '$$\n' + '段落\n\n'.repeat(600)
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, []))
+      .toBeNull()
+  })
+  it('注释中的公式落点不产生不可见的格式编辑', async () => {
+    const { view } = mount('<!--\ncomment\n-->\n\nafter')
+    view.dispatch({ selection: { anchor: 5 } })
+    pasteDisplayMath(view, 'x', 'X')
+    await settle()
+    expect(view.state.doc.toString()).toBe('<!--\nXcomment\n-->\n\nafter')
+  })
+  it.each([
+    ['<ol><li>', '</li><li>后项</li></ol>', '1.\n   $$\n   x\n   $$\n2. 后项', 'ol'],
+    ['<ul><li>', '</li><li>后项</li></ul>', '-\n  $$\n  x\n  $$\n- 后项', 'ul'],
+    ['<li>', '</li><li>后项</li>', '-\n  $$\n  x\n  $$\n- 后项', 'ul'],
+  ])('公式可作为列表条目的第一块：%s', async (prefix, suffix, expected, tag) => {
+    const { view } = mount('')
+    pasteDisplayMath(view, 'x', 'x\n后项', prefix, suffix)
+    await settle()
+    const source = view.state.doc.toString()
+    expect(source).toBe(expected)
+    expect(readingTexOf(source)).toEqual(['x'])
+    expect(splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+      .flatMap(block => Array.from(block.querySelectorAll(tag + ' > li')))).toHaveLength(2)
+  })
+  it('嵌套列表的首块为公式时，外层条目正文不会变成标题', async () => {
+    const { view } = mount('')
+    pasteDisplayMath(view, 'x', '甲\nx', '<ol><li>甲<ul><li>', '</li></ul></li></ol>')
+    await settle()
+    const source = view.state.doc.toString()
+    const reading = splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+    expect(reading.flatMap(block => [...block.querySelectorAll('ol > li > ul > li annotation')]).map(n => n.textContent?.trim()))
+      .toEqual(['x'])
+    expect(reading.flatMap(block => [...block.querySelectorAll('h2')])).toHaveLength(0)
+  })
+  it.each([
+    ['<ul>', '</ul>', 'ul', '-', '  '],
+    ['<ol start="12">', '</ol>', 'ol', '12.', '    '],
+  ])('列表首块是引用时，两种视图都保留引用和多行公式：%s', async (open, close, tag, marker, indent) => {
+    const { view } = mount('')
+    const tex = 'x+1\n+y'
+    pasteDisplayMath(view, tex, 'x+1\n+y\n后项', open + '<li><blockquote>', '</blockquote></li><li>后项</li>' + close)
+    await settle()
+    const source = view.state.doc.toString()
+    const frame = ['$$', ...tex.split('\n'), '$$'].map(line => indent + '> ' + line)
+    expect(source).toBe([marker, ...frame, (tag === 'ul' ? '-' : '13.') + ' 后项'].join('\n'))
+    expect(readingTexOf(source)).toEqual([tex])
+    const reading = splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+    expect(reading.flatMap(block => [...block.querySelectorAll(tag + ' > li > blockquote annotation')])
+      .map(node => node.textContent?.trim())).toEqual([tex])
+    expect(view.state.field(mathBlocksField).map(hit => hit.tex.trim())).toEqual([tex])
+  })
+  it('重新打开时仍识别列表内引用中的公式，缩进代码里的同形标记不抢占定界符', () => {
+    const code = '    > $$\n    > 字面内容'
+    const list = '-\n  > $$\n  > x+1\n  > $$'
+    const { view } = mount(code + '\n\n' + list)
+    expect(view.state.field(mathBlocksField).map(hit => hit.tex.trim())).toEqual(['x+1'])
+  })
+  it('整段替换带引用公式的列表后，不保留旧公式区间', () => {
+    const original = '-\n  > $$\n  > x+1\n  > $$\n- 后项'
+    const { view } = mount(original)
+    expect(view.state.field(mathBlocksField)).toHaveLength(1)
+    view.dispatch({ changes: { from: 0, to: original.length, insert: '新正文' }, selection: { anchor: 0 } })
+    expect(view.state.doc.toString()).toBe('新正文')
+    expect(view.state.field(mathBlocksField)).toEqual([])
+  })
+  it.each([false, true])('只有块公式的任务条目保留勾选状态：%s', async (checked) => {
+    const { view } = mount('')
+    pasteDisplayMath(view, 'x', 'x', `<ul><li><input type="checkbox"${checked ? ' checked' : ''}>`, '</li></ul>')
+    await settle()
+    const source = view.state.doc.toString()
+    const reading = splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+    const box = reading.flatMap(block => [...block.querySelectorAll<HTMLInputElement>('li input[type=checkbox]')])
+    expect(box.map(input => input.checked)).toEqual([checked])
+    expect(readingTexOf(source)).toEqual(['x'])
+  })
   it('Live 展示实体解码文本，光标进入只显形当前实体，代码保持字面', () => {
     const source = '开头&#30528; &amp; &#x1F642; &missing; `&#30528;`\n结尾'
     const { view } = mount(source)

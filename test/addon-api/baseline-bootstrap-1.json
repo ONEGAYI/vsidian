@@ -5,8 +5,8 @@
     "mode": "bootstrap",
     "anchor": {
       "kind": "commit",
-      "sha": "36e318c54ba8f57086a9617b36b74a103dedb396",
-      "ref": "36e318c54ba8f57086a9617b36b74a103dedb396",
+      "sha": "641e5d814f59281df497ab238eb87012fdb83b53",
+      "ref": "641e5d814f59281df497ab238eb87012fdb83b53",
       "catalogPath": "src/shared/addonApiCatalog.ts"
     },
     "note": "bootstrap 显式初始基线：锚点是提交（不是发行标签），在首个真实发行前建立——不伪造已发布锚点。首个稳定 API 发行时应以 release 模式重新锚定。",
@@ -1233,7 +1233,7 @@
         "modes": "只作用于富文本粘贴链（HTML 载荷）；显式纯文本粘贴、代码/表格上下文与 plain 等值守卫不经规则。转换成功参与 hasFormatting 判定，最终结果与 plain 相同时仍走一次撤销路径。",
         "coordinates": "规则语言为可序列化数据：匹配（标签名相等、属性条件全与——缺失与空串区分——＋可选条件树）＋取值槽（元素文本/指定属性/子内容转换结果/正则捕获组）＋模板产出（{{name}} 槽引用；字面部分是作者声明的静态 Markdown 结构不转义，文本/属性/捕获组槽按内置转义，URL 槽经既有 safeUrl 策略，children 槽不二次转义）或显式丢弃。正则为数据声明 pattern＋受限 flags（i/m/s/u，禁 g/y 有状态修饰符），注册时编译校验；捕获组取值支持整匹（组 0）/数字组/命名组，组引用越界或命名组缺失即拒绝。条件为 all/any/not 树（叶子：属性存在/相等、属性值正则、元素文本正则；空组合、非法节点与隐式真值形态拒绝）。嵌套转换在 children 槽声明子规则集（与顶层同一声明语言，ID 为槽内局部；子元素先子规则后内置，只沿子节点下降）。未知字段一律显式拒绝，不静默当成已声明形态。",
         "lifecycle": "有效规则按优先级降序、组件稳定 ID 升序、规则稳定 ID 升序确定性执行（缺省优先级 0，顺序不取决于页面装载先后；children 子规则集递归同序）；对同一元素依次尝试、首条成功接管、单条失败继续、全部未成功回内置转换；内置 SCRIPT/STYLE 等忽略规则先行生效，组件规则不能复活已忽略节点；嵌套求值期间外层规则集不参与（不按规则 ID 回跳或再次转换自身）。停用、故障、单组释放与代次结束撤回相应规则并广播新快照（版本单调、内容等值不递增）；一次粘贴在使用开始时捕获快照，转换中不拼接两个注册代次，迟到旧版本快照不回退。预算集中定义：每组件至多 256 条规则声明（含嵌套子规则合计）、条件组合层级与规则嵌套层级各至多 16、单条规则条件树至多 64 节点、单次粘贴求值步数至多 100,000（规则尝试/条件节点/正则执行各计一步，超限停用规则、内置转换继续）。正则实现为运行环境原生 RegExp：同步、单次执行不可中断——步数预算计执行次数不是可中断超时；正则输入（元素文本/属性值）超过 4,096 字符按必需取值缺失处理（本规则失败，不截断不改写）。",
-        "autoRules": "inlineMath 只接受 true，且须为独占模板的非 URL 文本槽。取命中元素内非块级 MathML 的 application/x-tex 注解，不做正文转义。宿主去除两端空白并以单美元符号包裹 TeX，必要时与邻接行内内容隔开。缺失、空白、跨行或不安全定界符回到下一规则或内置转换。",
+        "autoRules": "inlineMath 只接受 true，且须为独占模板的非 URL 文本槽。取命中元素内非块级 MathML 的 application/x-tex 注解，不做正文转义。宿主去除两端空白并以单美元符号包裹 TeX，必要时与邻接行内内容隔开。缺失、空白、跨行或不安全定界符回到下一规则或内置转换。blockMath: true 同样须是独占模板的非 URL 文本槽，不能与 inlineMath 共用。只读块级 MathML 的 application/x-tex 注解，保留 TeX 内部换行，用独立双美元定界行写入。注解缺失、空白、含双美元或在来源 HTML 表格、链接内让位；粘贴落点不能保留块结构时用原始纯文本。旧宿主拒绝尚不支持的整批声明，建议同现有规则分批登记。",
         "errors": "四种可辨认拒绝：invalid-declaration（形状/未知操作/未知字段/非法正则——编译失败、flags 越集、组引用越界或命名组缺失——/空条件组合/条件或嵌套超深超节点数）/ duplicate-id / too-many / released（已终结代次的迟到注册）——普通 API 拒绝不算组件故障；整批拒绝不部分安装。"
       },
       "signatures": [
@@ -1509,7 +1509,7 @@
       "AddonPasteRuleDeclaration": "/** 作者提交的规则声明（来源组件与代次由平台注入，声明不带身份字段） */\nexport interface AddonPasteRuleDeclaration {\n  /** 组件内稳定规则 ID（禁点号——不伪造跨组件身份） */\n  readonly id: string\n  /** 可选整数优先级（缺省 0；排序见 orderAddonPasteRules） */\n  readonly priority?: number\n  readonly match: AddonPasteRuleMatch\n  readonly output: AddonPasteRuleOutput\n}",
       "AddonPasteRuleMatch": "/** 匹配：标签名相等 + 属性条件全与 + 可选条件树（三处同时满足才匹配） */\nexport interface AddonPasteRuleMatch {\n  /** 标签名（大写形态与 DOM tagName 对齐；校验时规整） */\n  readonly tag: string\n  /** 属性条件列表（全部满足才匹配；至多 8 条） */\n  readonly attributes?: readonly AddonPasteRuleAttributeCondition[]\n  /** 条件树（#542 T02；根可为组合节点或叶子谓词，与 attributes 全与组合） */\n  readonly condition?: AddonPasteConditionNode\n}",
       "AddonPasteRuleOutput": "/** 产出：Markdown 结构模板或显式丢弃（空产出只有显式丢弃才算成功） */\nexport type AddonPasteRuleOutput =\n  | {\n    readonly kind: 'template'\n    /** 模板中的 {{name}} 引用槽；字面部分是作者声明的静态 Markdown 结构 */\n    readonly template: string\n    readonly slots: Readonly<Record<string, AddonPasteSlot>>\n  }\n  | { readonly kind: 'discard' }",
-      "AddonPasteSlot": "/** 模板槽：url=true 经现有 safeUrl 策略（children 来源无 URL 语义，拒绝） */\nexport interface AddonPasteSlot {\n  readonly source: AddonPasteSlotSource\n  readonly url?: boolean\n  /** 只可用于独占模板的文本槽（非 URL）：从非块级 MathML 取 TeX 并写入行内围栏。 */\n  readonly inlineMath?: true\n}",
+      "AddonPasteSlot": "/** 模板槽：url=true 经现有 safeUrl 策略（children 来源无 URL 语义，拒绝） */\nexport interface AddonPasteSlot {\n  readonly source: AddonPasteSlotSource\n  readonly url?: boolean\n  /** 只可用于独占模板的文本槽（非 URL）：从非块级 MathML 取 TeX 并写入行内围栏。 */\n  readonly inlineMath?: true\n  /** 同样须独占模板；从块级 MathML 取 TeX 并写入独立的公式块。 */\n  readonly blockMath?: true\n}",
       "AddonPasteSlotSource": "/** 槽取值来源：元素文本 / 指定属性 / 子内容转换结果 / 正则捕获组 */\nexport type AddonPasteSlotSource =\n  | { readonly kind: 'text' }\n  | { readonly kind: 'attribute'; readonly name: string }\n  | {\n    /** 子内容转换结果；rules 声明嵌套子规则集（先子规则后内置，仅沿子节点下降） */\n    readonly kind: 'children'\n    readonly rules?: readonly AddonPasteNestedRule[]\n  }\n  | { readonly kind: 'text-regex'; readonly regex: AddonPasteRegex; readonly group: number | string }\n  | { readonly kind: 'attribute-regex'; readonly name: string; readonly regex: AddonPasteRegex; readonly group: number | string }",
       "AddonPasteRegex": "/** 正则声明：数据形态 pattern 与受限 flags（注册时编译校验，不执行字符串代码） */\nexport interface AddonPasteRegex {\n  readonly pattern: string\n  readonly flags?: string\n}",
       "AddonPastePredicate": "/** 条件叶子谓词：属性存在/相等（基础谓词）或正则谓词（属性值/元素文本） */\nexport type AddonPastePredicate =\n  | { readonly kind: 'attribute'; readonly name: string; readonly value?: string }\n  | { readonly kind: 'attribute-regex'; readonly name: string; readonly regex: AddonPasteRegex }\n  | { readonly kind: 'text-regex'; readonly regex: AddonPasteRegex }",

@@ -3,7 +3,7 @@
 // KaTeX widget 渲染与原文降级、渲染/装饰实例缓存；宿主链路 undo 用例
 // 仿 liveTable.test.ts 的 setupLinked 模式（mock 宿主端口，#57 评审 A8）。
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { EditorSelection, EditorState } from '@codemirror/state'
 import { Decoration, EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
@@ -22,6 +22,7 @@ import {
 } from '../../src/webview/liveMath'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { MATH_CLASS_NAMES } from '../../src/shared/math'
+import * as mathScan from '../../src/shared/math'
 import type { MathOccurrence } from '../../src/shared/math'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { DocumentSession, type HostDocumentPort } from '../../src/host/documentSession'
@@ -288,6 +289,48 @@ describe('跨行块表：StateField 增量维护', () => {
     const blocks = stateBlocks('前文\n$$\na\n$$\n$$b$$\n后文\n$x$')
     expect(blocks).toHaveLength(1)
     expect(blocks[0]!.tex).toBe('\na\n')
+  })
+
+  it('远处的列表标记改变引用归属时，增量公式表与冷启动一致', () => {
+    const source = 'Lead\n\n' + '    Continued\n\n'.repeat(300) + '    > $$\n    > x+1\n    > $$'
+    const create = (doc: string) => EditorState.create({ doc, extensions: [liveDecorationsField, mathBlocksField] })
+    const before = create(source)
+    expect(before.field(mathBlocksField)).toEqual([])
+
+    const after = before.update({ changes: { from: 0, insert: '12. ' } }).state
+    const rebuilt = create('12. ' + source).field(mathBlocksField)
+    expect(rebuilt.map(block => block.tex.trim())).toEqual(['x+1'])
+    expect(after.field(mathBlocksField)).toEqual(rebuilt)
+
+    const removed = after.update({ changes: { from: 0, to: 4 } }).state
+    expect(removed.field(mathBlocksField)).toEqual(before.field(mathBlocksField))
+  })
+
+  it('长列表的普通行尾键入只重扫编辑行，不扩大到远处的引用公式', () => {
+    const source = '12. Lead\n\n' + '    Continued\n\n'.repeat(300) + '    > $$\n    > x+1\n    > $$'
+    const extensions = [liveDecorationsField, mathBlocksField]
+    const before = EditorState.create({ doc: source, extensions })
+    expect(before.field(mathBlocksField)).toHaveLength(1)
+    const at = source.indexOf('\n')
+    const scan = vi.spyOn(mathScan, 'scanMathRanges')
+    try {
+      const after = before.update({ changes: { from: at, insert: '!' } }).state
+      expect(after.field(mathBlocksField)).toHaveLength(1)
+      expect(scan.mock.calls.map(([lines]) => lines.length)).toEqual([1])
+    } finally {
+      scan.mockRestore()
+    }
+  })
+
+  it('只加宽有序列表标记也能刷新范围不变的条目内公式', () => {
+    const rest = 'Lead\n\n        Continued\n\n       > $$\n       > x+1\n       > $$'
+    const extensions = [liveDecorationsField, mathBlocksField]
+    const before = EditorState.create({ doc: '9. ' + rest, extensions })
+    expect(before.field(mathBlocksField)).toEqual([])
+    const after = before.update({ changes: { from: 0, to: 1, insert: '10' } }).state
+    const fresh = EditorState.create({ doc: '10. ' + rest, extensions }).field(mathBlocksField)
+    expect(fresh.map(block => block.tex.trim())).toEqual(['x+1'])
+    expect(after.field(mathBlocksField)).toEqual(fresh)
   })
 
   it('块后击入普通文本：块区间不动（映射保留）', () => {

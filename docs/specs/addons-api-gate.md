@@ -108,6 +108,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **1.5.0 发行重锚（2026-11-22）**：Vsidian 1.8.0 发行行内公式槽，宿主的 `ADDON_API_VERSION` 从 1.4.0 升到 1.5.0，发行台账只追加新记录。常量声明受字节冻结校验，从含新声明的发布提交 `36e318c54ba8f57086a9617b36b74a103dedb396` 重锚；保留旧签名、历史台账与既有检查规则。
 
+**粘贴块公式候选重锚（2026-11-23）**：`641e5d814f59281df497ab238eb87012fdb83b53` 为 `AddonPasteSlot` 追加可选的 `blockMath: true`，不改变 `inlineMath`、普通槽或既有规则。旧基线可信复验通过；候选比较只报 `AddonPasteSlot` 签名与 `paste-rules-register.autoRules` 语义文本两项。按变更提交重锚，不改检查器、发行台账或版本常量。能力记入 API 日志的 Unreleased 段，待下次正式发行时按新增能力升 API 次版本。
+
 ## CI 接线（代码侧，已交付）
 
 `.github/workflows/ci.yml` 新增独立 job **`addon-api-contract`**（job 名即 required status check 的 context 名），与 `style-contract` 同序同型——**先证检查器可信，再信检查结果**：
