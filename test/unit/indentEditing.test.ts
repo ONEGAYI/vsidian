@@ -194,6 +194,40 @@ describe('Tab 选区多行缩进', () => {
     expect(out.text).toBe('  - item\n  plain')
   })
 
+  it('选中有序项下方的多个无序项：一次 Tab 整组嵌套，Shift+Tab 整组退出', () => {
+    const doc = '1. parent\n- first\n- second\n- third\n- untouched'
+    const nested = '1. parent\n   - first\n   - second\n   - third\n- untouched'
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.indexOf('- untouched') })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+      expect(view.state.selection.main.from).toBe(nested.indexOf('- first'))
+      expect(view.state.selection.main.to).toBe(nested.indexOf('- untouched'))
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+      expect(view.state.selection.main.from).toBe(doc.indexOf('- first'))
+      expect(view.state.selection.main.to).toBe(doc.indexOf('- untouched'))
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it('引用内不同标记的同级项一起嵌套，Shift+Tab 保留原有外层列表', () => {
+    const doc = '> - outer\n>   1. parent\n>   - first\n>   * second'
+    const nested = '> - outer\n>   1. parent\n>      - first\n>      * second'
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
   it('多光标：各 range 覆盖行取并集', () => {
     const doc = 'a\nb\nc\nd'
     const view = makeEditView(doc, 0, [EditorState.allowMultipleSelections.of(true)])

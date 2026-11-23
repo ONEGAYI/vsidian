@@ -4,10 +4,10 @@
 // 行为（缩进单位的单一事实源在 shared/listPrefix.ts）：
 // - Tab：每受影响行在缩进落点插入一级宽度；Shift+Tab 从落点删除至多
 //   一级宽度的连续空白（不足全删）。列表行一级宽度对齐上方最近项的
-//   内容列（树上前驱兄弟/父项，跨列表块按位置回退；未达补齐、已达
-//   加深其标记宽——跨族不取自身标记宽，防越界脱离列表结构成续行或
-//   代码块，#121 验收修正）；Shift+Tab 删至树父项标记列（顶级删全部
-//   缩进）。普通行（含纯引用行、代码围栏、缩进代码块与块级公式内）
+//   内容列（未达补齐、已达加深其标记宽，#121）；同一批连续的同级项
+//   沿用首项的目标列，不把一同移动的兄弟项当成父项。
+//   Shift+Tab 删至树父项标记列（顶级删全部缩进）。
+//   普通行（含纯引用行、代码围栏、缩进代码块与块级公式内）
 //   固定 2 空格
 // - 光标/选区随缩进平移（锚点与头均向右关联映射，对齐 CM6 命令）
 // - 不自动携带子孙项；整体移动由用户用选区覆盖表达
@@ -46,30 +46,12 @@ const TABLE_NODES = new Set([
 /** 代码块节点：围栏/缩进代码块内同普通行语义（不做列表智能对齐） */
 const CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock'])
 
-/**
- * 上方最近列表项的内容列与标记总宽（均相对引用前缀右端）。取树上前驱
- * 兄弟项；无前驱（首子项）取父项（祖先链上最近的 ListItem）；两级皆无
- * 时按位置回退——项前文档位置上最近的 ListItem（跨列表块的视觉上方
- * 最近项，如同为无序的松散列表本就有前驱，走到这里的是异族邻块）。
- * 仍无（文档首项）返回 null
- */
-function prevItemColsOf(
+/** 列表项的内容列与标记总宽（均相对引用前缀右端）。 */
+function itemColsOf(
   state: EditorState,
-  chain: readonly SyntaxNode[],
+  target: SyntaxNode | null,
 ): { contentCol: number; markWidth: number } | null {
-  const items = chain.filter((node) => node.name === 'ListItem')
-  const self = items[items.length - 1]
-  if (!self) return null
-  let prev = self.prevSibling
-  while (prev && prev.name !== 'ListItem') prev = prev.prevSibling
-  let target: SyntaxNode | null = prev ?? items[items.length - 2] ?? null
-  if (!target) {
-    let node: SyntaxNode | null = chain[0]!.resolveInner(Math.max(0, self.from - 1), -1)
-    while (node && node.name !== 'ListItem') node = node.parent
-    target = node && node !== self ? node : null
-  }
-  if (!target) return null
-  const mark = target.getChild('ListMark')
+  const mark = target?.getChild('ListMark')
   if (!mark) return null
   const targetPrefix = parseLinePrefix(state.doc.lineAt(mark.from).text)
   const shape = targetPrefix?.list
@@ -93,17 +75,43 @@ function prevItemColsOf(
  */
 function listUnitOf(
   state: EditorState,
-  chain: readonly SyntaxNode[],
+  chain: SyntaxNode[],
   prefix: LinePrefix,
   dir: 1 | -1,
+  tabTargets: Map<number, number>,
 ): { offset: number; width: number } {
   const cur = prefix.indent.length
   if (dir > 0) {
-    const prev = prevItemColsOf(state, chain)
-    const target = tabIndentWidthOf(cur, prev?.contentCol ?? null, prev?.markWidth ?? 0)
-    return { offset: prefix.quote.length, width: Math.max(0, target - cur) }
+    const items = chain.filter((node) => node.name === 'ListItem')
+    const self = items[items.length - 1]
+    let prev = self?.prevSibling ?? null
+    while (prev && prev.name !== 'ListItem') prev = prev.prevSibling
+    if (!prev && self) {
+      // 有序/无序或点号不同会切成两棵列表，紧邻的前一棵仍处于同层。
+      let block = self.parent?.prevSibling
+      while (block?.name === 'QuoteMark') block = block.prevSibling
+      if (block?.name === 'BulletList' || block?.name === 'OrderedList') {
+        prev = block.lastChild
+        while (prev && prev.name !== 'ListItem') prev = prev.prevSibling
+      }
+    }
+    const onItemMark = chain[chain.length - 1]?.name === 'ListMark'
+    // 只从直接前驱兄弟继承同一批的目标。父子项与未选中的间隔不合组。
+    let column = onItemMark && prev ? tabTargets.get(prev.from) : undefined
+    if (column === undefined) {
+      let target: SyntaxNode | null = prev ?? items[items.length - 2] ?? null
+      if (!target && self) {
+        let node: SyntaxNode | null = chain[0]!.resolveInner(Math.max(0, self.from - 1), -1)
+        while (node && node.name !== 'ListItem') node = node.parent
+        target = node && node.from !== self.from ? node : null
+      }
+      const cols = itemColsOf(state, target)
+      column = tabIndentWidthOf(cur, cols?.contentCol ?? null, cols?.markWidth ?? 0)
+    }
+    if (self && onItemMark) tabTargets.set(self.from, column)
+    return { offset: prefix.quote.length, width: Math.max(0, column - cur) }
   }
-  const parentCol = parentIndentWidth(state, chain as SyntaxNode[], prefix)
+  const parentCol = parentIndentWidth(state, chain, prefix)
   return { offset: prefix.quote.length, width: Math.max(0, cur - (parentCol ?? 0)) }
 }
 
@@ -124,6 +132,7 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     }
   }
   const changes: { from: number; to?: number; insert?: string }[] = []
+  const tabTargets = new Map<number, number>()
   const mathBlocks = state.field(mathBlocksField, false)
   for (const num of [...lineNumbers].sort((a, b) => a - b)) {
     const line = state.doc.line(num)
@@ -142,8 +151,13 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     const plain = (mathBlocks?.some((b) => line.from < b.to && line.to > b.from) ?? false)
       || chain.some((node) => CODE_NODES.has(node.name))
     const prefix = plain ? null : parseLinePrefix(line.text)
+    // 引用行的首个非空白字符是 >，列表的祖先链须在实际标记处查询。
+    const quotedListChain = prefix?.mark && prefix.quote
+      ? chainAt(field.tree, line.from + prefix.quote.length + prefix.indent.length)
+      : null
     const unit = prefix?.mark
-      ? listUnitOf(state, chain, prefix, dir)
+      ? listUnitOf(state, quotedListChain?.at(-1)?.name === 'ListMark' ? quotedListChain : chain,
+        prefix, dir, tabTargets)
       : indentUnitOf(prefix)
     if (dir > 0) {
       changes.push({ from: line.from + unit.offset, insert: ' '.repeat(unit.width) })
