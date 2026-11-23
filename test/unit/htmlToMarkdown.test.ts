@@ -35,6 +35,10 @@ describe('剪贴板HTML可表达格式', () => {
     expect(markdown).toBe(expected)
     expect(new MarkdownIt().render(markdown)).toContain(block)
   })
+  it('没有替代文字的本地图片不会让排版缩进重新变成空行', () => {
+    const html = '<p>A</p>\n  <img src="file:///a.png" alt="">\n  <ul><li>B</li></ul>'
+    expect(htmlToMarkdown(html).markdown).toBe('A\n\n- B')
+  })
   it.each([
     ['<li>甲</li>\n  <li>乙<ul><li>子项</li></ul></li>', '- 甲\n- 乙\n  - 子项'],
     ['<p>前文</p><li><input type="checkbox" checked>完成</li><p>后文</p>', '前文\n\n- [x] 完成\n\n后文'],

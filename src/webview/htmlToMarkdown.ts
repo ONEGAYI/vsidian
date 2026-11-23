@@ -409,7 +409,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const marks=el instanceof Element ? effectiveMarks(el,inherited) : inherited
     let result='',runs:InlineRun[]=[]
     let previousOrphanItem = false
-    const onlyIndent = () => runs.every(run => run.text === ' ')
+    const onlyIndent = () => runs.every(run => run.text === '' || run.text === ' ')
     for (const node of Array.from(el.childNodes)) {
       if (node instanceof Element && isBlockContainer(node)) {
         const block = render(node, table, marks)
