@@ -24,9 +24,11 @@ describe('公式渲染 CSS 契约（#59）', () => {
     expect(block).toMatch(/overflow-x:\s*auto/)
   })
 
-  it('live 行内公式继承编辑器前景色（明暗主题跟随）', () => {
+  it('live 公式默认沿用编辑器前景，强调内的行内公式可继承外层颜色', () => {
     expect(rule('#app .cm-editor .cm-content .vsidian-math'))
       .toMatch(/color:\s*var\(--vscode-editor-foreground/)
+    expect(rule(':where(.vsidian-strong, .vsidian-emphasis, .vsidian-highlight) .vsidian-math:not(:where(.vsidian-math-block))'))
+      .toMatch(/color:\s*inherit/)
   })
 
   it('阅读块级公式容器带垂直 margin 与居中', () => {

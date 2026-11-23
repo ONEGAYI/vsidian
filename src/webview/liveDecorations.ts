@@ -1497,10 +1497,10 @@ function emitForRange(
         return
       }
       case 'Emphasis':
-        pushInnerSpan(out, node, 'EmphasisMark', emphasisDeco)
+        pushInnerSpan(out, node, 'EmphasisMark', emphasisDeco, doc)
         return
       case 'StrongEmphasis':
-        pushInnerSpan(out, node, 'EmphasisMark', strongDeco)
+        pushInnerSpan(out, node, 'EmphasisMark', strongDeco, doc)
         return
       case 'InlineCode':
         pushInnerSpan(out, node, 'CodeMark', inlineCodeDeco)
@@ -1508,7 +1508,7 @@ function emitForRange(
       case 'Highlight':
         // #105 高亮：内容 span 常显（底色在 CSS；pushInnerSpan 的
         // last.from > first.to 检查天然跳过空内容形态 ====）
-        pushInnerSpan(out, node, 'HighlightMark', highlightDeco)
+        pushInnerSpan(out, node, 'HighlightMark', highlightDeco, doc)
         return
       case 'Strikethrough':
         // #483 删除线：语义对齐其余四种行内围栏（内容 span + 定界符触界显形）
@@ -1665,6 +1665,7 @@ function pushInnerSpan(
   node: SyntaxNode,
   markName: string,
   deco: Decoration,
+  inlineMathDoc?: Text,
 ): void {
   let first: SyntaxNode | null = null
   let last: SyntaxNode | null = null
@@ -1677,7 +1678,20 @@ function pushInnerSpan(
     }
   }
   if (first && last && last.from > first.to) {
-    out.push(deco.range(first.to, last.from))
+    const from = first.to
+    const to = last.from
+    if (inlineMathDoc) {
+      // CM6 的 replace widget 与 mark 共边界时，需要 inclusive 才能被包进来。
+      // 只调整单美元侧的排序；公式是否成立仍由 liveMath 判定，$$ 与其他 widget 保持原边界。
+      const start = inlineMathDoc.sliceString(from, from + 2)
+      const end = inlineMathDoc.sliceString(to - 2, to)
+      const inclusiveStart = start[0] === '$' && start[1] !== '$'
+      const inclusiveEnd = end[1] === '$' && end[0] !== '$'
+      if (inclusiveStart || inclusiveEnd) {
+        deco = Decoration.mark({ ...deco.spec, inclusiveStart, inclusiveEnd })
+      }
+    }
+    out.push(deco.range(from, to))
   }
 }
 

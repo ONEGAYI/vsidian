@@ -116,11 +116,12 @@ try {
   await page.waitForTimeout(150)
   await checkView('reading', '重挂载后')
 
-  // Obsidian 1.15.1：阅读侧公式随外层强调走主题色；Live 排版独立于强调。
+  // 两种视图的行内公式继承 Markdown 强调色，TeX 字形与显式颜色保持原样。
   const mathPage = await browser.newPage({ viewport: { width: 720, height: 560 } })
   const formulaDoc = [
     '普通 $2$', '**$2$**', '_$2$_', '==$2$==', '<span style="color: purple">$2$</span>',
     '***$2$***', '___$2$___', '***<span>$2$</span>***', '_**$2$**_', String.raw`**$\color{red}{2}$**`,
+    '1. **用 $2$ 与 $3$ 划分边界**：普通正文 $4$。', '**$$W$$**',
   ].join('\n\n')
   const mathHtml = path.join(path.dirname(output), 'math.html')
   writeFileSync(mathHtml, '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="main.css"><div id="app"></div><script src="main.js"></script>')
@@ -128,11 +129,14 @@ try {
   await mathPage.addStyleTag({ content: `
     :root { --vscode-editor-foreground: rgb(17, 18, 19); }
     #app { --vsidian-highlight-background: rgb(255, 228, 128); }
+    .cm-line { color: rgb(30, 130, 70); }
+    .cm-strong { opacity: 0.6; }
+    .cm-highlight { color: rgb(95, 71, 36); }
     .markdown-preview-view strong, .cm-strong { color: rgb(42, 83, 124); }
     .markdown-preview-view em, .cm-emphasis { color: rgb(131, 64, 86); }
   ` })
   await mathPage.evaluate((doc) => window.initAlias(doc), formulaDoc)
-  const paint = (mode) => mathPage.locator(`.vsidian-view-${mode} .vsidian-math .katex-html .mord:not(:has(.mord))`)
+  const paint = (mode) => mathPage.locator(`.vsidian-view-${mode} .vsidian-math:not(.vsidian-math-block) .katex-html .mord:not(:has(.mord))`)
     .evaluateAll((items) => items.map((el) => {
       const style = getComputedStyle(el)
       return [style.color, style.fontWeight, style.fontStyle]
@@ -142,8 +146,17 @@ try {
   const emphasis = 'rgb(131, 64, 86)'
   const texRed = 'rgb(255, 0, 0)'
   const normalGlyph = (color) => [color, '400', 'normal']
-  const livePaint = [plain, plain, plain, plain, plain, plain, plain, texRed].map(normalGlyph)
-  assert.deepEqual(await paint('live'), livePaint, 'Live 公式渲染但不接管外层强调；行内 HTML 保持原有呈现')
+  // Live 的三连与相邻文字一样沿用 Lezer 的内层粗体，阅读三连另有 Obsidian 顺序。
+  const livePaint = [plain, strong, emphasis, 'rgb(95, 71, 36)', strong, strong, strong, texRed, strong, strong, plain].map(normalGlyph)
+  const liveBlockOpacity = await mathPage.locator('.vsidian-view-live .vsidian-math-block .katex-html').evaluate((el) => {
+    let opacity = 1
+    for (let layer = el; layer; layer = layer.parentElement) opacity *= Number(getComputedStyle(layer).opacity)
+    return opacity
+  })
+  assert.deepEqual({ glyphs: await paint('live'), blockOpacity: liveBlockOpacity }, { glyphs: livePaint, blockOpacity: 1 },
+    '只有强调内的行内公式跟随强调色；自定义行色、粗体透明度不改变普通行内及共边界块公式的绘制')
+  assert.equal(await mathPage.locator('.cm-highlight:has(.katex-html)')
+    .evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(255, 228, 128)', 'Live 只在高亮内写公式时底色也覆盖公式')
   const openItalic = formulaDoc.indexOf('_$2$_') + 2
   await mathPage.evaluate((anchor) => window.controller.getView().dispatch({ selection: { anchor } }), openItalic)
   assert.equal(await mathPage.locator('.vsidian-math-source').textContent(), '$2$', '进入斜体中的公式能编辑原始 TeX')
@@ -152,13 +165,13 @@ try {
   await mathPage.evaluate(() => window.setAliasMode('reading'))
   await mathPage.locator('.markdown-preview-view span[style="color: purple"] .katex-html').waitFor()
   assert.deepEqual(await paint('reading'),
-    [plain, strong, emphasis, plain, 'rgb(128, 0, 128)', emphasis, emphasis, emphasis, strong, texRed].map(normalGlyph),
+    [plain, strong, emphasis, plain, 'rgb(128, 0, 128)', emphasis, emphasis, emphasis, strong, texRed, strong, strong, plain].map(normalGlyph),
     '阅读侧继承强调和 HTML 包裹颜色；三连优先斜体色、显式嵌套按内层、TeX 显式颜色优先')
   assert.equal(await mathPage.locator('.markdown-preview-view mark:has(.katex-html)')
     .evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(255, 228, 128)', '阅读侧高亮覆盖公式')
   await mathPage.evaluate(() => window.setAliasMode('live'))
   await mathPage.locator('.vsidian-view-live .katex-html').first().waitFor()
-  assert.deepEqual(await paint('live'), livePaint, '切回 Live 后恢复样式隔离')
+  assert.deepEqual(await paint('live'), livePaint, '切回 Live 后保留公式的强调色')
   await mathPage.close()
 
   console.log('obsidianAlias: 全部断言通过（双视图 × 明暗主题 × 重挂载 + 变量桥）')

@@ -1438,7 +1438,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
       <h3><code>.vsidian-math</code><span class="eid">live-math</span></h3>
-      <p class="purpose">公式渲染态稳定容器：live 为行内 widget 外层、阅读为 KaTeX 外层 span/p（内含 KaTeX .katex 结构）；颜色继承编辑器前景。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。</p>
+      <p class="purpose">公式渲染态稳定容器：live 为 widget 外层，阅读为 KaTeX 外层 span/p（内含 KaTeX .katex 结构）。实时预览默认使用编辑器前景色；粗体、斜体或高亮内的行内公式继承外层颜色。阅读公式继承外层颜色。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
 <p class="states">状态：live 侧光标进入公式范围显源码（见 live-math-source）。</p>
       <p class="obsidian">Obsidian 对应：.cm-math（Obsidian live 数学 token）</p>
