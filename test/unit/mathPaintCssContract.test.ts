@@ -17,16 +17,12 @@ function rule(selector: string, declaration?: RegExp): string {
 }
 
 describe('公式渲染 CSS 契约（#59）', () => {
-  it('live 块级公式独立成块并居中，横向溢出走滚动不折行', () => {
+  it('live 块级公式独立成块并居中，横向溢出走滚动，颜色跟随编辑器前景', () => {
     const block = rule('#app .cm-editor .cm-content .vsidian-math-block')
     expect(block).toMatch(/display:\s*block/)
     expect(block).toMatch(/text-align:\s*center/)
     expect(block).toMatch(/overflow-x:\s*auto/)
-  })
-
-  it('live 行内公式继承编辑器前景色（明暗主题跟随）', () => {
-    expect(rule('#app .cm-editor .cm-content .vsidian-math'))
-      .toMatch(/color:\s*var\(--vscode-editor-foreground/)
+    expect(block).toMatch(/color:\s*var\(--vscode-editor-foreground/)
   })
 
   it('阅读块级公式容器带垂直 margin 与居中', () => {

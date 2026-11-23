@@ -247,12 +247,13 @@ function lineDeco(cls: string): ReturnType<typeof Decoration.line> {
 const headerSpanDecos = [1, 2, 3, 4, 5, 6].map((lv) =>
   Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.headerSpan(lv)) }),
 )
-const strongDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.strong) })
+// CM6 的 replace widget 与内容共边界时，需要 inclusive mark 才能包住它。
+const strongDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.strong), inclusive: true })
 /** #139 注释淡化：整节点区间（含定界符）常显，无显形切换（内容可见） */
 const htmlCommentDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.htmlComment })
-const emphasisDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.emphasis) })
+const emphasisDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.emphasis), inclusive: true })
 const inlineCodeDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.inlineCode) })
-const highlightDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.highlight) })
+const highlightDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.highlight), inclusive: true })
 const strikeDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.strikethrough) })
 
 /**
