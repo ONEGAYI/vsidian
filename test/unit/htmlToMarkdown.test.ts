@@ -21,6 +21,38 @@ describe('剪贴板HTML可表达格式', () => {
   ])('%s -> Markdown', (html, markdown) => {
     expect(htmlToMarkdown(html)).toEqual({ markdown, hasFormatting: true })
   })
+  it('块间 HTML 缩进只留下一个空行，段内手动换行仍保留', () => {
+    const html = '<p><strong>标题</strong><br>续行</p>\n  <ul><li>条目</li></ul>'
+    expect(htmlToMarkdown(html).markdown).toBe('**标题**  \n续行\n\n- 条目')
+  })
+  it.each([
+    ['<p>A</p>\n  <section>\n  <ul><li>B</li></ul>\n  </section>', 'A\n\n- B', '<ul>'],
+    ['<section><p>A</p>\n  </section>\n  <ul><li>B</li></ul>', 'A\n\n- B', '<ul>'],
+    ['<p>A</p>\n<!--a-->\n<!--b-->\n<!--c-->\n<div><ul><li>B</li></ul></div>', 'A\n\n- B', '<ul>'],
+    ['<p>A</p><section>\n<!--a-->\n<!--b-->\n<!--c-->\n<p>B</p></section>', 'A\n\nB', '<p>B</p>'],
+  ])('块包装和 HTML 注释不会增加空行或把内容变成代码：%s', (html, expected, block) => {
+    const { markdown } = htmlToMarkdown(html)
+    expect(markdown).toBe(expected)
+    expect(new MarkdownIt().render(markdown)).toContain(block)
+  })
+  it('没有替代文字的本地图片不会让排版缩进重新变成空行', () => {
+    const html = '<p>A</p>\n  <img src="file:///a.png" alt="">\n  <ul><li>B</li></ul>'
+    expect(htmlToMarkdown(html).markdown).toBe('A\n\n- B')
+  })
+  it.each([false, true])('段首 HTML 缩进和行内正文同批时仍保留段落（包装：%s）', (wrapped) => {
+    const tail = '\n<!--a-->\n<!--b-->\n<!--c-->\n<span>B</span> <em>正文</em><br>续行\n<ul><li>C</li></ul>'
+    const html = '<p>A</p>' + (wrapped ? '<section>' + tail + '</section>' : tail)
+    const { markdown } = htmlToMarkdown(html)
+    const rendered = document.createElement('template')
+    rendered.innerHTML = new MarkdownIt().render(markdown)
+    expect(rendered.content.querySelector('pre')).toBeNull()
+    expect(rendered.content.querySelectorAll('p')[1]?.innerHTML).toBe('B <em>正文</em><br>\n续行')
+    expect(rendered.content.querySelector('ul li')?.textContent).toBe('C')
+  })
+  it('透明包装未另起段时保留前后行内内容之间的空格', () => {
+    const html = '<p>A</p><span>one</span><section>\n  <span>two</span><ul><li>C</li></ul></section>'
+    expect(htmlToMarkdown(html).markdown).toBe('A\n\none two\n\n- C')
+  })
   it.each([
     ['<li>甲</li>\n  <li>乙<ul><li>子项</li></ul></li>', '- 甲\n- 乙\n  - 子项'],
     ['<p>前文</p><li><input type="checkbox" checked>完成</li><p>后文</p>', '前文\n\n- [x] 完成\n\n后文'],
