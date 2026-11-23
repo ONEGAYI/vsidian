@@ -235,6 +235,54 @@ try {
     assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.vsidian-view-reading').scrollTop)) - readingTop) <= 2,
       'reading 重建后视口应稳定在离开时位置')
 
+    // 滚轮抵达 Live 正文的滚动末端时，末行仍可读，下方留白不算正文。
+    const liveScroller = page.locator('.vsidian-view-live .cm-scroller')
+    for (const [height, tail] of [
+      [640, '这是文档的最后一行。'],
+      [480, '# 这是文档的最后一行。'],
+      [560, '这是文档的最后一行。'.repeat(18)],
+    ]) {
+      await page.evaluate((text) => window.resetViewportDoc(text), longDoc + tail)
+      await liveScroller.locator('.cm-line').first().waitFor()
+      const lastLine = liveScroller.locator('.cm-line').filter({ hasText: '这是文档的最后一行。' })
+      await page.setViewportSize({ width: 900, height })
+      const box = await liveScroller.boundingBox()
+      await page.mouse.move(box.x + 60, box.y + 100)
+      await page.mouse.wheel(0, 100_000)
+      await lastLine.waitFor()
+      await page.waitForFunction(() => {
+        const scroller = document.querySelector('.vsidian-view-live .cm-scroller')
+        return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 1
+      })
+      const paintAtEnd = await lastLine.evaluate((line) => {
+        const scroller = line.closest('.cm-scroller')
+        const viewport = scroller.getBoundingClientRect()
+        const rect = line.getBoundingClientRect()
+        const text = document.createRange()
+        text.selectNodeContents(line)
+        const glyphs = text.getClientRects()[0]
+        const painted = document.elementFromPoint(glyphs.left + 2, (glyphs.top + glyphs.bottom) / 2)
+        const blank = document.elementFromPoint(glyphs.left + 2, viewport.bottom - 10)
+        return {
+          top: rect.top - viewport.top,
+          textVisible: glyphs.top >= viewport.top && glyphs.bottom < viewport.bottom && line.contains(painted),
+          blankBelow: scroller.contains(blank) && !blank.closest('.cm-line'),
+        }
+      })
+      assert.ok(Math.abs(paintAtEnd.top) <= 5 && paintAtEnd.textVisible && paintAtEnd.blankBelow,
+        `Live 滚动到底时末行应显示在视口首行，下方是空白（高度 ${height}）：${JSON.stringify(paintAtEnd)}`)
+      await page.evaluate((text) => window.reloadViewportDoc(text), longDoc + tail)
+      await lastLine.waitFor()
+      const restoredTop = await lastLine.evaluate(async (line) => {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        return line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top
+      })
+      assert.ok(Math.abs(restoredTop - paintAtEnd.top) <= 2,
+        `隐藏并重建 Live 后仍应停在末行（${paintAtEnd.top} → ${restoredTop}）`)
+    }
+    assert.ok(!(await page.evaluate(() => window.readHostMessages())).some(({ kind }) => kind === 'edit.request'),
+      '滚过末行和调整窗口大小不应写回源文')
+
     assert.deepEqual(errors, [], `页面不应有脚本错误: ${errors.join('; ')}`)
     await page.close()
   }

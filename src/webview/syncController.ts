@@ -33,7 +33,7 @@
 // - seq 持久化：经 bridge.setState 保存，webview 重载（retainContextWhenHidden
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
 import { Annotation, EditorSelection, EditorState, type Extension, type Text } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
+import { BlockType, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view'
 import { inlineInsertSelectionWarning, isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
@@ -502,15 +502,55 @@ export interface VsCodeBridge {
 /** 视图模式（#6）：live=实时预览（CM6 编辑），reading=阅读（只读渲染） */
 export type ViewMode = 'live' | 'reading'
 
+// 定高的主 Live 正文才需要尾部留白。按实际末行高度计算，不能用默认
+// 行高，否则末尾的标题或折行文本滚到顶时会被裁切。
+const LIVE_END_SPACE = '--_vsidian-live-end-space'
+const liveEndSpace = ViewPlugin.fromClass(class {
+  private measuring = false
+
+  constructor(view: EditorView) { this.measure(view) }
+
+  update(update: ViewUpdate): void {
+    if (update.geometryChanged || update.viewportChanged) this.measure(update.view)
+  }
+
+  private measure(view: EditorView): void {
+    // CM6 在同一轮 read/write 之间也会发 geometryChanged，不重复排队。
+    if (this.measuring) return
+    this.measuring = true
+    view.requestMeasure({
+      read: (measured) => {
+        const end = measured.state.doc.length
+        const block = measured.lineBlockAt(end)
+        let height = block.height
+        if (measured.viewport.to === end && block.type === BlockType.Text) {
+          // 虚拟滚动刚挂载末行时，CM6 高度表可能仍是折行前的估算。
+          const { node } = measured.domAtPos(end, -1)
+          const line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line')
+          if (line) height = line.getBoundingClientRect().height
+        }
+        return Math.max(0, measured.scrollDOM.clientHeight -
+          (height + measured.documentPadding.top) / measured.scaleY)
+      },
+      write: (height) => {
+        this.measuring = false
+        const style = view.scrollDOM.style
+        const value = `${height}px`
+        if (style.getPropertyValue(LIVE_END_SPACE) !== value) style.setProperty(LIVE_END_SPACE, value)
+      },
+    })
+  }
+})
+
 /** webview 持久化状态（retainContextWhenHidden 关闭时重载恢复） */
 interface PersistedState {
   seq?: number
   viewMode?: ViewMode
   /** 最近一次模式锚点（UTF-16 offset）：live=光标主位，reading=锚点块 start */
   anchor?: number
-  /** 标签页重载时恢复可见视口：Live 同存中心源码偏移与像素兜底；
+  /** 标签页重载时恢复可见视口：Live 同存中心源码偏移或距文末的滚动距离；
    *  独立于模式切换使用的 anchor。 */
-  viewport?: { mode: ViewMode; top: number; centerOffset?: number }
+  viewport?: { mode: ViewMode; top: number; centerOffset?: number; endGap?: number }
   conflictRevision?: number
   /** #53 右侧栏展开态（缺省收起） */
   sidebarOpen?: boolean
@@ -675,7 +715,7 @@ export class WebviewSyncController {
   /** 最近模式锚点：live=光标主位；reading=锚点块 src-start（源码位置锚点） */
   private modeAnchor: number | null
   /** 当前模式的滚动像素位置；与 modeAnchor 分开，避免纯滚动移动编辑光标。 */
-  private viewport: { mode: ViewMode; top: number; centerOffset?: number } | null
+  private viewport: NonNullable<PersistedState['viewport']> | null
   private viewportSaveFrame: number | undefined
   private restoringViewport = false
   /** 仅测试注入后开放绘制中心探针，避免常规 view.state 改变 CM6 测量时机。 */
@@ -1202,6 +1242,9 @@ export class WebviewSyncController {
           ...(typeof saved.viewport.centerOffset === 'number' &&
             Number.isInteger(saved.viewport.centerOffset) && saved.viewport.centerOffset >= 0
             ? { centerOffset: saved.viewport.centerOffset } : {}),
+          ...(typeof saved.viewport.endGap === 'number' &&
+            Number.isFinite(saved.viewport.endGap) && saved.viewport.endGap >= 0
+            ? { endGap: saved.viewport.endGap } : {}),
         }
       : null
     this.sidebarOpen = saved?.sidebarOpen === true
@@ -1952,6 +1995,9 @@ export class WebviewSyncController {
    *  updateListener，等价搬运；随实例装配，不由卡片设置热重配重建） */
   private rootOwnedViewExtensions(): Extension[] {
     return [
+      // 只给主 Live 正文留末行滚动空间；嵌入编辑器的卡片高度不受影响。
+      liveEndSpace,
+      EditorView.contentAttributes.of({ style: `padding-bottom: var(${LIVE_END_SPACE})` }),
       // T04（#672）callout 容器 BlockWrapper（结构层）：根正文独有装配
       //（引用嵌入实例不接——边界登记）；内部类名，视觉迁移归 T05
       liveCalloutWrap,
@@ -5270,10 +5316,20 @@ export class WebviewSyncController {
       ? this.readingContainer : this.view?.scrollDOM
     if (!scroller) return
     const previous = this.viewport?.mode === this.viewMode ? this.viewport : null
-    const hasLayout = scroller.getBoundingClientRect().height > 0
-    const centerOffset = this.liveViewportCenterPosition() ?? previous?.centerOffset
+    const box = scroller.getBoundingClientRect()
+    const hasLayout = box.height > 0
     const top = hasLayout || !previous ? scroller.scrollTop : previous.top
-    this.viewport = { mode: this.viewMode, top: Math.max(0, top), centerOffset }
+    const view = this.viewMode === 'live' ? this.view : undefined
+    // 中心落在末行以下的留白时，不能把坐标吸附到 EOF 后又按居中恢复。
+    const inEndSpace = hasLayout && view &&
+      box.top + box.height / 2 > view.documentTop + view.lineBlockAt(view.state.doc.length).bottom
+    const centerOffset = hasLayout
+      ? (inEndSpace ? undefined : this.liveViewportCenterPosition() ?? undefined)
+      : previous?.centerOffset
+    const endGap = hasLayout
+      ? (inEndSpace ? Math.max(0, scroller.scrollHeight - scroller.clientHeight - top) : undefined)
+      : previous?.endGap
+    this.viewport = { mode: this.viewMode, top: Math.max(0, top), centerOffset, endGap }
   }
 
   private flushViewportSave(): void {
@@ -5325,10 +5381,14 @@ export class WebviewSyncController {
         this.restoringViewport = false
         return
       }
-      view.scrollDOM.scrollTop = viewport.top
+      if (viewport.endGap === undefined) view.scrollDOM.scrollTop = viewport.top
       requestAnimationFrame(() => {
         if (this.view === view && this.viewport === viewport && this.viewMode === 'live') {
-          if (viewport.centerOffset !== undefined) {
+          if (viewport.endGap !== undefined) {
+            view.dispatch({ effects: EditorView.scrollIntoView(view.state.doc.lineAt(view.state.doc.length).from,
+              { y: 'start', yMargin: viewport.endGap },
+            ) })
+          } else if (viewport.centerOffset !== undefined) {
             view.dispatch({ effects: EditorView.scrollIntoView(
               this.clampToDoc(viewport.centerOffset), { y: 'center' },
             ) })
