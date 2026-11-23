@@ -237,14 +237,19 @@ try {
 
     // 滚轮抵达 Live 正文的滚动末端时，末行仍可读，下方留白不算正文。
     const liveScroller = page.locator('.vsidian-view-live .cm-scroller')
-    for (const [height, tail] of [
-      [640, '这是文档的最后一行。'],
-      [480, '# 这是文档的最后一行。'],
-      [560, '这是文档的最后一行。'.repeat(18)],
+    for (const [scenario, height, tail, scrollBack] of [
+      ['普通行', 640, '这是文档的最后一行。', 0],
+      ['Callout', 480, '> [!note] 文末提示\n> 这是文档的最后一行。', 0],
+      ['表格', 480, '| 项目 | 值 |\n| --- | --- |\n| 这是文档的最后一行。 | 完成 |', 0],
+      ['标题', 480, '# 这是文档的最后一行。', 120],
+      ['折行', 560, '这是文档的最后一行。'.repeat(18), 0],
+      ['末尾空行', 560, '> [!note] 文末提示\n> 这是文档的最后一行。\n', 0],
     ]) {
       await page.evaluate((text) => window.resetViewportDoc(text), longDoc + tail)
       await liveScroller.locator('.cm-line').first().waitFor()
-      const lastLine = liveScroller.locator('.cm-line').filter({ hasText: '这是文档的最后一行。' })
+      const lastLine = scenario === '末尾空行'
+        ? liveScroller.locator('.cm-content > .cm-line:last-child')
+        : liveScroller.locator('.cm-line').filter({ hasText: '这是文档的最后一行。' })
       await page.setViewportSize({ width: 900, height })
       const box = await liveScroller.boundingBox()
       await page.mouse.move(box.x + 60, box.y + 100)
@@ -260,7 +265,7 @@ try {
         const rect = line.getBoundingClientRect()
         const text = document.createRange()
         text.selectNodeContents(line)
-        const glyphs = text.getClientRects()[0]
+        const glyphs = text.getClientRects()[0] ?? rect
         const painted = document.elementFromPoint(glyphs.left + 2, (glyphs.top + glyphs.bottom) / 2)
         const blank = document.elementFromPoint(glyphs.left + 2, viewport.bottom - 10)
         return {
@@ -270,15 +275,27 @@ try {
         }
       })
       assert.ok(Math.abs(paintAtEnd.top) <= 5 && paintAtEnd.textVisible && paintAtEnd.blankBelow,
-        `Live 滚动到底时末行应显示在视口首行，下方是空白（高度 ${height}）：${JSON.stringify(paintAtEnd)}`)
+        `Live 滚动到底时末行应显示在视口首行，下方是空白（${scenario}）：${JSON.stringify(paintAtEnd)}`)
+      let savedTop = paintAtEnd.top
+      if (scrollBack > 0) {
+        await page.mouse.wheel(0, -scrollBack)
+        await page.waitForFunction((gap) => {
+          const scroller = document.querySelector('.vsidian-view-live .cm-scroller')
+          return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop >= gap - 1
+        }, scrollBack)
+        savedTop = await lastLine.evaluate((line) =>
+          line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top)
+      }
       await page.evaluate((text) => window.reloadViewportDoc(text), longDoc + tail)
       await lastLine.waitFor()
-      const restoredTop = await lastLine.evaluate(async (line) => {
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-        return line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top
+      await page.evaluate(async () => {
+        // 重挂期间表格、折行等布局会再测量；等待该轮绘制，而非假定两帧内固定。
+        for (let i = 0; i < 4; i++) await new Promise((resolve) => requestAnimationFrame(resolve))
       })
-      assert.ok(Math.abs(restoredTop - paintAtEnd.top) <= 2,
-        `隐藏并重建 Live 后仍应停在末行（${paintAtEnd.top} → ${restoredTop}）`)
+      const restoredTop = await lastLine.evaluate((line) =>
+        line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top)
+      assert.ok(Math.abs(restoredTop - savedTop) <= 2,
+        `隐藏并重建 Live 后应保留末行的可见位置（${scenario}：${savedTop} → ${restoredTop}）`)
     }
     assert.ok(!(await page.evaluate(() => window.readHostMessages())).some(({ kind }) => kind === 'edit.request'),
       '滚过末行和调整窗口大小不应写回源文')

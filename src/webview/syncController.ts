@@ -502,8 +502,8 @@ export interface VsCodeBridge {
 /** 视图模式（#6）：live=实时预览（CM6 编辑），reading=阅读（只读渲染） */
 export type ViewMode = 'live' | 'reading'
 
-// 定高的主 Live 正文才需要尾部留白。按实际末行高度计算，不能用默认
-// 行高，否则末尾的标题或折行文本滚到顶时会被裁切。
+// 定高的主 Live 正文才需要尾部留白。按末行起点到正文末端的实际
+// 高度计算，兼顾标题、折行与 Callout 等外层容器的末端内边距。
 const LIVE_END_SPACE = '--_vsidian-live-end-space'
 const liveEndSpace = ViewPlugin.fromClass(class {
   private measuring = false
@@ -519,26 +519,52 @@ const liveEndSpace = ViewPlugin.fromClass(class {
     if (this.measuring) return
     this.measuring = true
     view.requestMeasure({
-      read: (measured) => {
-        const end = measured.state.doc.length
-        const block = measured.lineBlockAt(end)
-        let height = block.height
-        if (measured.viewport.to === end && block.type === BlockType.Text) {
-          // 虚拟滚动刚挂载末行时，CM6 高度表可能仍是折行前的估算。
-          const { node } = measured.domAtPos(end, -1)
-          const line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line')
-          if (line) height = line.getBoundingClientRect().height
-        }
-        return Math.max(0, measured.scrollDOM.clientHeight -
-          (height + measured.documentPadding.top) / measured.scaleY)
-      },
+      read: (measured) => this.endLayout(measured).padding,
       write: (height) => {
         this.measuring = false
-        const style = view.scrollDOM.style
-        const value = `${height}px`
-        if (style.getPropertyValue(LIVE_END_SPACE) !== value) style.setProperty(LIVE_END_SPACE, value)
+        this.setPadding(view, height)
       },
     })
+  }
+
+  private endLayout(view: EditorView): { padding: number; scrollTop?: number } {
+    const end = view.state.doc.length
+    const block = view.lineBlockAt(end)
+    const { contentDOM, scrollDOM, documentPadding, scaleY } = view
+    let height = block.height
+    let scrollTop: number | undefined
+    const tail = contentDOM.lastElementChild
+    if (view.viewport.to === end && tail) {
+      // 虚拟滚动刚挂载末行时，CM6 高度表可能仍是折行前的估算。
+      let line = tail.matches('.cm-line') ? tail : null
+      if (!line && block.type === BlockType.Text) {
+        const { node } = view.domAtPos(block.from)
+        line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line') ?? null
+      }
+      if (line) {
+        // 不量 contentDOM 底边：其 min-height 会把短文下方的空白也算进来。
+        const lineTop = line.getBoundingClientRect().top
+        height = tail.getBoundingClientRect().bottom - lineTop
+        scrollTop = scrollDOM.scrollTop +
+          (lineTop - scrollDOM.getBoundingClientRect().top - documentPadding.top) / scaleY
+      }
+    }
+    return { padding: Math.max(0, scrollDOM.clientHeight - (height + documentPadding.top) / scaleY), scrollTop }
+  }
+
+  private setPadding(view: EditorView, height: number): void {
+    const style = view.scrollDOM.style
+    const value = `${height}px`
+    if (style.getPropertyValue(LIVE_END_SPACE) !== value) style.setProperty(LIVE_END_SPACE, value)
+  }
+
+  restore(view: EditorView, endGap: number): void {
+    // 挂载末行后用实测行的位置恢复；此时行号列未必已刷入新的留白高度。
+    const layout = this.endLayout(view)
+    this.setPadding(view, layout.padding)
+    const scroller = view.scrollDOM
+    const end = layout.scrollTop ?? scroller.scrollHeight - scroller.clientHeight
+    scroller.scrollTop = end - endGap
   }
 })
 
@@ -5381,23 +5407,34 @@ export class WebviewSyncController {
         this.restoringViewport = false
         return
       }
-      if (viewport.endGap === undefined) view.scrollDOM.scrollTop = viewport.top
-      requestAnimationFrame(() => {
+      const scroller = view.scrollDOM
+      const restore = () => {
         if (this.view === view && this.viewport === viewport && this.viewMode === 'live') {
           if (viewport.endGap !== undefined) {
-            view.dispatch({ effects: EditorView.scrollIntoView(view.state.doc.lineAt(view.state.doc.length).from,
-              { y: 'start', yMargin: viewport.endGap },
-            ) })
+            view.plugin(liveEndSpace)!.restore(view, viewport.endGap)
           } else if (viewport.centerOffset !== undefined) {
             view.dispatch({ effects: EditorView.scrollIntoView(
               this.clampToDoc(viewport.centerOffset), { y: 'center' },
             ) })
           } else {
-            view.scrollDOM.scrollTop = viewport.top
+            scroller.scrollTop = viewport.top
           }
         }
         this.restoringViewport = false
-      })
+      }
+      if (viewport.endGap !== undefined) {
+        // 先滚到末端让虚拟行挂载，再用实测滚动范围恢复。表格的源码
+        // 起点可能没有可滚动到的字形，不能用 scrollIntoView 做锚点。
+        scroller.scrollTop = scroller.scrollHeight
+        view.requestMeasure()
+        requestAnimationFrame(() => {
+          if (this.viewport === viewport && this.view === view) view.requestMeasure()
+          requestAnimationFrame(restore)
+        })
+      } else {
+        scroller.scrollTop = viewport.top
+        requestAnimationFrame(restore)
+      }
     }
   }
 
