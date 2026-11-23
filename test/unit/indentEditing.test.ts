@@ -228,6 +228,43 @@ describe('Tab 选区多行缩进', () => {
     }
   })
 
+  it('只移动选区内的内容，续段、围栏和子列表跟随各自的列表项', () => {
+    const content = '- first\n\n  continued\n\n  ```txt\n  code\n  ```\n  - child\n- second'
+    const doc = `10. parent\n${content}\n- untouched`
+    const nested = `10. parent\n${content.replace(/^(?=.)/gm, '    ')}\n- untouched`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.indexOf('- untouched') })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it.each([
+    ['空父项', '1.', '', '   '],
+    ['标记后接制表符', '1.\tparent', '', '    '],
+    ['标记后接五个空格', '1.     code', '', '   '],
+    ['同一行的内层标记', '- 1. parent', '  ', '     '],
+    ['父项和所选项以制表符缩进', '1. outer\n\t1. parent', '\t', '\t   '],
+  ])('按 Markdown 列宽处理%s', (_, above, before, after) => {
+    const doc = `${above}\n${before}- first\n${before}- second`
+    const nested = `${above}\n${after}- first\n${after}- second`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
   it('多光标：各 range 覆盖行取并集', () => {
     const doc = 'a\nb\nc\nd'
     const view = makeEditView(doc, 0, [EditorState.allowMultipleSelections.of(true)])

@@ -85,6 +85,12 @@ const scenarios = [
     bullets: ['•', '•', '•', '•'],
   },
   {
+    name: 'tab-selection-list-keeps-child',
+    doc: '1.     code\n- first\n  - child\n- second\n- untouched', range: [12, 39], keys: ['Tab'],
+    text: '1.     code\n   - first\n     - child\n   - second\n- untouched', from: 15, to: 48,
+    bullets: ['◦', '▪', '◦', '•'],
+  },
+  {
     name: 'tab-table-nav-priority', doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('1') + 1,
     keys: ['Tab'], text: TABLE_DOC, head: TABLE_DOC.indexOf('2'),
   },
@@ -161,12 +167,14 @@ try {
           })))
         assert.deepEqual(paint.map(({ bullet }) => bullet), s.bullets.map((bullet) => JSON.stringify(bullet)),
           `${s.name} 圆点反映列表层级`)
-        const baseIndent = paint.at(-1).indent
-        const [first, second, third] = paint
-        assert.equal(first.indent, second.indent, `${s.name} 前两项同列`)
-        assert.equal(first.indent, third.indent, `${s.name} 第三项同列`)
-        assert.equal(Math.sign(first.indent - baseIndent), s.keys[0] === 'Tab' ? 1 : 0,
-          `${s.name} 与未移动列表项的缩进对照`)
+        const order = '•◦▪'
+        for (let i = 0; i < paint.length - 1; i++) {
+          for (let j = i + 1; j < paint.length; j++) {
+            const expected = order.indexOf(s.bullets[i]) - order.indexOf(s.bullets[j])
+            assert.equal(Math.sign(paint[i].indent - paint[j].indent), Math.sign(expected),
+              `${s.name}：第 ${i + 1} 项与第 ${j + 1} 项的缩进层级`)
+          }
+        }
       }
       if (s.focus) {
         const focusClass = await page.evaluate(() => window.readFocus())

@@ -10,7 +10,7 @@
 //   普通行（含纯引用行、代码围栏、缩进代码块与块级公式内）
 //   固定 2 空格
 // - 光标/选区随缩进平移（锚点与头均向右关联映射，对齐 CM6 命令）
-// - 不自动携带子孙项；整体移动由用户用选区覆盖表达
+// - 选区内的续行和子孙项随所属项移动；未选中的行不自动携带
 // - 不接管（return false 交默认）：表格行——Tab/Shift+Tab 归
 //   tableEditing 的单元格导航，边界放行也不缩进表格行（不破坏表格
 //   结构与「表格内导航语义优先」）；成型 frontmatter（卡片态，光标被
@@ -22,10 +22,10 @@
 //
 // 装配顺序约定：置于 tableEditing 之后、defaultKeymap（extraExtensions）
 // 之前——表格上下文优先。变换单笔事务派发（一次撤销整体回退）。
-import { EditorSelection } from '@codemirror/state'
+import { countColumn, EditorSelection, findColumn } from '@codemirror/state'
+import type { EditorState, Line } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import type { Command, EditorView } from '@codemirror/view'
-import type { EditorState } from '@codemirror/state'
 import type { SyntaxNode } from '@lezer/common'
 import {
   dedentCutOf,
@@ -36,7 +36,6 @@ import {
 } from '../shared/listPrefix'
 import { liveDecorationsField } from './liveDecorations'
 import { mathBlocksField } from './liveMath'
-import { parentIndentWidth } from './listEditing'
 import { chainAt } from '../shared/markdownDoc'
 
 /** 表格节点：行落在其中即不接管（单元格导航优先；边界放行不缩进表格行） */
@@ -45,26 +44,28 @@ const TABLE_NODES = new Set([
 ])
 /** 代码块节点：围栏/缩进代码块内同普通行语义（不做列表智能对齐） */
 const CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock'])
+// Markdown 的制表符固定使用四列制表位，与编辑器的显示设置无关。
+const MARKDOWN_TAB_SIZE = 4
 
-/** 列表项的内容列与标记总宽（均相对引用前缀右端）。 */
-function itemColsOf(
+/** 使用实际的语法树标记；一行可以同时容纳外层和内层标记。 */
+function listMarkCols(
   state: EditorState,
-  target: SyntaxNode | null,
-): { contentCol: number; markWidth: number } | null {
-  const mark = target?.getChild('ListMark')
+  mark: SyntaxNode | null,
+): { markCol: number; contentCol: number } | null {
   if (!mark) return null
-  const targetPrefix = parseLinePrefix(state.doc.lineAt(mark.from).text)
-  const shape = targetPrefix?.list
-  if (!targetPrefix || !shape) return null
-  // 子项嵌套列按 CommonMark 内容列：父项「标记+一空格」的宽度——任务
-  // 标记属内容不计（`- [ ] p` 的内容列是 2，不是 `- [ ] ` 总宽 6；按
-  // 总宽缩进会越过内容列+4 的边界，令子行脱离列表结构失去全部样式）
-  const coreMark = shape.bullet
-    ? shape.bullet + shape.gap1
-    : shape.digits + shape.delim + shape.gap1
+  const line = state.doc.lineAt(mark.from)
+  const start = mark.from - line.from
+  const end = mark.to - line.from
+  const content = end + /^[ \t]*/u.exec(line.text.slice(end))![0].length
+  const quoteCol = countColumn(line.text, MARKDOWN_TAB_SIZE, parseLinePrefix(line.text)?.quote.length ?? 0)
+  const afterMark = countColumn(line.text, MARKDOWN_TAB_SIZE, end)
+  const afterGap = countColumn(line.text, MARKDOWN_TAB_SIZE, content)
+  // CommonMark / Lezer getListIndent：空项或超过四列的空白只记一列；
+  // 多出来的空白可能是缩进代码的内容，不是列表标记的宽度。
+  const contentCol = content === line.length || afterGap - afterMark > 4 ? afterMark + 1 : afterGap
   return {
-    contentCol: targetPrefix.indent.length + coreMark.length,
-    markWidth: coreMark.length,
+    markCol: countColumn(line.text, MARKDOWN_TAB_SIZE, start) - quoteCol,
+    contentCol: contentCol - quoteCol,
   }
 }
 
@@ -75,15 +76,18 @@ function itemColsOf(
  */
 function listUnitOf(
   state: EditorState,
+  line: Line,
   chain: SyntaxNode[],
   prefix: LinePrefix,
   dir: 1 | -1,
   tabTargets: Map<number, number>,
 ): { offset: number; width: number } {
-  const cur = prefix.indent.length
+  const offset = prefix.quote.length
+  const cur = countColumn(line.text, MARKDOWN_TAB_SIZE, offset + prefix.indent.length) -
+    countColumn(line.text, MARKDOWN_TAB_SIZE, offset)
+  const items = chain.filter((node) => node.name === 'ListItem')
+  const self = items[items.length - 1]
   if (dir > 0) {
-    const items = chain.filter((node) => node.name === 'ListItem')
-    const self = items[items.length - 1]
     let prev = self?.prevSibling ?? null
     while (prev && prev.name !== 'ListItem') prev = prev.prevSibling
     if (!prev && self) {
@@ -105,14 +109,16 @@ function listUnitOf(
         while (node && node.name !== 'ListItem') node = node.parent
         target = node && node.from !== self.from ? node : null
       }
-      const cols = itemColsOf(state, target)
-      column = tabIndentWidthOf(cur, cols?.contentCol ?? null, cols?.markWidth ?? 0)
+      const cols = listMarkCols(state, target?.getChild('ListMark') ?? null)
+      column = tabIndentWidthOf(cur, cols?.contentCol ?? null, cols ? cols.contentCol - cols.markCol : 0)
     }
     if (self && onItemMark) tabTargets.set(self.from, column)
-    return { offset: prefix.quote.length, width: Math.max(0, column - cur) }
+    return { offset, width: Math.max(0, column - cur) }
   }
-  const parentCol = parentIndentWidth(state, chain, prefix)
-  return { offset: prefix.quote.length, width: Math.max(0, cur - (parentCol ?? 0)) }
+  const parent = self?.parent?.parent
+  const mark = parent?.name === 'ListItem' ? parent.getChild('ListMark') : null
+  const parentCol = listMarkCols(state, mark)?.markCol ?? 0
+  return { offset, width: Math.max(0, cur - parentCol) }
 }
 
 /** Tab/Shift+Tab 共用主体。dir 为 +1 缩进 / -1 反缩进 */
@@ -133,6 +139,7 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
   }
   const changes: { from: number; to?: number; insert?: string }[] = []
   const tabTargets = new Map<number, number>()
+  let movedItem: { end: number; width: number; quotePrefix: RegExp } | null = null
   const mathBlocks = state.field(mathBlocksField, false)
   for (const num of [...lineNumbers].sort((a, b) => a - b)) {
     const line = state.doc.line(num)
@@ -155,12 +162,39 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     const quotedListChain = prefix?.mark && prefix.quote
       ? chainAt(field.tree, line.from + prefix.quote.length + prefix.indent.length)
       : null
-    const unit = prefix?.mark
-      ? listUnitOf(state, quotedListChain?.at(-1)?.name === 'ListMark' ? quotedListChain : chain,
-        prefix, dir, tabTargets)
-      : indentUnitOf(prefix)
-    if (dir > 0) {
-      changes.push({ from: line.from + unit.offset, insert: ' '.repeat(unit.width) })
+    const listChain = quotedListChain?.at(-1)?.name === 'ListMark' ? quotedListChain : chain
+    const mark = listChain.at(-1)
+    const item = mark?.name === 'ListMark' ? mark.parent : null
+    if (movedItem && line.from >= movedItem.end) movedItem = null
+    let unit
+    if (movedItem) {
+      const quote = movedItem.quotePrefix.exec(line.text)?.[0]
+      // 空行和省略外层引用前缀的惰性续行不必补缩进，其余行沿用所属项的位移。
+      if (quote === undefined || line.text.slice(quote.length).trim() === '') continue
+      unit = { offset: quote.length, width: movedItem.width }
+    } else if (prefix?.mark) {
+      unit = listUnitOf(state, line, listChain, prefix, dir, tabTargets)
+      if (item && item.to > line.to) {
+        const depth = prefix.quote.split('>').length - 1
+        movedItem = { end: item.to, width: unit.width, quotePrefix: new RegExp(`^(?:[ \\t]*>[ \\t]?){${depth}}`) }
+      }
+    } else {
+      unit = indentUnitOf(prefix)
+    }
+    if (!unit.width) continue
+    const { offset, width } = unit
+    const indent = /^[ \t]*/u.exec(line.text.slice(offset))![0]
+    if ((prefix?.mark || movedItem) && indent.includes('\t')) {
+      // 保留仍落在目标列以内的制表符；仅跨过目标列的最后一个制表符改成空格。
+      const end = offset + indent.length
+      const goal = Math.max(countColumn(line.text, MARKDOWN_TAB_SIZE, offset),
+        countColumn(line.text, MARKDOWN_TAB_SIZE, end) + dir * width)
+      let keep = Math.min(end, findColumn(line.text, goal, MARKDOWN_TAB_SIZE))
+      if (countColumn(line.text, MARKDOWN_TAB_SIZE, keep) > goal) keep--
+      changes.push({ from: line.from + keep, to: line.from + end,
+        insert: ' '.repeat(goal - countColumn(line.text, MARKDOWN_TAB_SIZE, keep)) })
+    } else if (dir > 0) {
+      changes.push({ from: line.from + offset, insert: ' '.repeat(width) })
     } else {
       const cut = dedentCutOf(line.text, unit)
       if (cut) changes.push({ from: line.from + cut.from, to: line.from + cut.to })
