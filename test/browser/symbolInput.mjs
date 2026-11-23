@@ -201,6 +201,45 @@ try {
     await check(page, '（）', 2, '完整对不补')
   })
 
+  const emptyChild = '1. 父项\n   - \n2. 后项'
+  await scenario('子列表候选期不重复绘制源码标记和圆点',
+    { doc: emptyChild, cursor: emptyChild.indexOf('- ') + 2 }, async (page) => {
+      const child = page.locator('.cm-line').nth(1)
+      await cdpSession.send('Input.imeSetComposition', { text: 's', selectionStart: 1, selectionEnd: 1 })
+      const candidate = await child.evaluate((line) => ({
+        raw: /^\s*- /u.test(line.innerText),
+        bullet: getComputedStyle(line, '::before').content === '"◦"',
+      }))
+      assert.equal(Number(candidate.raw) + Number(candidate.bullet), 1, JSON.stringify(candidate))
+      await cdpSession.send('Input.insertText', { text: '是' })
+      await page.waitForFunction(() => {
+        const row = document.querySelectorAll('.cm-line')[1]
+        return row.innerText === '是' && getComputedStyle(row, '::before').content === '"◦"'
+      })
+      await check(page, emptyChild.replace('- ', '- 是'), emptyChild.indexOf('- ') + 3, '候选定稿')
+    })
+
+  const childLine = '1. 父项\n   \n2. 后项'
+  const childStart = childLine.indexOf('   ') + 3
+  await scenario('手写子项的单减号只在当前编辑时暂缓标题绘制',
+    { doc: childLine, cursor: childStart }, async (page) => {
+      const parent = page.locator('.cm-line').nth(0)
+      const next = page.locator('.cm-line').nth(2)
+      const fontSize = (row) => row.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
+      const normal = await fontSize(next)
+      await page.keyboard.type('- ')
+      await check(page, emptyChild, childStart + 2, '手写空项不改原文')
+      assert.equal(await fontSize(parent), normal, '还在编辑减号行时，父项保持普通列表样式')
+      await page.evaluate((end) => window.locate(end), emptyChild.length)
+      assert.ok(await fontSize(parent) > normal, '离开还未写完的行后，合法的单减号标题仍按语法显示')
+      await page.evaluate((at) => window.locate(at), childStart + 2)
+      assert.equal(await fontSize(parent), normal, '光标回到减号行时，恢复原地编辑')
+      await page.keyboard.type('child')
+      await check(page, emptyChild.replace('- ', '- child'), childStart + 7, '写入列表正文')
+      const child = page.locator('.cm-line').nth(1)
+      assert.equal(await child.evaluate((el) => getComputedStyle(el, '::before').content), '"◦"')
+    })
+
   // 微信输入法现场：文档已正确插入标点，浏览器选区却留在最后一个「好」前。
   // 真机第二笔组合事务同时携带文本变更和旧选区。用不同预编辑标点让
   // CDP 定稿产生替换，再仅模拟 DOM 选区回退，仍由 CM6 观察并生成事务。

@@ -98,6 +98,27 @@ describe('Tab 无选区光标行缩进', () => {
     expect(typed(makeEditView(doc, 8))).toEqual({ text: '10. p\n    11. c', from: 12, to: 12 })
   })
 
+  it('空有序项成为新子列表首项时，从 1 开始并保持光标在标记后', () => {
+    const doc = '1. 数字电路：受限于拓扑，扫一遍即可\n2. '
+    expect(typed(makeEditView(doc, doc.length))).toEqual({
+      text: '1. 数字电路：受限于拓扑，扫一遍即可\n   1. ', from: doc.length + 3, to: doc.length + 3,
+    })
+  })
+
+  it('空有序项进入已有同种子列表时，不重置编号', () => {
+    const doc = '1. parent\n   1. existing\n2. '
+    expect(typed(makeEditView(doc, doc.length))).toEqual({
+      text: '1. parent\n   1. existing\n   2. ', from: doc.length + 3, to: doc.length + 3,
+    })
+  })
+
+  it('有序项正文即使只有不换行空格，也不重置编号', () => {
+    const doc = '1. p\n2. \u00a0'
+    expect(typed(makeEditView(doc, doc.length))).toEqual({
+      text: '1. p\n   2. \u00a0', from: doc.length + 3, to: doc.length + 3,
+    })
+  })
+
   it('任务行：对齐上方项内容列（`- ` 2 格——任务标记属内容不计列宽）', () => {
     const doc = '- [ ] p\n- [ ] c'
     expect(typed(makeEditView(doc, doc.indexOf('c') + 1)))
@@ -194,6 +215,158 @@ describe('Tab 选区多行缩进', () => {
     expect(out.text).toBe('  - item\n  plain')
   })
 
+  it('选中有序项下方的多个无序项：一次 Tab 整组嵌套，Shift+Tab 整组退出', () => {
+    const doc = '1. parent\n- first\n- second\n- third\n- untouched'
+    const nested = '1. parent\n   - first\n   - second\n   - third\n- untouched'
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.indexOf('- untouched') })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+      expect(view.state.selection.main.from).toBe(nested.indexOf('- first'))
+      expect(view.state.selection.main.to).toBe(nested.indexOf('- untouched'))
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+      expect(view.state.selection.main.from).toBe(doc.indexOf('- first'))
+      expect(view.state.selection.main.to).toBe(doc.indexOf('- untouched'))
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it('引用内不同标记的同级项一起嵌套，Shift+Tab 保留原有外层列表', () => {
+    const doc = '> - outer\n>   1. parent\n>   - first\n>   * second'
+    const nested = '> - outer\n>   1. parent\n>      - first\n>      * second'
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it('成组 Tab 前后都对齐首项目标列，偏右项及其已选子项一同左移', () => {
+    const doc = '- parent\n\n10. first\n   11. second\n       - owned'
+    const expected = '- parent\n\n  10. first\n  11. second\n      - owned'
+    let edits = 0
+    const view = makeEditView(doc, { anchor: doc.indexOf('10.'), head: doc.length }, [
+      EditorView.updateListener.of((update) => { if (update.docChanged) edits++ }),
+    ])
+    expect(typed(view)).toEqual({ text: expected, from: expected.indexOf('10.'), to: expected.length })
+    expect(edits).toBe(1)
+  })
+
+  it.each([
+    ['普通列表的 NBSP', '', '\u00a0'],
+    ['普通列表的全角空格', '', '\u3000'],
+    ['引用内列表的 NBSP', '> ', '\u00a0'],
+    ['引用内列表的全角空格', '> ', '\u3000'],
+  ])('成组 Tab 左移保留%s续行正文且可一次撤销', (_, quote, space) => {
+    const doc = ['- parent', '', '10. first', '   11. second', `${space}lazy`, ` ${space}continued`]
+      .map((line) => quote + line).join('\n')
+    const expected = ['- parent', '', '  10. first', '  11. second', `${space}lazy`, `${space}continued`]
+      .map((line) => quote + line).join('\n')
+    const undoTexts: string[] = []
+    const view = makeEditView(doc, { anchor: doc.indexOf('10.'), head: doc.length }, [
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) undoTexts.push(update.changes.invert(update.startState.doc).apply(update.state.doc).toString())
+      }),
+    ])
+    expect(typed(view)).toEqual({ text: expected, from: expected.indexOf('10.'), to: expected.length })
+    expect(undoTexts).toEqual([doc])
+  })
+
+  it('只移动选区内的内容，续段、围栏和子列表跟随各自的列表项', () => {
+    const content = '- first\n\n  continued\n\n  \u00a0\n\n  ```txt\n  code\n  ```\n  - child\n- second'
+    const doc = `10. parent\n${content}\n- untouched`
+    const nested = `10. parent\n${content.replace(/^(?=.)/gm, '    ')}\n- untouched`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.indexOf('- untouched') })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it.each([
+    ['空父项', '1.', '', '   '],
+    ['标记后接制表符', '1.\tparent', '', '    '],
+    ['标记后接五个空格', '1.     code', '', '   '],
+    ['同一行的内层标记', '- 1. parent', '  ', '     '],
+    ['父项和所选项以制表符缩进', '1. outer\n\t1. parent', '\t', '\t   '],
+  ])('按 Markdown 列宽处理%s', (_, above, before, after) => {
+    const doc = `${above}\n${before}- first\n${before}- second`
+    const nested = `${above}\n${after}- first\n${after}- second`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it.each([
+    ['裸引用标记', '> 1. p', '>', '> ', '>    '],
+    ['续行的引用制表符', '> 10. p', '>\t', '>\t', '>\t    '],
+    ['引用开行的额外制表符', '>\t1. p', '>\t', '>\t   ', '>\t      '],
+    ['列表行里的引用', '- > 1. p', '  > ', '  > ', '  >    '],
+  ])('同级项按实际引用前缀成组：%s', (_, parent, before, afterDedent, nested) => {
+    const doc = `${parent}\n${before}- first\n${before}- second`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(`${parent}\n${nested}- first\n${nested}- second`)
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(`${parent}\n${afterDedent}- first\n${afterDedent}- second`)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it('没有前置同级父候选时，连续按 Tab 不会把整组首批子项变成代码', () => {
+    const doc = '10. p\n- first\n- second'
+    const nested = '10. p\n    - first\n    - second'
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+      pressTab(view)
+      expect(view.state.doc.toString()).toBe(nested)
+      pressTab(view, true)
+      expect(view.state.doc.toString()).toBe(doc)
+    } finally {
+      view.destroy()
+    }
+  })
+
+  it('深层引用中缺一层标记的惰性续行保持原文，按键不被空白匹配拖慢', () => {
+    const quote = '> '.repeat(27)
+    const lazy = `${quote.slice(2)}lazy`
+    const doc = `${quote}1. p\n${quote}- first\n${lazy}\n${quote}- second`
+    const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.length })
+    try {
+      const start = performance.now()
+      pressTab(view)
+      // 旧量词回溯约需数秒；线性扫描只处理这四行，阈值不以机器微基准为准。
+      expect(performance.now() - start).toBeLessThan(1500)
+      expect(view.state.doc.toString()).toBe(`${quote}1. p\n${quote}   - first\n${lazy}\n${quote}   - second`)
+    } finally {
+      view.destroy()
+    }
+  })
+
   it('多光标：各 range 覆盖行取并集', () => {
     const doc = 'a\nb\nc\nd'
     const view = makeEditView(doc, 0, [EditorState.allowMultipleSelections.of(true)])
@@ -238,6 +411,59 @@ describe('Shift+Tab 反向缩进', () => {
   it('有序宽编号删 4 格', () => {
     const doc = '10. p\n    11. c'
     expect(typed(makeEditView(doc, 12), true)).toEqual({ text: '10. p\n11. c', from: 8, to: 8 })
+  })
+
+  it('有序子项整组退一级时接续外层编号，只顺延同一列表的后项', () => {
+    const doc = '03. parent\n    1) first\n    2) second\n04. next\n\nseparate\n\n9. other'
+    const expected = '03. parent\n04. first\n05. second\n06. next\n\nseparate\n\n9. other'
+    let edits = 0
+    const view = makeEditView(doc, { anchor: doc.indexOf('1)'), head: doc.indexOf('04.') }, [
+      EditorView.updateListener.of((update) => { if (update.docChanged) edits++ }),
+    ])
+    const out = typed(view, true)
+    expect(out).toEqual({ text: expected, from: expected.indexOf('04.'), to: expected.indexOf('06.') })
+    expect(edits).toBe(1)
+  })
+
+  it('后项编号跨过 9 时，所属子项保持在原后项下面', () => {
+    const doc = '8. parent\n   1. child\n9. next\n   - stays nested'
+    const expected = '8. parent\n9. child\n10. next\n    - stays nested'
+    expect(typed(makeEditView(doc, doc.indexOf('child')), true)).toEqual({
+      text: expected, from: expected.indexOf('child'), to: expected.indexOf('child'),
+    })
+  })
+
+  it('升上来的编号变宽时，不把剩余子项意外抬到外层', () => {
+    const doc = '9. p\n   1. moved\n   2. still nested\n10. q'
+    const expected = '9. p\n10. moved\n    2. still nested\n11. q'
+    expect(typed(makeEditView(doc, doc.indexOf('moved')), true)).toEqual({
+      text: expected, from: expected.indexOf('moved'), to: expected.indexOf('moved'),
+    })
+  })
+
+  it('续号不改被 Markdown 树误认成列表项的公式正文', () => {
+    const doc = '1. parent\n   1. child\n2. next\n$$\n1. math\n$$'
+    const expected = '1. parent\n2. child\n3. next\n$$\n1. math\n$$'
+    expect(typed(makeEditView(doc, doc.indexOf('child')), true)).toEqual({
+      text: expected, from: expected.indexOf('child'), to: expected.indexOf('child'),
+    })
+  })
+
+  it('Shift+Tab 续号遇到足以吸收冲突的跳号即停止', () => {
+    const doc = '5. parent\n   1. moved\n6. next\n10. gap\n1. explicit\n11. keep'
+    const expected = '5. parent\n6. moved\n7. next\n10. gap\n1. explicit\n11. keep'
+    expect(typed(makeEditView(doc, doc.indexOf('moved')), true)).toEqual({
+      text: expected, from: expected.indexOf('moved'), to: expected.indexOf('moved'),
+    })
+  })
+
+  it('同一外层列表可以在跳号后的另一批升格项重新续号', () => {
+    const doc = '5. parent\n   1. first\n6. next\n10. gap\n1. explicit\n   1. second\n2. last'
+    const view = makeEditView(doc, doc.indexOf('first'), [EditorState.allowMultipleSelections.of(true)])
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(doc.indexOf('first')), EditorSelection.cursor(doc.indexOf('second')),
+    ]) })
+    expect(typed(view, true).text).toBe('5. parent\n6. first\n7. next\n10. gap\n1. explicit\n2. second\n3. last')
   })
 
   it('引用内列表：删引用前缀右端的缩进', () => {

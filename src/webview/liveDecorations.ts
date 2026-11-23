@@ -1103,6 +1103,13 @@ export function selectionRevealsLineMarkers(
   return false
 }
 
+/** 手写的空子项与列表内单减号 Setext 标题共享源文，只在编辑行上暂缓绘制。 */
+function listDashUnderlineOf(node: SyntaxNode, doc: Text): number | undefined {
+  if (node.name !== 'SetextHeading2' || node.parent?.name !== 'ListItem') return undefined
+  const mark = node.getChild('HeaderMark')!
+  return doc.sliceString(mark.from, mark.to) === '-' ? doc.lineAt(mark.from).number : undefined
+}
+
 /** 名为 name 的直接子节点（mark 查找用） */
 function childNamed(node: SyntaxNode, name: string): SyntaxNode | null {
   for (let c = node.firstChild; c; c = c.nextSibling) {
@@ -1241,6 +1248,9 @@ function emitForRange(
     }
     const level = headingLevelOf(node.name)
     if (level !== null) {
+      const dashLine = listDashUnderlineOf(node, doc)
+      if (dashLine !== undefined && selection.ranges.some((range) =>
+        range.empty && doc.lineAt(range.head).number === dashLine)) return
       const mark = childNamed(node, 'HeaderMark')
       let contentFrom = node.from
       let contentTo = node.to
@@ -1564,7 +1574,12 @@ function emitForRange(
         const to = markerEnd(node)
         // 同 QuoteMark 的 A86 选区覆盖显形：非空选区与所在行相交即显
         // 形（列表不在表格上下文，无需表格分流）
-        if (!selectionRevealsLineMarkers(selection, line.from, to, line.from, line.to)) {
+        // IME 在前缀之后移动选区时，CM6 可能暂时保留已经显形的源码标记。
+        // 跟随组合起点保持显形态，等定稿后再同时隐藏源码、恢复圆点。
+        const revealedAtStart = compositionSelection &&
+          (selectionRevealsLineMarkers(compositionSelection.left, line.from, to, line.from, line.to) ||
+            selectionRevealsLineMarkers(compositionSelection.right, line.from, to, line.from, line.to))
+        if (!revealedAtStart && !selectionRevealsLineMarkers(selection, line.from, to, line.from, line.to)) {
           out.push(hideDeco.range(line.from, to))
         } else {
           addLineCls(line.number, LIVE_CLASS_NAMES.listMarkerVisible)
@@ -1896,7 +1911,7 @@ const INLINE_SOURCE_SCOPE_NAMES = new Set(['Emphasis', 'StrongEmphasis', 'Strike
  *  被替换区间整体吞没的选区经 CM6 映射可得 from > to 的反向 Range
  *  （replaceDoc 已归一主路径；此处兜底其余来源），直接建区间会产出
  *  倒置 span 使 emitForRange 分配负长数组。 */
-function selectionSpans(tr: Transaction, oldTree: Tree): LineSpan[] {
+function selectionSpans(tr: Transaction, oldTree: Tree, newTree: Tree = oldTree): LineSpan[] {
   const doc = tr.state.doc
   const spans: LineSpan[] = []
   const push = (from: number, to: number): void => {
@@ -1906,11 +1921,24 @@ function selectionSpans(tr: Transaction, oldTree: Tree): LineSpan[] {
   }
   const pushOld = (from: number, to: number): void =>
     push(tr.changes.mapPos(from, -1), tr.changes.mapPos(to, 1))
+  // 单减号行的显隐变化也要重绘其上的父项，选区移动本身不会改变语法树。
+  const addDashHeading = (tree: Tree, text: Text, pos: number, add: typeof push): void => {
+    const line = text.lineAt(pos)
+    if (!line.text.trimEnd().endsWith('-')) return
+    for (let node: SyntaxNode | null = tree.resolveInner(line.to, -1); node; node = node.parent) {
+      if (listDashUnderlineOf(node, text) === line.number) {
+        add(node.from, node.to)
+        return
+      }
+    }
+  }
   for (const r of tr.startState.selection.ranges) {
     pushOld(r.from, r.to)
+    if (r.empty) addDashHeading(oldTree, tr.startState.doc, r.head, pushOld)
   }
   for (const r of tr.state.selection.ranges) {
     push(r.from, r.to)
+    if (r.empty) addDashHeading(newTree, doc, r.head, push)
   }
   const composition = tr.startState.field(inlineCompositionSelection)
   if (composition) {
@@ -2084,7 +2112,7 @@ function planRebuildSpans(
   }
   // 选区显式变化才扩展重建行（编辑事务的默认选区映射不触发）
   if (tr.selection !== undefined) {
-    spans.push(...selectionSpans(tr, oldTree))
+    spans.push(...selectionSpans(tr, oldTree, newTree))
   }
 
   // callout 身份翻转扩展（#653/T02）：首行声明区间的编辑可翻转容器的

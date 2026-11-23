@@ -1,8 +1,8 @@
 // 使用浏览器原生键盘回归 #120 Tab/Shift+Tab 通用缩进：无选区光标行、
 // 选区多行、列表智能对齐（`- ` 2 格、`10. ` 4 格、任务 6 格、引用内
 // 列表落点）、Shift+Tab 反向与不足全删、表格内导航优先与边界不缩进、
-// 代码块围栏内普通行语义。光标定位走生产 view.locate 链路；断言只看
-// 文本与光标（readEditor）。
+// 代码块围栏内普通行语义。光标定位走生产 view.locate 链路；多项缩进
+// 另检查取消选区后的圆点与缩进。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,6 +36,14 @@ await build({ entryPoints: [path.join(root, 'test/browser/tabIndentFixture.ts')]
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]', plugins: [katexFontStrip, katexMinJs] })
 
 const TABLE_DOC = '| a | b |\n| --- | --- |\n| 1 | 2 |\npara'
+const SIBLINGS = '1. parent\n- first\n- second\n- third\n- untouched'
+const NESTED = '1. parent\n   - first\n   - second\n   - third\n- untouched'
+const ORDERED_CHILDREN = '1. parent\n   1. first\n   2. second\n2. next\n10. gap\n1. explicit'
+const ORDERED_PROMOTED = '1. parent\n2. first\n3. second\n4. next\n10. gap\n1. explicit'
+const MISALIGNED = '- parent\n\n10. first\n   11. second\n       - owned'
+const ALIGNED = '- parent\n\n  10. first\n  11. second\n      - owned'
+const QUOTED_MISALIGNED = '> - parent\n> \n> 10. first\n>    11. second\n> \u00a0lazy\n> \u3000wide'
+const QUOTED_ALIGNED = '> - parent\n> \n>   10. first\n>   11. second\n> \u00a0lazy\n> \u3000wide'
 
 // #420 降级 frontmatter 文档对（嵌套 map 源码态；Tab 前后互为镜像）
 const DEGRADED_FM = '---\nperm:\n  bash: deny\n---\nbody'
@@ -50,6 +58,8 @@ const scenarios = [
   { name: 'tab-bullet', doc: '- p\n- c', cursor: 6, keys: ['Tab'], text: '- p\n  - c', head: 8 },
   { name: 'tab-nested-bullet', doc: '- p\n  - c', cursor: 8, keys: ['Tab'], text: '- p\n    - c', head: 10 },
   { name: 'tab-ordered-wide', doc: '10. p\n11. c', cursor: 10, keys: ['Tab'], text: '10. p\n    11. c', head: 14 },
+  { name: 'tab-empty-ordered-start', doc: '1. parent\n2. ', cursor: 13, keys: ['Tab'],
+    text: '1. parent\n   1. ', head: 16, type: { keys: 'child', text: '1. parent\n   1. child' } },
   { name: 'tab-task', doc: '- [ ] p\n- [ ] c', cursor: 15, keys: ['Tab'], text: '- [ ] p\n  - [ ] c', head: 17 },
   { name: 'tab-cross-bullet-task', doc: '- a\n- [ ] t', cursor: 11, keys: ['Tab'], text: '- a\n  - [ ] t', head: 13 },
   { name: 'tab-cross-ordered-bullet', doc: '10. a\n- b', cursor: 9, keys: ['Tab'], text: '10. a\n    - b', head: 13 },
@@ -69,6 +79,40 @@ const scenarios = [
   {
     name: 'tab-selection-mixed', doc: '- item\nplain', range: [0, 12], keys: ['Tab'],
     text: '  - item\n  plain', from: 2, to: 16,
+  },
+  {
+    name: 'tab-selection-list-siblings', doc: SIBLINGS,
+    range: [SIBLINGS.indexOf('- first'), SIBLINGS.indexOf('- untouched')], keys: ['Tab'],
+    text: NESTED, from: NESTED.indexOf('- first'), to: NESTED.indexOf('- untouched'),
+    bullets: ['◦', '◦', '◦', '•'],
+  },
+  {
+    name: 'shift-selection-list-siblings', doc: NESTED,
+    range: [NESTED.indexOf('- first'), NESTED.indexOf('- untouched')], keys: ['Shift+Tab'],
+    text: SIBLINGS, from: SIBLINGS.indexOf('- first'), to: SIBLINGS.indexOf('- untouched'),
+    bullets: ['•', '•', '•', '•'],
+  },
+  {
+    name: 'shift-selection-continues-outer-numbering', doc: ORDERED_CHILDREN,
+    range: [ORDERED_CHILDREN.indexOf('1. first'), ORDERED_CHILDREN.indexOf('2. next')], keys: ['Shift+Tab'],
+    text: ORDERED_PROMOTED, from: ORDERED_PROMOTED.indexOf('2. first'), to: ORDERED_PROMOTED.indexOf('4. next'),
+  },
+  {
+    name: 'tab-selection-list-keeps-child',
+    doc: '1.     code\n- first\n  - child\n- second\n- untouched', range: [12, 39], keys: ['Tab'],
+    text: '1.     code\n   - first\n     - child\n   - second\n- untouched', from: 15, to: 48,
+    bullets: ['◦', '▪', '◦', '•'],
+  },
+  {
+    name: 'tab-selection-aligns-items-from-both-sides', doc: MISALIGNED,
+    range: [MISALIGNED.indexOf('10.'), MISALIGNED.length], keys: ['Tab'],
+    text: ALIGNED, from: ALIGNED.indexOf('10.'), to: ALIGNED.length,
+    bullets: ['•', '▪'],
+  },
+  {
+    name: 'tab-selection-preserves-unicode-in-quoted-continuation', doc: QUOTED_MISALIGNED,
+    range: [QUOTED_MISALIGNED.indexOf('10.'), QUOTED_MISALIGNED.length], keys: ['Tab'],
+    text: QUOTED_ALIGNED, from: QUOTED_ALIGNED.indexOf('10.'), to: QUOTED_ALIGNED.length,
   },
   {
     name: 'tab-table-nav-priority', doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('1') + 1,
@@ -137,6 +181,24 @@ try {
         assert.equal(after.to, s.to, `${s.name} to: ${JSON.stringify(after)}`)
       } else {
         assert.equal(after.head, s.head, `${s.name} head: ${JSON.stringify(after)}`)
+      }
+      if (s.bullets) {
+        await page.evaluate((end) => window.locate(end), s.text.length)
+        const paint = await page.locator('.cm-line.vsidian-list-bullet').evaluateAll((lines) =>
+          lines.map((line) => ({
+            bullet: getComputedStyle(line, '::before').content,
+            indent: parseFloat(getComputedStyle(line).paddingLeft),
+          })))
+        assert.deepEqual(paint.map(({ bullet }) => bullet), s.bullets.map((bullet) => JSON.stringify(bullet)),
+          `${s.name} 圆点反映列表层级`)
+        const order = '•◦▪'
+        for (let i = 0; i < paint.length - 1; i++) {
+          for (let j = i + 1; j < paint.length; j++) {
+            const expected = order.indexOf(s.bullets[i]) - order.indexOf(s.bullets[j])
+            assert.equal(Math.sign(paint[i].indent - paint[j].indent), Math.sign(expected),
+              `${s.name}：第 ${i + 1} 项与第 ${j + 1} 项的缩进层级`)
+          }
+        }
       }
       if (s.focus) {
         const focusClass = await page.evaluate(() => window.readFocus())
