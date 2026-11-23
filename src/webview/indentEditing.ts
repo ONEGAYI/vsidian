@@ -139,7 +139,7 @@ function listUnitOf(
       column = tabIndentWidthOf(cur, cols?.contentCol ?? null, cols ? cols.contentCol - cols.markCol : 0)
       const list = prefix.list
       if (prev && cols && cur < cols.contentCol && onItemMark && self && self.to <= line.to &&
-          list?.digits && list.digits !== '1' && !state.doc.sliceString(mark.to, line.to).trim() &&
+          list?.digits && list.digits !== '1' && /^[ \t]*$/u.test(state.doc.sliceString(mark.to, line.to)) &&
           state.selection.ranges.length === 1 && state.selection.main.empty) {
         // 空项在当前位置新开有序子列表才从 1 开始，保留已有列表和非空编号。
         const child = prev.lastChild
@@ -211,7 +211,7 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
       while (depth < movedItem.quoteDepth && quoteLayer.test(line.text)) depth++
       const offset = quoteLayer.lastIndex
       // 空行和省略外层引用前缀的惰性续行不必补缩进，其余行沿用所属项的位移。
-      if (depth < movedItem.quoteDepth || line.text.slice(offset).trim() === '') continue
+      if (depth < movedItem.quoteDepth || /^[ \t]*$/u.test(line.text.slice(offset))) continue
       unit = { offset, width: movedItem.width }
     } else if (prefix?.mark) {
       unit = listUnitOf(state, line, listChain, prefix, dir, batch)

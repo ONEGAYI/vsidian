@@ -112,6 +112,13 @@ describe('Tab 无选区光标行缩进', () => {
     })
   })
 
+  it('有序项正文即使只有不换行空格，也不重置编号', () => {
+    const doc = '1. p\n2. \u00a0'
+    expect(typed(makeEditView(doc, doc.length))).toEqual({
+      text: '1. p\n   2. \u00a0', from: doc.length + 3, to: doc.length + 3,
+    })
+  })
+
   it('任务行：对齐上方项内容列（`- ` 2 格——任务标记属内容不计列宽）', () => {
     const doc = '- [ ] p\n- [ ] c'
     expect(typed(makeEditView(doc, doc.indexOf('c') + 1)))
@@ -243,7 +250,7 @@ describe('Tab 选区多行缩进', () => {
   })
 
   it('只移动选区内的内容，续段、围栏和子列表跟随各自的列表项', () => {
-    const content = '- first\n\n  continued\n\n  ```txt\n  code\n  ```\n  - child\n- second'
+    const content = '- first\n\n  continued\n\n  \u00a0\n\n  ```txt\n  code\n  ```\n  - child\n- second'
     const doc = `10. parent\n${content}\n- untouched`
     const nested = `10. parent\n${content.replace(/^(?=.)/gm, '    ')}\n- untouched`
     const view = makeEditView(doc, { anchor: doc.indexOf('- first'), head: doc.indexOf('- untouched') })
