@@ -542,6 +542,23 @@ try {
   assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), [quotedTex])
   console.log('[PASS] 列表首块为引用时，保留列表层级并显示原多行公式')
 
+  const quoteInCode = 'Lead\n\n    A\n\n    B\n\n    C\n\n    > $$\n    > x+1\n    > $$'
+  await page.evaluate(source => {
+    window.replace(source)
+    window.selectRanges([{ anchor: 0, head: 0 }])
+  }, quoteInCode)
+  const quotedDisplay = editor.locator('.vsidian-math .katex-display')
+  await quotedDisplay.waitFor({ state: 'detached' })
+  await page.keyboard.insertText('12. ')
+  await waitBoth('12. ' + quoteInCode)
+  await quotedDisplay.waitFor({ state: 'visible' })
+  assert.equal((await editor.locator('.vsidian-math annotation').textContent()).trim(), 'x+1')
+  await page.evaluate(() => window.selectRanges([{ anchor: 0, head: 4 }]))
+  await page.keyboard.press('Backspace')
+  await waitBoth(quoteInCode)
+  await quotedDisplay.waitFor({ state: 'detached' })
+  console.log('[PASS] 编辑远处列表父标记立即显示或移除引用公式')
+
   const blockSource = '$$\na+b\n$$\n\nend'
   await page.evaluate(source => {
     window.replace(source)

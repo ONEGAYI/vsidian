@@ -1,7 +1,7 @@
 // Live 视图公式装饰（工单 #59）：照 liveLinks.ts 的双层模式——
 // - mathBlocksField（StateField）：跨行 `$$` 块表，create 全量扫描、
-//   update 增量重建（种子 = 变更区间 ∪ 相交旧块，向上回溯固定窗口
-//   MATH_BLOCK_LOOKBACK_LINES 起步；纯选区移动不触发重扫）
+//   update 增量重建（种子 = 变更区间 ∪ 归属变化的列表/引用容器 ∪ 相交旧块，
+//   向上回溯 MATH_BLOCK_LOOKBACK_LINES 行；纯选区移动不触发重扫）
 // - ViewPlugin（visibleRanges）：视口行内扫描（$…$、段内 $$、行首单行
 //   $$）+ 块表与视口相交的跨行块，逐条按 selectionTouchesRange 切换
 //   「源码态 mark」与「渲染态 replace widget」（光标进入公式范围显源码、
@@ -25,7 +25,7 @@
 // 行后熔断（超长闭合同理漏配对）。
 import { EditorSelection, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
-import type { Tree } from '@lezer/common'
+import type { SyntaxNode, Tree } from '@lezer/common'
 import { chainAt, parsedQuoteMarks, scanMathInMarkdownLine, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
 import { inlineCompositionSelection, inlineSourceTouchesRange, liveDecorationsField, type InlineCompositionSelection } from './liveDecorations'
@@ -137,8 +137,29 @@ function scanAllBlocks(doc: Text, quoteMarkAt?: QuoteMarkAt): readonly MathOccur
     doc.lineAt(hit.from).number !== doc.lineAt(hit.to - 1).number)
 }
 
+/** 改动行所属的列表/引用容器。从该行最后一个可见字符取祖先，
+ * 避免把普通行尾追加误当成进入或离开容器。 */
+function quoteContainersOnLine(tree: Tree, doc: Text, pos: number): SyntaxNode[] {
+  const line = doc.lineAt(pos)
+  const containers: SyntaxNode[] = []
+  for (let node: SyntaxNode | null = tree.resolve(line.from + line.text.trimEnd().length, -1); node; node = node.parent) {
+    if (node.name === 'ListItem' || node.name === 'Blockquote') containers.push(node)
+  }
+  return containers.reverse()
+}
+
+/** 标记宽度和随后的空白决定延续缩进；同宽的编号变化不影响它。 */
+function quoteContainerPrefix(doc: Text, node: SyntaxNode): string {
+  const mark = node.getChild(node.name === 'ListItem' ? 'ListMark' : 'QuoteMark')!
+  const line = doc.lineAt(mark.to)
+  const start = mark.to - line.from
+  let end = start
+  while (line.text[end] === ' ' || line.text[end] === '\t') end++
+  return `${mark.to - mark.from}:${line.text.slice(start, end)}`
+}
+
 /**
- * 增量重建块表：种子 = 变更区间（新坐标）∪ 映射后与之相交的旧块；起点
+ * 增量重建块表：种子 = 变更区间 ∪ 归属变化的列表/引用容器 ∪ 相交旧块；起点
  * 向上回溯 MATH_BLOCK_LOOKBACK_LINES 行（覆盖种子前开启的块定界符）；
  * 终点延伸到种子末行行尾，末尾仍在块中时继续到闭合或文末。
  * 重扫区间外的旧块（坐标已映射）原样保留。
@@ -149,12 +170,32 @@ function rebuildBlocks(
 ): readonly MathOccurrence[] {
   const changes = tr.changes
   const doc = tr.state.doc
-  const quoteMarkAt = parsedQuoteMarks(tr.state.field(liveDecorationsField, false)?.tree)
+  const before = tr.startState
+  const oldTree = before.field(liveDecorationsField, false)?.tree
+  const tree = tr.state.field(liveDecorationsField, false)?.tree
+  const quoteMarkAt = parsedQuoteMarks(tree)
   let seedFrom = doc.length + 1
   let seedTo = -1
-  changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+  changes.iterChangedRanges((fromA, toA, fromB, toB) => {
     seedFrom = Math.min(seedFrom, fromB)
     seedTo = Math.max(seedTo, toB)
+    if (oldTree && tree) {
+      // 列表标记可让远处的缩进代码成为引用，或反过来；仅在语法容器
+      // 或延续缩进改变时重扫其范围，不为同一容器内的普通键入扩窗。
+      for (const [a, b] of [[fromA, fromB], [toA, toB]] as const) {
+        const old = quoteContainersOnLine(oldTree, before.doc, a)
+        const next = quoteContainersOnLine(tree, doc, b)
+        for (let i = 0; i < Math.max(old.length, next.length); i++) {
+          const oldNode = old[i], newNode = next[i]
+          const from = oldNode ? changes.mapPos(oldNode.from, -1) : b
+          const to = oldNode ? changes.mapPos(oldNode.to, 1) : b
+          if (oldNode && newNode && oldNode.name === newNode.name && from === newNode.from && to === newNode.to &&
+              quoteContainerPrefix(before.doc, oldNode) === quoteContainerPrefix(doc, newNode)) continue
+          seedFrom = Math.min(seedFrom, from, newNode?.from ?? b)
+          seedTo = Math.max(seedTo, to, newNode?.to ?? b)
+        }
+      }
+    }
   })
   if (seedTo < 0) {
     return prev
