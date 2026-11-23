@@ -68,8 +68,8 @@ const scenarios = [
   { name: 'backspace-quote-layer', doc: '> > item', cursor: 4, keys: ['Backspace'], text: '> item', head: 2 },
   { name: 'backspace-quote-list', doc: '> - item', cursor: 4, keys: ['Backspace'], text: '> item', head: 2 },
   { name: 'backspace-nested-promote', doc: '- p\n  - c', cursor: 8, keys: ['Backspace'], text: '- p\n- c', head: 6 },
-  { name: 'backspace-promote-continues-outer-numbering', doc: '1. parent\n   1. child\n2. next',
-    cursor: 16, keys: ['Backspace'], text: '1. parent\n2. child\n3. next', head: 13 },
+  { name: 'backspace-promote-stops-at-number-gap', doc: '5. parent\n   1. moved\n6. next\n10. gap\n1. explicit\n11. keep',
+    cursor: 16, keys: ['Backspace'], text: '5. parent\n6. moved\n7. next\n10. gap\n1. explicit\n11. keep', head: 13 },
   { name: 'backspace-inside-mark', doc: '1. item', cursor: 1, keys: ['Backspace'], text: '. item', head: 0 },
   { name: 'backspace-plain-default', doc: 'plain', cursor: 2, keys: ['Backspace'], text: 'pain', head: 1 },
   // #512/#513：多行选区格式化——Shift+End 到行尾后 Shift+ArrowDown 逐行

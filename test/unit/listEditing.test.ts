@@ -169,6 +169,14 @@ describe('Backspace 退格清层', () => {
     })
   })
 
+  it('Backspace 续号遇到足以吸收冲突的跳号即停止', () => {
+    const doc = '5. parent\n   1. moved\n6. next\n10. gap\n1. explicit\n11. keep'
+    const expected = '5. parent\n6. moved\n7. next\n10. gap\n1. explicit\n11. keep'
+    expect(typed(makeEditView(doc, doc.indexOf('moved')), 'Backspace')).toEqual({
+      text: expected, head: expected.indexOf('moved'),
+    })
+  })
+
   it('顶级项一次清除整段标记变普通段落', () => {
     expect(typed(makeEditView('- item', 2), 'Backspace')).toEqual({ text: 'item', head: 0 })
     expect(typed(makeEditView('1. item', 3), 'Backspace')).toEqual({ text: 'item', head: 0 })

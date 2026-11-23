@@ -418,6 +418,23 @@ describe('Shift+Tab 反向缩进', () => {
     })
   })
 
+  it('Shift+Tab 续号遇到足以吸收冲突的跳号即停止', () => {
+    const doc = '5. parent\n   1. moved\n6. next\n10. gap\n1. explicit\n11. keep'
+    const expected = '5. parent\n6. moved\n7. next\n10. gap\n1. explicit\n11. keep'
+    expect(typed(makeEditView(doc, doc.indexOf('moved')), true)).toEqual({
+      text: expected, from: expected.indexOf('moved'), to: expected.indexOf('moved'),
+    })
+  })
+
+  it('同一外层列表可以在跳号后的另一批升格项重新续号', () => {
+    const doc = '5. parent\n   1. first\n6. next\n10. gap\n1. explicit\n   1. second\n2. last'
+    const view = makeEditView(doc, doc.indexOf('first'), [EditorState.allowMultipleSelections.of(true)])
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(doc.indexOf('first')), EditorSelection.cursor(doc.indexOf('second')),
+    ]) })
+    expect(typed(view, true).text).toBe('5. parent\n6. first\n7. next\n10. gap\n1. explicit\n2. second\n3. last')
+  })
+
   it('引用内列表：删引用前缀右端的缩进', () => {
     const doc = '> - p\n>   - c'
     // 删除 L2 内 [8,10)：光标 9 落在删除区间，坍到区间起点（'-' 前）

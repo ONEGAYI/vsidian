@@ -240,27 +240,33 @@ export function continuePromotedNumbers(state: EditorState, base: ChangeSet, ite
     const format = doc.sliceString(firstMark.from, firstMark.to)
     const delim = format.at(-1)!
     const pad = format.length - 1
-    let number: number | undefined
+    let next: number | undefined
     for (let item: SyntaxNode | null = first; item; item = item.nextSibling) {
       if (item.name !== 'ListItem' || moved.has(item.from)) continue
       const mark = item.getChild('ListMark')!
       // 块级公式的文本可能被 GFM 树误判为列表；跨过时不承接此前的编号。
       if (mathBlocks?.some((block) => block.from <= mark.from && mark.from < block.to)) {
-        number = undefined
+        next = undefined
         continue
       }
       const promoted = children.get(item.from)
-      if (number === undefined && !promoted) continue
+      if (next === undefined && !promoted) continue
       const literal = doc.sliceString(mark.from, mark.to)
-      // 不压缩作者已写下的跳号，只向后推被插入项占用的编号。
-      const original = Number(literal.slice(0, -1))
-      number = number === undefined ? original : Math.max(number + 1, original)
-      const updated = String(number).padStart(literal.length - 1, '0') + delim
-      if (literal !== updated) edits.push({ item, mark, insert: updated })
-      for (const child of promoted ?? []) {
-        const childMark = child.getChild('ListMark')!
-        const insert = String(++number).padStart(pad, '0') + delim
-        if (doc.sliceString(childMark.from, childMark.to) !== insert) edits.push({ item: child, mark: childMark, insert })
+      let number = Number(literal.slice(0, -1))
+      // 原编号足以吸收本轮顺延时停止传播，不规范化后续的手写编号。
+      if (next !== undefined && number < next) {
+        number = next++
+        edits.push({ item, mark, insert: String(number).padStart(literal.length - 1, '0') + delim })
+      } else {
+        next = undefined
+      }
+      if (promoted) {
+        for (const child of promoted) {
+          const childMark = child.getChild('ListMark')!
+          const insert = String(++number).padStart(pad, '0') + delim
+          if (doc.sliceString(childMark.from, childMark.to) !== insert) edits.push({ item: child, mark: childMark, insert })
+        }
+        next = number + 1
       }
     }
     // Markdown 有序标记限九位数字；无法续号时保留这组原编号。

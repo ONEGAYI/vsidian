@@ -38,8 +38,8 @@ await build({ entryPoints: [path.join(root, 'test/browser/tabIndentFixture.ts')]
 const TABLE_DOC = '| a | b |\n| --- | --- |\n| 1 | 2 |\npara'
 const SIBLINGS = '1. parent\n- first\n- second\n- third\n- untouched'
 const NESTED = '1. parent\n   - first\n   - second\n   - third\n- untouched'
-const ORDERED_CHILDREN = '1. parent\n   1. first\n   2. second\n2. next'
-const ORDERED_PROMOTED = '1. parent\n2. first\n3. second\n4. next'
+const ORDERED_CHILDREN = '1. parent\n   1. first\n   2. second\n2. next\n10. gap\n1. explicit'
+const ORDERED_PROMOTED = '1. parent\n2. first\n3. second\n4. next\n10. gap\n1. explicit'
 
 // #420 降级 frontmatter 文档对（嵌套 map 源码态；Tab 前后互为镜像）
 const DEGRADED_FM = '---\nperm:\n  bash: deny\n---\nbody'
