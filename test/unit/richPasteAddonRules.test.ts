@@ -9,7 +9,7 @@
 // - 纯文本粘贴（总开关关闭/代码上下文）不经过规则。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
-import { EditorSelection, EditorState } from '@codemirror/state'
+import { EditorSelection, EditorState, Text } from '@codemirror/state'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { mathBlocksField } from '../../src/webview/liveMath'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -20,6 +20,7 @@ import type { WebviewToHost } from '../../src/shared/protocol'
 import type { SettingsPayload } from '../../src/shared/settings'
 import * as conversion from '../../src/webview/htmlToMarkdown'
 import { prepareRichPaste } from '../../src/webview/richPastePlan'
+import { docInput, markdownTreeParser } from '../../src/shared/markdownDoc'
 
 if (!Range.prototype.getClientRects) { Range.prototype.getClientRects = () => [] as unknown as DOMRectList; Range.prototype.getBoundingClientRect = () => new DOMRect() }
 let c: WebviewSyncController
@@ -114,6 +115,31 @@ describe('粘贴规则控制器消费链', () => {
     expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, []))
       .toBeNull()
   })
+  it('在现有列表条目中间粘贴块公式不拆分条目，改用原纯文本', async () => {
+    const { view, sent } = mount('- 前后\n- 次项')
+    view.dispatch({ selection: { anchor: 3 } })
+    pasteDisplayMath(view, 'x', 'X')
+    await settle()
+    expect(view.state.doc.toString()).toBe('- 前X后\n- 次项')
+    expect(sent.filter(m => m.kind === 'edit.request')).toHaveLength(1)
+  })
+  it('在远离旧块的长文档末尾保留公式，不复制全文为字符串', () => {
+    const doc = Text.of(['$$', 'old', '$$', '', ...'段落\n\n'.repeat(20_000).split('\n')])
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const source = { doc, tree: markdownTreeParser.parse(docInput(doc)), fm: null }
+    const copies = vi.spyOn(Text.prototype, 'toString')
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source))
+      .toMatchObject({ insertions: [markdown] })
+    expect(copies.mock.contexts.some(value => (value as Text).length >= doc.length)).toBe(false)
+  })
+  it('远处的未闭合块仍不能吞入新公式的开符', () => {
+    const doc = '$$\n' + '段落\n\n'.repeat(600)
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, []))
+      .toBeNull()
+  })
   it('注释中的公式落点不产生不可见的格式编辑', async () => {
     const { view } = mount('<!--\ncomment\n-->\n\nafter')
     view.dispatch({ selection: { anchor: 5 } })
@@ -134,6 +160,26 @@ describe('粘贴规则控制器消费链', () => {
     expect(readingTexOf(source)).toEqual(['x'])
     expect(splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
       .flatMap(block => Array.from(block.querySelectorAll(tag + ' > li')))).toHaveLength(2)
+  })
+  it('嵌套列表的首块为公式时，外层条目正文不会变成标题', async () => {
+    const { view } = mount('')
+    pasteDisplayMath(view, 'x', '甲\nx', '<ol><li>甲<ul><li>', '</li></ul></li></ol>')
+    await settle()
+    const source = view.state.doc.toString()
+    const reading = splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+    expect(reading.flatMap(block => [...block.querySelectorAll('ol > li > ul > li annotation')]).map(n => n.textContent?.trim()))
+      .toEqual(['x'])
+    expect(reading.flatMap(block => [...block.querySelectorAll('h2')])).toHaveLength(0)
+  })
+  it.each([false, true])('只有块公式的任务条目保留勾选状态：%s', async (checked) => {
+    const { view } = mount('')
+    pasteDisplayMath(view, 'x', 'x', `<ul><li><input type="checkbox"${checked ? ' checked' : ''}>`, '</li></ul>')
+    await settle()
+    const source = view.state.doc.toString()
+    const reading = splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+    const box = reading.flatMap(block => [...block.querySelectorAll<HTMLInputElement>('li input[type=checkbox]')])
+    expect(box.map(input => input.checked)).toEqual([checked])
+    expect(readingTexOf(source)).toEqual(['x'])
   })
   it('Live 展示实体解码文本，光标进入只显形当前实体，代码保持字面', () => {
     const source = '开头&#30528; &amp; &#x1F642; &missing; `&#30528;`\n结尾'

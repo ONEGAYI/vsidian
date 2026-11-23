@@ -1,7 +1,8 @@
 import { EditorSelection, type EditorState, type Text, type Transaction } from '@codemirror/state'
+import { TreeFragment, type ChangedRange } from '@lezer/common'
 import type { PasteSelection, PasteStage } from '../shared/protocol'
-import { inlineMathNeedsSpace, MATH_CODE_CONTEXTS, scanMathRanges, type MathOccurrence } from '../shared/math'
-import { chainAt, docInput, frontmatterRange, markdownTreeParser, scanMathInMarkdownLine, type MarkdownMathSource } from '../shared/markdownDoc'
+import { inlineMathNeedsSpace, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
+import { chainAt, docInput, FM_SCAN_LIMIT, frontmatterRange, markdownTreeParser, scanMathInMarkdownLine, type MarkdownMathSource } from '../shared/markdownDoc'
 import type { ConvertedHtml } from './htmlToMarkdown'
 
 export function pasteSelection(selection: EditorSelection): PasteSelection {
@@ -37,6 +38,20 @@ function paragraphBreak(doc: Text, at: number, side: 'before' | 'after'): string
 
 const independentPasteBlocks = new Set(['BulletList', 'OrderedList', 'Blockquote'])
 
+/** 在已知闭合的位置之后，检查到达新开启行之前是否仍在旧公式中。
+ *  非开启形态的双美元行必使状态回到闭合；开启形态的行则切换状态。 */
+function hasOpenMathBefore(doc: Text, from: number, backTo: number): boolean {
+  if (from <= backTo) return false
+  const cursor = doc.iterRange(from, backTo)
+  let open = false
+  while (!cursor.next().done) {
+    if (!cursor.value.includes('$$')) continue
+    if (!opensMathBlockLine(stripQuotePrefix(cursor.value).bare)) break
+    open = !open
+  }
+  return open
+}
+
 function blockPasteBreaks(state: EditorState, input: Text, distribute: boolean, math: NonNullable<ConvertedHtml['blockMath']>): readonly { before: string; after: string }[] {
   const ranges = state.selection.ranges
   const edges = (text: string) => {
@@ -67,11 +82,16 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
 } | null {
   const ranges = state.selection.ranges
   const { markdown: text, inlineMath = [], blockMath = [] } = converted
+  const sourceTree = source?.tree
   const scanned = new Map<number, MathOccurrence[]>()
   const existingInline: MathOccurrence[] = []
   const boundaryBlocks = new Set<MathOccurrence>()
   let blockIndex = 0
   for (const range of ranges) {
+    // 补块边界会使已有条目的前后内容分家；不改条目缩进或选区外文本。
+    if (blockMath.length && sourceTree && [range.from, range.to].some(at =>
+      chainAt(sourceTree, at).some(node =>
+        node.name === 'ListItem' && (node.from < range.from || range.to < node.to)))) return null
     for (const at of [range.from, range.to]) {
       const line = state.doc.lineAt(at)
       // 光标或选区端点在已有公式内部：沿纯文本编辑，不把 Markdown 定界符写入 TeX。
@@ -146,18 +166,22 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   const { changes } = pasteChanges(state, text, insertions)
   const doc = changes.apply(state.doc)
   if (expectedBlocks.length) {
-    const draft = doc.toString()
-    const fm = frontmatterRange(draft)
-    const tree = markdownTreeParser.parse(docInput(doc))
-    // 从文档开头扫描：落点之前未闭合的块也可能抢占这次插入的开启符。
-    const actual = new Map(scanMathRanges(draft.split('\n'), 0)
-      .filter(hit => hit.kind === 'block').map(hit => [hit.from, hit.to]))
-    if (expectedBlocks.some(hit =>
-      actual.get(hit.from) !== hit.to ||
-      (fm && hit.from < fm.end) ||
-      chainAt(tree, hit.from).some(node => MATH_CODE_CONTEXTS.has(node.name) || node.name === 'CommentBlock' || node.name === 'HTMLBlock') ||
-      doc.sliceString(hit.to, doc.lineAt(hit.to).to).trim(),
-    )) return null
+    const fm = frontmatterRange(doc.sliceString(0, FM_SCAN_LIMIT))
+    const touched: ChangedRange[] = []
+    changes.iterChangedRanges((fromA, toA, fromB, toB) => touched.push({ fromA, toA, fromB, toB }))
+    const fragments = sourceTree && TreeFragment.applyChanges(TreeFragment.addTree(sourceTree), touched)
+    const tree = markdownTreeParser.parse(docInput(doc), fragments)
+    let closedAt = 0
+    for (const hit of expectedBlocks) {
+      const first = doc.lineAt(hit.from).from, last = doc.lineAt(hit.to).to
+      if ((fm && hit.from < fm.end) ||
+          chainAt(tree, hit.from).some(node => MATH_CODE_CONTEXTS.has(node.name) || node.name === 'CommentBlock' || node.name === 'HTMLBlock') ||
+          doc.sliceString(hit.to, last).trim() ||
+          hasOpenMathBefore(doc, first, closedAt) ||
+          !scanMathRanges(doc.sliceString(first, last).split('\n'), first)
+            .some(block => block.kind === 'block' && block.from === hit.from && block.to === hit.to)) return null
+      closedAt = last
+    }
   }
   // 只检查选区端点所在线的旧公式；被选区替换的公式不参与校验。
   const existing = existingInline.concat([...boundaryBlocks]).sort((a, b) => a.from - b.from)

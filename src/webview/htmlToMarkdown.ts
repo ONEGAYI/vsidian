@@ -195,10 +195,13 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
     if (slot.inlineMath || slot.blockMath) {
       const math = slot.blockMath ? 'math[display="block"]' : 'math:not([display="block"])'
       const annotation = el.querySelector(math + ' > semantics > annotation[encoding="application/x-tex"]')
-      const tex = annotation?.textContent?.trim()
+      if (!annotation) return null
+      const tex = annotation.textContent?.trim()
       if (!tex) return null
       // 块扫描器会把任意正文行上的双美元符当作闭合符，不生成会提前关闭的块。
-      if (slot.blockMath) return tex.includes('$$') ? null : deps.blockMath(tex.replace(/\r\n?/g, '\n'))
+      if (slot.blockMath) {
+        return annotation.closest('a[href],table') || tex.includes('$$') ? null : deps.blockMath(tex.replace(/\r\n?/g, '\n'))
+      }
       // 公式槽独占模板：裸 $ 会提前闭合，尾部反斜杠会改变结束定界符语义。
       if (/[\r\n]|(^|[^\\])(?:\\\\)*\$|\\$/u.test(tex)) return null
       return deps.inlineMath(tex)
@@ -288,7 +291,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
             if (table && Array.from(tex.matchAll(/\|/g)).some(hit => isEscapedAt(tex, hit.index))) return null
             return `\u0000m${mathLiterals.push(table ? tex.replace(/\|/g, '\\|') : tex) - 1}\u0000`
           },
-          blockMath: (tex) => table || el.closest('a[href]') ? null : `\n\n\u0000b${blockMathLiterals.push(tex) - 1}\u0000\n\n`,
+          blockMath: (tex) => `\n\n\u0000b${blockMathLiterals.push(tex) - 1}\u0000\n\n`,
           templateCache,
           regexCache,
           spendStep: spendAddonRuleStep,
@@ -424,7 +427,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     }
     return encode(merged,markKeys)
   }
-  function children(el: Node, table = false, inherited: Marks = unmarked, startsParagraph = false): string {
+  function children(el: Node, table = false, inherited: Marks = unmarked, startsParagraph = false, nodes: ArrayLike<Node> = el.childNodes): string {
     const marks=el instanceof Element ? effectiveMarks(el,inherited) : inherited
     let result='',runs:InlineRun[]=[]
     let previousOrphanItem = false
@@ -441,7 +444,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       runs = []
       previousOrphanItem = orphanItem
     }
-    for (const node of Array.from(el.childNodes)) {
+    for (const node of Array.from(nodes)) {
       if (node instanceof Element && isBlockContainer(node)) {
         // 透明包装继承外侧段首，但不能越过包装之前的可见行内内容。
         const block = render(node, table, marks, atParagraphStart() && onlyIndent())
@@ -463,19 +466,24 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     return leading + marker + text.trim() + marker + trailing
   }
   function renderListItem(li: Element, prefix: string, table: boolean, inherited: Marks): string {
-    const clone = li.cloneNode(true) as Element
     const nested = Array.from(li.children).filter(el => el.matches('ul,ol'))
-    Array.from(clone.children).filter(el => el.matches('ul,ol')).forEach(el => el.remove())
-    const checkbox = clone.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    // 直接转换原节点：规则求值仍能追溯上下文，子列表另行缩进。
+    const body = Array.from(li.childNodes).filter(node => !(node instanceof Element && node.matches('ul,ol')))
+    const checkbox = li.querySelector<HTMLInputElement>(':scope > input[type="checkbox"], :scope > :not(ul,ol) input[type="checkbox"]')
     const task = checkbox ? (checkbox.checked ? '[x] ' : '[ ] ') : ''
-    checkbox?.remove()
     const indent = ' '.repeat(prefix.length)
-    const content = children(clone, table, inherited).trim().replace(/\n{3,}/g, '\n\n')
-    const tail = nested.map(el => '\n' + render(el, table, effectiveMarks(li, inherited)).trim().split('\n')
-      .map(part => indent + part).join('\n')).join('')
+    const content = children(li, table, inherited, false, body).trim().replace(/\n{3,}/g, '\n\n')
+    const tail = nested.map(el => {
+      const list = render(el, table, effectiveMarks(li, inherited)).trim()
+      // 只有标记的子项不能打断父项段落；裸 '-' 还会被当成 Setext 下划线。
+      const separator = content && /^(?:-|\d+\.)\n/.test(list) ? '\n\n' : '\n'
+      return separator + list.split('\n').map(part => indent + part).join('\n')
+    }).join('')
     // 条目首块也让 $$ 单独成行，列表标记不能占据公式的开启行。
-    const marker = prefix + task
-    const head = content.startsWith('\u0000b') ? marker.trimEnd() + '\n' + indent : marker
+    // 任务标记后用空格实体保留渲染器所需的分隔空格（行尾字面空格会被裁掉）。
+    const head = content.startsWith('\u0000b')
+      ? (task ? prefix + task + '&#32;' : prefix.trimEnd()) + '\n' + indent
+      : prefix + task
     return head + content.replace(/\n/g, '\n' + indent) + tail
   }
   function render(node: Node, table = false, inherited: Marks = unmarked, startsParagraph = false): string {

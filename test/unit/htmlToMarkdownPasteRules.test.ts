@@ -91,6 +91,19 @@ describe('从显式块级 MathML 还原 TeX', () => {
       expect(pasteRulesModule.validateAddonPasteRuleDeclarations([{ ...declaration, output }])).toMatchObject({ ok: false })
     }
   })
+
+  it.each([
+    '<a href="https://example.com"><ul><li>FORMULA</li></ul></a>',
+    '<span class="katex-display"><a href="https://example.com">FORMULA</a></span>',
+    '<div class="katex-display"><table><tr><td>FORMULA</td></tr></table></div>',
+  ])('在注解的真实链接或表格上下文中让位：%s', (context) => {
+    const candidate = { ...declaration, match: { ...declaration.match, tag: context.startsWith('<div') ? 'DIV' : 'SPAN' } }
+    const result = pasteRulesModule.validateAddonPasteRuleDeclarations([candidate])
+    if (!result.ok) throw new Error(result.detail)
+    const rules = result.rules.map(r => ({ ...r, addonId: 'fixture.demo' }))
+    const html = context.replace('FORMULA', markup('x'))
+    expect(convert(html, rules)).toEqual(convert(html, []))
+  })
 })
 
 describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
