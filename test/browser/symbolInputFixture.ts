@@ -3,7 +3,10 @@
 // 键盘/CDP IME 发起。光标定位经 view.locate 消息走生产链路；粘贴经真实
 // 剪贴板快捷键（Control+v）。与 tabIndentFixture 同口径。
 import 'katex/dist/katex.min.css'
+import { EditorSelection, StateEffect, type TransactionSpec } from '@codemirror/state'
 import { WebviewSyncController } from '../../src/webview/syncController'
+import type { LiveEditorInstanceDeps } from '../../src/webview/liveInstance'
+import type { SerChange } from '../../src/shared/protocol'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
@@ -45,6 +48,31 @@ Object.assign(window, {
   },
   locate(offset: number) {
     controller.handleHostMessage({ kind: 'view.locate', offset })
+  },
+  moveNativeCaret(offset: number) {
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+    const { node, offset: domOffset } = view.domAtPos(offset)
+    window.getSelection()!.collapse(node, domOffset)
+  },
+  attachAddonBehaviorDrive(drive: LiveEditorInstanceDeps['driveAddonBehaviors']) {
+    controller.attachAddonBehaviorDrive(drive)
+  },
+  dispatchEditor(spec: TransactionSpec) {
+    EditorView.findFromDOM(document.querySelector('.cm-editor')!)!.dispatch(spec)
+  },
+  setCursors(offsets: number[]) {
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+    view.dispatch({ selection: EditorSelection.create(offsets.map((offset) => EditorSelection.cursor(offset))) })
+  },
+  observeComposeEnd(observer: () => void) {
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+    view.dispatch({ effects: StateEffect.appendConfig.of(EditorView.domEventObservers({ compositionend: observer })) })
+  },
+  applyExternalChanges(version: number, changes: SerChange[]) {
+    controller.handleHostMessage({ kind: 'doc.changed', version, origin: 'external', changes })
+  },
+  ackEdit(seq: number, version: number) {
+    controller.handleHostMessage({ kind: 'edit.ack', seq, ok: true, version })
   },
   setSymbolAutocomplete(on: boolean) {
     controller.handleHostMessage({ kind: 'settings.changed',

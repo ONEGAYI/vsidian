@@ -18,6 +18,7 @@
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateField, Transaction, type Extension, type Text } from '@codemirror/state'
 import { EditorView, ViewPlugin, dropCursor, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
+import { findAutocloseEntry, findSelectionWrapEntry } from '../shared/symbols'
 import { addonInstanceIdField, setAddonInstanceId } from './addonViewIdentity'
 import type { DocumentChangeReason, HostToWebview, PasteHistory, PasteStage, SerChange, WebviewToHost } from '../shared/protocol'
 import type { AddonApplyEditsResult, AddonEditorSnapshot, AddonSelectionRange } from '../shared/addonEditApi'
@@ -117,6 +118,7 @@ export const addonEditOriginTag = Annotation.define<{ origins: EditOriginMeta[] 
  *  addonEditOriginTag 向外发请求注入 origin 元数据并强制开新撤销段——
  *  本注解只退出行为链驱动面，出站合并与撤销分段语义均不变 */
 export const builtinEditOrigin = Annotation.define<boolean>()
+const imeNativeCaretReport = Annotation.define<true>()
 
 /** #597 键入路径符号原始事务标记：#123 补全 / #124 包裹的
  *  transactionFilter 放行原始单字符键入时以重指定（同形事务，变更/选区
@@ -208,6 +210,22 @@ const UNDO_SEGMENT_NAV_KEYS = new Set([
   'Home', 'End', 'PageUp', 'PageDown',
 ])
 
+function nativeCaretOf(view: EditorView, selection: Selection | null): number | null {
+  if (!selection?.isCollapsed || !selection.focusNode || !view.contentDOM.contains(selection.focusNode)) return null
+  return view.posAtDOM(selection.focusNode, selection.focusOffset)
+}
+
+/** CM6 6.43.13 的 DOMObserver 在派发原生选区前设置此快照，DocView.update
+ *  消费并清除。测量也能触发 observer.flush，不能只监听 selectionchange；
+ *  userEvent=select 也可能来自命令。这里只读来源，升级时由 symbolInput 验证。 */
+function isNativeSelectionReport(view: EditorView, selection: EditorSelection): boolean {
+  const { docView } = view as unknown as {
+    readonly docView: { readonly domChanged: { readonly newSel: EditorSelection['main'] | null } | null }
+  }
+  const native = docView.domChanged?.newSel
+  return native?.anchor === selection.main.anchor && native.head === selection.main.head
+}
+
 /** ChangeSet 展开的段表（定义域系坐标）：fromA/toA 为定义域区间，insLen 插入长度 */
 interface ChainSection {
   fromA: number
@@ -275,8 +293,8 @@ function touchesUnconfirmedChange(
 
 /** 逆穿已确认链后的变更：端点携带关联语义（正穿未确认集时保持前后次序） */
 interface UnmappedChange extends SerChange {
-  fromAssoc: 1 | -1
-  toAssoc: 1 | -1
+  fromAssoc?: 1 | -1
+  toAssoc?: 1 | -1
 }
 
 /**
@@ -290,7 +308,7 @@ function unmapSerGroupThroughAcked(
   chain: ChangeSet,
 ): UnmappedChange[] | null {
   const sections = chainSections(chain)
-  const unmapPos = (p: number): { pos: number; assoc: 1 | -1 } | null => {
+  const unmapPos = (p: number): { pos: number; assoc?: 1 | -1 } | null => {
     let delta = 0
     for (const s of sections) {
       const afterStart = s.fromA + delta
@@ -299,7 +317,7 @@ function unmapSerGroupThroughAcked(
         return null // 纯删除段塌缩点：原被删区间内归属二义
       }
       if (p < afterStart) {
-        return { pos: p - delta, assoc: -1 }
+        return { pos: p - delta }
       }
       if (p === afterStart) {
         return { pos: s.fromA, assoc: -1 }
@@ -314,7 +332,8 @@ function unmapSerGroupThroughAcked(
       }
       return null // 已确认段插入内容严格内部：与已确认内容冲突
     }
-    return { pos: p - delta, assoc: -1 }
+    // 只有碰到已确认修改的边界才有已知的关联方向。
+    return { pos: p - delta }
   }
   const out: UnmappedChange[] = []
   for (const c of changes) {
@@ -352,8 +371,10 @@ function mapSerGroupThroughCm(
     if (conflictsWithLocal(from, to, c.fromAssoc ?? -1, local)) {
       return null
     }
-    const mappedFrom = local.mapPos(from, c.fromAssoc ?? -1)
-    const mappedTo = local.mapPos(to, c.toAssoc ?? 1)
+    // 非空外部区间的默认端点向内贴：相邻但不相交的本地插入不属于外部删除。
+    const fromAssoc = c.fromAssoc ?? (from === to ? -1 : 1)
+    const mappedFrom = local.mapPos(from, fromAssoc)
+    const mappedTo = from === to ? mappedFrom : local.mapPos(to, c.toAssoc ?? -1)
     out.push({ offset: mappedFrom, length: mappedTo - mappedFrom, text: c.text })
   }
   return out
@@ -393,12 +414,8 @@ interface BufferedIncremental {
   version: number
   /** 增量（权威变更前系；入队时点的参考系） */
   changes: SerChange[]
-  /** 入队时逆穿当时已确认链得到的 baseVersion 系增量；null = 与当时已确认
-   *  编辑二义，无法安全逆映射（flush 时按冲突暂停处理）。
-   *  为何入队即逆穿：组合编辑的 ack 可能在 flush 之前到达并复合进已确认链，
-   *  届时缓冲增量的参考系（不含组合编辑）与已确认链（含）不再一致，迟到
-   *  的逆穿会多平移组合编辑部分（#12 表格 IME 场景实测暴露） */
-  baseChanges: SerChange[] | null
+  /** 本组之后、下一组之前收到的确认。回放时先推进本组坐标，再纳入确认链。 */
+  ackSeqsAfter: number[]
 }
 
 /** 右键保选区（#186 关键 bug 1）：Chrome contenteditable 上右键 mousedown
@@ -648,20 +665,19 @@ export class LiveEditorInstance {
    *  的实际作用面）；单选区与非塌缩选区（replaceSelection 路径，选区
    *  归 #107 重建等既有链路）不建立——保守收窄干预面。 */
   private multiCursorCompose: { startSelection: EditorSelection; netChanges: ChangeSet } | null = null
-  /** #593 组合期通用净变更材料（组合外为 null）：组合起点文档 + 组合期
-   *  全部文档事务的净变更累积。compositionend 补驱动据此推导 replaced——
-   *  iterChanges 给出起点坐标系下被组合覆盖的区间与文本（典型：组合开始
-   *  时的选区内容），中间态 preedit 的相互替换在 ChangeSet 合成数学中自动
-   *  消解（净变更只表达「起点文档 → 终态文档」差异）。在捕获阶段建立
-   *  （captureCompositionStart，先于 CM6 内建 observer 的冒泡阶段跨行
-   *  选区删除——deferredLocal 同款时序，R1 审查实证）：起点文档先于首笔
-   *  删除抓取，跨行选区的替换侧才不丢失；冒泡 handler 不重复初始化
-   *  （会把已含首笔删除的净变更重置为空）。迟入组合（compositionupdate
-   *  兜底）组合前事务可能已入账，起点差异无法补记，材料缺席退 null 不
-   *  引入新错位（#495 补偿同口径）。与 multiCursorCompose（#495 选区补偿，
-   *  互不依赖；空白格/表格组合（blankComposition 归表格管线）同样建立但
-   *  补驱动门控先行拦截，不消费）。行末单光标另留起点供定稿光标校正。 */
-  private composeNetChanges: { startDoc: Text; net: ChangeSet; lineEndCaret: number | null } | null = null
+  /** #593 组合净变更：在 CM6 删除跨行选区前记下起点，定稿时用净变更
+   *  推导行为链的 replaced。迟入组合没看到起点，不能补记。
+   *  lastEditState 不随之后的编辑或导航更新；单个折叠光标另留起点做校正。 */
+  private composeNetChanges: {
+    startDoc: Text
+    net: ChangeSet
+    startCaret: number | null
+    lastEditState: EditorState
+    ending: boolean
+    selectionTaken: boolean
+  } | null = null
+  /** 已验证的标点定稿，还可能收到一笔只有原生选区的事务。 */
+  private committedPunctuationCaret: { doc: Text; lineFrom: number; at: number } | null = null
   /** 组合期间到达、待 flush 的外部增量（按到达序） */
   private pendingExternal: BufferedIncremental[] = []
   /** 组合期间到达、待 flush 的全文消息（覆盖增量形态）。source 记录来源
@@ -1177,9 +1193,8 @@ export class LiveEditorInstance {
    * - 只读：非 Live/已销毁实例没有输入事务，天然不达此路径；
    * - IME（#399）：组合进行期（composing/空白格组合缓冲在场）与组合
    *   中间态事务不驱动——候选中间态不是行为输入（symbol-input「IME
-   *   组合期时序」同口径，情境保持）；compositionend 之后的定稿 compose
-   *   事务**驱动**（inputText 含定稿文本），与 #123 补全/#124 包裹的
-   *   「定稿后微任务处理」模式一致；
+   *   组合期时序」同口径）；定稿由 compositionend 后的微任务单独驱动，
+   *   不靠定稿 compose 事务再次触发；
    * - 表格：tableRegionField 格区内的键入不驱动（格区归 tableEditing，
    *   结构不被行为改写——#124「表格格区不接管」同口径）；
    * - Tab：Tab 是 keymap 命令（fenceEscape/tableEditing/indentEditing
@@ -1271,7 +1286,7 @@ export class LiveEditorInstance {
    * 会退化为未补偿形态（不会更糟）；VS Code webview（Chromium）经 CDP
    * 实证为定稿先于 compositionend（#399 注释），本补偿按先序形态设计。
    */
-  private compensateMultiCursorCompose(): void {
+  private compensateMultiCursorCompose(): number | undefined {
     const compose = this.multiCursorCompose
     this.multiCursorCompose = null
     const view = this.view
@@ -1295,105 +1310,63 @@ export class LiveEditorInstance {
     if (!settled) {
       view.dispatch({ selection: derived })
     }
+    return view.state.selection.main.head
+  }
+
+  /** 确认是组合起点处的单标点纯插入后，才把偏左光标恢复到标点后。 */
+  private settleComposePunctuationCaret(view: EditorView, at: number, lineFrom: number): void {
+    const { doc, selection } = view.state
+    const { main } = selection
+    const after = at + 1
+    // 定稿事务有时仍携带候选选区；只收起选中这一个定稿字符的范围。
+    if (view.compositionStarted || !view.hasFocus || selection.ranges.length !== 1 ||
+        (!main.empty && (main.from !== at || main.to !== after)) ||
+        main.head < lineFrom || main.head > after) return
+    const native = nativeCaretOf(view, view.contentDOM.ownerDocument.getSelection())
+    if (!main.empty || main.head !== after || (native !== null && native >= lineFrom && native <= at)) {
+      view.dispatch({ selection: { anchor: after } })
+    }
+    this.committedPunctuationCaret = { doc, lineFrom, at }
   }
 
   /**
-   * IME 在行末提交单个标点时，文本可能已插入，但浏览器仍报告插入点
-   * 之前的折叠选区。只在净变更能证明是起点光标处的纯追加时校正。
-   * 微任务等 CM6 定稿，不在组合事件内写 DOM；补全和附加组件随后读落点。
+   * 定稿微任务：先校正单标点光标，再以实际定稿位置驱动附加组件（#399/#649）。
+   * replaced 来自组合起点文档（#593），而不是后续可能改过的文本或选区。
    */
-  private settleLineEndPunctuationCaret(data: string): void {
-    const compose = this.composeNetChanges
-    const view = this.view
-    if (!view || !compose || compose.lineEndCaret === null ||
-        this.blankComposition !== null || this.compositionInTableRegion ||
-        data.length !== 1 || !/\p{P}/u.test(data)) {
-      return
-    }
-    const at = compose.lineEndCaret
-    let count = 0
-    let appended = false
-    compose.net.iterChanges((from, to, _fromB, _toB, inserted) => {
-      count++
-      appended = from === at && to === at && inserted.toString() === data
-    })
-    if (count !== 1 || !appended) return
-
-    const lineFrom = compose.startDoc.lineAt(at).from
-    const committedDoc = view.state.doc
-    const after = at + data.length
-    queueMicrotask(() => {
-      const { doc, selection } = view.state
-      if (view.compositionStarted || !view.hasFocus || doc !== committedDoc ||
-          selection.ranges.length !== 1 || !selection.main.empty) return
-      let head = selection.main.head
-      if (head === after) {
-        // DOM selectionchange 还没被 CM6 消费：模型已正确，仍须同步原生落点。
-        const dom = view.contentDOM.ownerDocument.getSelection()
-        if (!dom?.isCollapsed || !dom.focusNode || !view.contentDOM.contains(dom.focusNode)) return
-        head = view.posAtDOM(dom.focusNode, dom.focusOffset)
-      }
-      if (head >= lineFrom && head < at) {
-        view.dispatch({ selection: { anchor: after } })
-      }
-    })
-  }
-
-  /**
-   * #399 IME 组合定稿的行为链驱动（compositionend 钩子调用）。定稿事务
-   * 先于 compositionend 到达且被组合期门控拦截（见 compositionend 处的
-   * 实证注释），这里以净定稿文本（event.data）补一次驱动，userEvent 标
-   * 'input.type.compose'（行为可据此区分普通键入与 IME 定稿）。
-   * replaced 经组合期净变更推导（#593）：净变更 ChangeSet 定义域为组合
-   * 起点文档，iterChanges 直接给出起点坐标系下被组合覆盖的区间与文本
-   * （与键入路径的事务取法同构）；纯塌缩光标组合为纯插入、迟入组合
-   * （compositionupdate 兜底）材料缺席，均为 null。
-   * 门控对齐键入路径的既有情境：空白格/网格组合（blankComposition 在场
-   * ——净输入归表格管线规范化）、表格格区（组合开始点标记——定稿事务
-   * 已清空 region，开始时刻留存，#124「格区不接管」口径）、代码上下文
-   * （定稿落点判 inBlockCodeContext，#649 键入路径同款拆分；多选区时
-   * 只查主选区 head 与 head-1，
-   * 是键入路径「全部选区双端」的近似——IME 定稿在多选区下极罕见，
-   * 取主落点已覆盖现实输入形态）、取消组合（data 为空）。外部同步与
-   * SDK 修饰不经此路径。净变更材料取用即清（所有门控路径统一回收，
-   * 不残留到下一组合）。
-   */
-  private maybeDriveAddonBehaviorsForComposeCommit(committedText: string): void {
-    const composeNet = this.composeNetChanges
-    this.composeNetChanges = null
-    if (this.deps.driveAddonBehaviors === undefined || this.addonBehaviorInstanceId === undefined) {
-      return
-    }
-    if (committedText === '' || this.composing || this.blankComposition !== null || this.compositionInTableRegion) {
-      return
-    }
-    const state = this.view?.state
-    if (!state) {
-      return
-    }
-    const head = state.selection.main.head
-    if (inBlockCodeContext(state, head - 1) || inBlockCodeContext(state, head)) {
-      return
-    }
-    // replaced 推导与键入路径（maybeDriveAddonBehaviors）的事务取法同构：
-    // 多删除区间最小包围 + 起点文档按序切片拼接（事务前 LF 坐标）
+  private finishComposeCommit(
+    view: EditorView,
+    data: string,
+    compose: LiveEditorInstance['composeNetChanges'],
+    multi: { doc: Text; head: number } | null,
+  ): void {
+    const state = compose?.lastEditState ?? view.state
+    let changeCount = 0
+    let insertedEnd: number | undefined
     let replacedFrom = -1
     let replacedTo = -1
     let replacedText = ''
-    if (composeNet) {
-      composeNet.net.iterChanges((fromA, toA) => {
+    if (compose) {
+      compose.net.iterChanges((fromA, toA, _fromB, toB, inserted) => {
+        if (++changeCount === 1 && inserted.toString() === data) insertedEnd = toB
         if (toA > fromA) {
           replacedFrom = replacedFrom < 0 ? fromA : Math.min(replacedFrom, fromA)
           replacedTo = Math.max(replacedTo, toA)
-          replacedText += composeNet.startDoc.sliceString(fromA, toA)
+          replacedText += compose.startDoc.sliceString(fromA, toA)
         }
       })
+      if (changeCount !== 1) insertedEnd = undefined
+      const at = compose.startCaret
+      if (at !== null && !compose.selectionTaken && view.state.doc === state.doc && replacedFrom < 0 &&
+          insertedEnd === at + 1 && data.length === 1 && /\p{P}/u.test(data)) {
+        this.settleComposePunctuationCaret(view, at, compose.startDoc.lineAt(at).from)
+      }
     }
-    const replaced = replacedFrom < 0 ? null : { from: replacedFrom, to: replacedTo, text: replacedText }
     const instanceId = this.addonBehaviorInstanceId
-    queueMicrotask(() => {
-      this.deps.driveAddonBehaviors?.({ instanceId, userEvent: 'input.type.compose', inputText: committedText, replaced })
-    })
+    if (this.deps.driveAddonBehaviors === undefined || instanceId === undefined) return
+    const head = multi?.doc === state.doc ? multi.head : insertedEnd ?? state.selection.main.head
+    if (inBlockCodeContext(state, head - 1) || inBlockCodeContext(state, head)) return
+    const replaced = replacedFrom < 0 ? null : { from: replacedFrom, to: replacedTo, text: replacedText }
+    this.deps.driveAddonBehaviors({ instanceId, userEvent: 'input.type.compose', inputText: data, replaced })
   }
 
   // ---- #376 T01 双链联想会话（根路由与模式切换消费） ----
@@ -1627,29 +1600,27 @@ export class LiveEditorInstance {
       return
     }
     if (message.ok) {
-      this.inFlight.delete(message.seq)
-      {
-        // T06（#355）SDK 凭据结算：version 与 ack 同源（宿主确认后的凭据）
-        const originsOfSeq = this.originsOfSeq(message.seq)
-        if (originsOfSeq !== undefined) {
-          for (const o of originsOfSeq) {
-            this.settleAddonOrigin(o.opId, { ok: true, credential: { opId: o.opId, version: message.version } })
-          }
-        }
+      const txn = this.inFlight.delete(message.seq) ? this.sentTxns.find((t) => t.seq === message.seq) : undefined
+      // T06（#355）SDK 凭据结算：version 与 ack 同源（宿主确认后的凭据）
+      for (const o of txn?.origins ?? []) {
+        this.settleAddonOrigin(o.opId, { ok: true, credential: { opId: o.opId, version: message.version } })
       }
       // #314 粘贴元数据回读：剥离已确认队列**之前**找本事务（confirmSentTxn
       //  会 splice 掉），根据此标记 pasteFeedback 落定（时机对齐 main 版
       //  ok 分支开头；无元数据的事务零回调）
-      const txn = this.sentTxns.find((t) => t.seq === message.seq)
       if (txn && (txn.paste || txn.plainPasteFeedback)) {
         this.deps.onPasteTxnAcked?.({
           paste: txn.paste ?? null,
           plainPasteFeedback: txn.plainPasteFeedback ?? null,
         })
       }
-      // 按 seq 剥离已确认事务并复合进已确认链（C-2）：外部增量逆穿
-      // 它平移回 baseVersion 系；宿主按序确认，通常命中队首
-      this.confirmSentTxn(message.seq)
+      // ACK 的结算照常；若外部增量还没回放，只延后把这笔纳入坐标链。
+      // 否则旧增量会逆穿它尚未见到的确认，或者新增量会用到尚未推进的坐标。
+      if (txn) {
+        const preceding = this.pendingExternal.at(-1)
+        if (preceding) preceding.ackSeqsAfter.push(message.seq)
+        else this.confirmSentTxn(message.seq)
+      }
       // 未确认集的清空延后到缓冲 flush（组合输入映射仍需它）；
       // 全部确认且无缓冲挂起时本地与权威一致
       if (this.inFlight.size === 0 && !this.hasBufferedSync() && !this.deferredLocal) {
@@ -1728,28 +1699,27 @@ export class LiveEditorInstance {
       // 暂停：外部增量不应用（保留本地输入，恢复时以全文对齐）
       return
     }
-    if (this.deferredLocal && !this.composing && !this.blankComposition && !this.hasBufferedSync()) {
-      // 待发集定义域未随外部增量重定位；保守暂停并保留本地全文，
-      // 避免确认后用旧坐标覆盖权威文本。
+    const buffer = this.composing || this.blankComposition !== null || this.hasBufferedSync()
+    if (this.deferredLocal && !buffer && !this.deferredFromComposition) {
+      // 非组合的触碰式暂缓沿用 #4：暂停并保留本地快照，不冒险写旧坐标。
       this.enterSuspended()
       return
     }
-    if (this.composing || this.blankComposition || this.hasBufferedSync()) {
+    if (buffer) {
       // 组合中不打断输入；缓冲挂起期间到达的增量一并对齐到 flush。
-      // 入队即逆穿到 base 系（参考系一致性见 BufferedIncremental 注释）；
+      // 保留宿主版本坐标：回放时每组先推进确认链，再解释下一组。
       // #314 分步撤销的 reason/paste 随组缓冲（flush 收敛时随末组回调根）
       this.pendingExternal.push({
         version: message.version,
         changes: message.changes,
-        baseChanges: this.ackedChain
-          ? unmapSerGroupThroughAcked(message.changes, this.ackedChain)
-          : message.changes,
+        ackSeqsAfter: [],
         ...(message.reason !== undefined ? { reason: message.reason } : {}),
         ...(message.paste !== undefined ? { paste: message.paste } : {}),
       })
+      if (!this.composing) this.scheduleFlush()
     } else if (this.unconfirmed || this.ackedChain) {
-      // 在途未确认编辑：外部增量（权威系）先逆穿已确认链回 base 系再
-      // 穿未确认集（C-2），真重叠则冲突暂停
+      // 定稿已结束但尚未写回时，也逐条应用外部增量。每条推进确认链坐标，
+      // 不能把连续宿主版本的增量都逆穿同一份旧确认链（C-2）。
       const mapped = this.applyExternalGroup(message.changes)
       if (!mapped) {
         this.enterSuspended()
@@ -2022,35 +1992,18 @@ export class LiveEditorInstance {
   }
 
   /**
-   * 外部增量组（坐标 = 权威当前系，直发路径）应用的统一入口：
+   * 外部增量组（坐标 = 权威当前系）应用的统一入口：
    * 1. 有已确认事务时先逆穿已确认链，平移回 unconfirmed 定义域（baseVersion
    *    系）——外部坐标已含已确认编辑，直接穿未确认集会多平移已确认部分（C-2）
    * 2. 再穿未确认集映射到本地系；两阶段任一二义（真重叠）返回 null（冲突暂停）
    * 3. 应用成功后，未确认集与已确认链都以 base 系增量 rebase（定义域推进，
    *    CM6 mapDesc 精确保持段语义），baseVersion 由调用方推进
-   *
-   * 组合缓冲 flush 路径不经过此入口的逆穿阶段（缓冲增量已在入队时逆穿，
-   * 见 BufferedIncremental.baseChanges），直接调 applyBaseChanges。
    */
   private applyExternalGroup(changes: readonly SerChange[]): SerChange[] | null {
-    let baseChanges: readonly (SerChange & Partial<UnmappedChange>)[] = changes
-    if (this.ackedChain) {
-      const rev = unmapSerGroupThroughAcked(changes, this.ackedChain)
-      if (!rev) {
-        return null
-      }
-      baseChanges = rev
-    }
-    return this.applyBaseChanges(baseChanges)
-  }
-
-  /**
-   * baseVersion 系增量穿未确认集映射到本地系并 rebase 参考系
-   * （直发与组合 flush 共用的后半段；返回本地系增量，二义返回 null）。
-   */
-  private applyBaseChanges(
-    baseChanges: readonly (SerChange & Partial<UnmappedChange>)[],
-  ): SerChange[] | null {
+    const baseChanges: readonly UnmappedChange[] | null = this.ackedChain
+      ? unmapSerGroupThroughAcked(changes, this.ackedChain)
+      : changes
+    if (!baseChanges) return null
     if (!this.unconfirmed) {
       // 已确认链非空时未确认集必非空（同源清空）；异常态自愈
       this.ackedChain = null
@@ -2061,19 +2014,49 @@ export class LiveEditorInstance {
     if (!mapped) {
       return null
     }
-    const gCs = ChangeSet.of(
+    const externalInBase = ChangeSet.of(
       [...baseChanges]
         .sort((a, b) => a.offset - b.offset)
         .map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
       this.unconfirmed.length,
-    )
+    ).desc
+    const insertsAfterAck = baseChanges.some((c) => c.length === 0 && c.fromAssoc === 1)
+    let localFirst = false
+    if (insertsAfterAck || this.deferredLocal) {
+      const externalInView = ChangeSet.of(mapped.map((c) => ({
+        from: c.offset, to: c.offset + c.length, insert: c.text,
+      })), this.unconfirmed.newLength).desc
+      const visible = externalInView.toJSON()
+      const agreesWithView = (desc: typeof externalInView) => {
+        const sections = desc.toJSON()
+        return sections.length === visible.length && sections.every((n, i) => n === visible[i])
+      }
+      if (insertsAfterAck && !agreesWithView(externalInBase.mapDesc(this.unconfirmed, true))) {
+        // 正文中外部字符排在已确认插入之后，推进坐标链也要保留这个次序。
+        // 若同一批的端点不能用同一顺序表达，暂停而不是留下错位的坐标链。
+        if (!agreesWithView(externalInBase.mapDesc(this.unconfirmed, false))) return null
+        localFirst = true
+      }
+      if (this.deferredLocal) {
+        // 逆穿未发队列得到队首坐标；已确认写入的同点关联不能套给未发输入。
+        const externalAtHead = externalInView.mapDesc(this.deferredLocal.invertedDesc)
+        if (!agreesWithView(externalAtHead.mapDesc(this.deferredLocal, true))) return null
+        let externalAtSegment = externalAtHead
+        this.deferredSegments = this.deferredSegments.map((segment) => {
+          const changes = segment.changes.map(externalAtSegment)
+          externalAtSegment = externalAtSegment.mapDesc(segment.changes, true)
+          return { ...segment, changes }
+        })
+        this.deferredLocal = this.deferredLocal.map(externalAtHead)
+      }
+    }
     // 待确认事务与 unconfirmed/ackedChain 共用定义域；外部增量推进定义域时
     // 也要同步平移其坐标，否则稍后 ack 会把旧位置复合进 ackedChain。
     this.sentTxns = this.sentTxns.map((txn) => {
       const cs = ChangeSet.of(
         txn.changes.map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
         this.unconfirmed!.length,
-      ).mapDesc(gCs, false) as ChangeSet
+      ).map(externalInBase, localFirst)
       const rebased: SerChange[] = []
       cs.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
         rebased.push({
@@ -2085,9 +2068,9 @@ export class LiveEditorInstance {
       // #314：rebase 只重算坐标，粘贴元数据原样随事务保留
       return { ...txn, changes: rebased }
     })
-    this.unconfirmed = this.unconfirmed.mapDesc(gCs, false) as ChangeSet
+    this.unconfirmed = this.unconfirmed.map(externalInBase, localFirst)
     if (this.ackedChain) {
-      this.ackedChain = this.ackedChain.mapDesc(gCs, false) as ChangeSet
+      this.ackedChain = this.ackedChain.map(externalInBase, localFirst)
     }
     return mapped
   }
@@ -2140,10 +2123,10 @@ export class LiveEditorInstance {
    *  T06（#355）origins：SDK applyEdits 事务（addonEditOriginTag）的来源
    *  列表随事务传入；暂缓窗口内 joinPrevious 并入同组队尾段（合并笔），
    *  正常路径逐笔出站（各自成条目、同组连续撤回）。
-   *  #597 forceDefer：符号原始键入事务（symbolRawInput 注解）强制暂缓——
-   *  同一事件循环微任务内的内置兜底 attempt 触碰暂缓集并入同段，flush
-   *  单笔出站（撤销粒度语义见注解注释）。 */
-  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[], origins?: EditOriginMeta[], forceDefer = false): void {
+   *  符号原始键入（#597）与晚到的起始符定稿都暂缓，让内置加工合并进同一写回。 */
+  private recordLocalChangeSet(
+    changeSet: ChangeSet, changes: SerChange[], origins?: EditOriginMeta[], defer?: 'typed-symbol' | 'compose-symbol',
+  ): void {
     if (changes.length === 0 || !this.sessionId) {
       if (origins !== undefined) {
         // 无净文本变更的 SDK 请求不进文本管线（纯选区语义，不造文本
@@ -2164,12 +2147,13 @@ export class LiveEditorInstance {
     // 标记来自用户主动移光标（或组合开始时刻的停顿回看）；时间停顿仅在
     // 非组合态回看——组合进行中不切段（原子性），组合间停顿已在
     // compositionstart 的 markPauseBoundary 判定过
+    const composingInput = this.composing || defer === 'compose-symbol'
     const segmentBoundary = !!paste || !!plainPasteFeedback || this.undoCursorBoundary ||
-      (!this.composing && this.lastLocalInputAt !== null &&
+      (!composingInput && this.lastLocalInputAt !== null &&
         Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS)
     this.undoCursorBoundary = false
     this.lastLocalInputAt = Date.now()
-    if (forceDefer || this.composing || this.deferredLocal || (
+    if (defer || this.composing || this.deferredLocal || (
       this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
     )) {
       // T06（#355）同组未提交合并（技术方案 §6 表格第一行）：joinPrevious
@@ -2214,12 +2198,12 @@ export class LiveEditorInstance {
       } else {
         this.deferredSegments = [{ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}), ...(origins ? { origins } : {}) }]
       }
+      // 独立的晚到定稿与组合候选同样允许映射非重叠外部增量；如果已经有
+      // #4 的非组合暂缓队列，不能仅凭这次定稿就改变整队的冲突口径。
+      if (this.composing || (composingInput && !this.deferredLocal)) this.deferredFromComposition = true
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
         : changeSet
-      if (this.composing) {
-        this.deferredFromComposition = true
-      }
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       // 组合期间不逐笔上报全文快照（#49）：组合中的候选事务一律暂缓
       //（#123 起含首笔——首笔立即出站会让组合结束点的符号补全成为第二
@@ -2235,7 +2219,7 @@ export class LiveEditorInstance {
       }
       // P2-05：暂缓集增长 = 输入挂起态（组合/触碰暂缓）——置位 settle 检测
       this.notifyInputSettle()
-      if (forceDefer) {
+      if (defer) {
         // #597：强制暂缓自带 flush 定时兜底——孤立按键（无在途请求、无
         // 既有暂缓集）没有 ack 收敛点触发 sendDeferredLocal；setTimeout(0)
         // 宏任务晚于链驱动/内置兜底全部微任务，段在出站前已完整
@@ -2583,11 +2567,8 @@ export class LiveEditorInstance {
         this.enterSuspended()
         return
       }
-      // 外部增量已在入队时逆穿到 base 系（迟到逆穿会多平移组合编辑，见
-      // BufferedIncremental 注释）；base 系增量直接穿未确认集应用（C-2 后半段）
-      const mapped = group.baseChanges
-        ? this.applyBaseChanges(group.baseChanges)
-        : null // 入队时即与已确认编辑二义：无法安全映射
+      // 以前一组和两组之间的 ACK 推进确认链，再解释本组的宿主坐标。
+      const mapped = this.applyExternalGroup(group.changes)
       if (!mapped) {
         // 外部区间与本地未确认编辑真重叠：无法安全映射。保留本地输入、
         // 暂停写回并上报冲突（#4；不再 sync.request 全文覆盖丢组合输入）
@@ -2595,6 +2576,7 @@ export class LiveEditorInstance {
         return
       }
       this.dispatchExternalChanges(this.view, mapped)
+      for (const seq of group.ackSeqsAfter) this.confirmSentTxn(seq)
       lastVersion = group.version
     }
     if (this.inFlight.size === 0) {
@@ -2770,6 +2752,10 @@ export class LiveEditorInstance {
    *  顺序语义见 symbol-input.md「装配顺序陷阱」——keymap 正序拼接、
    *  filter 逆序应用，fenceEscape 必须在 tableEditing 之前）。 */
   private extensions(extraExtensions: Extension[]) {
+    const giveSelectionToUser = () => {
+      this.committedPunctuationCaret = null
+      if (this.composeNetChanges) this.composeNetChanges.selectionTaken = true
+    }
     const captureCompositionStart = () => {
       // #153：组合开始时刻（捕获阶段、置组合态之前）回看与上一笔本地
       // 输入的停顿——组合间分段的唯一判定点。必须在 composing 置 true 前
@@ -2782,20 +2768,26 @@ export class LiveEditorInstance {
       // #593 净变更材料同款时序：起点文档必须在删除发生前抓取，跨行
       // 选区的首笔删除才能进累积（replaced 保留组合开始时刻的原始文本，
       // R1 审查实证）
+      this.committedPunctuationCaret = null
       this.composing = true
       if (this.view) {
-        const { doc, selection } = this.view.state
-        const head = selection.main.head
+        const state = this.view.state
+        const { doc, selection } = state
         this.composeNetChanges = {
           startDoc: doc,
           net: ChangeSet.empty(doc.length),
-          lineEndCaret: selection.ranges.length === 1 && selection.main.empty &&
-            doc.lineAt(head).to === head ? head : null,
+          startCaret: selection.ranges.length === 1 && selection.main.empty ? selection.main.head : null,
+          lastEditState: state,
+          ending: false,
+          selectionTaken: false,
         }
       }
       this.beginBlankComposition()
       // P2-05：组合开始 = 输入挂起态——置位 settle 检测
       this.notifyInputSettle()
+    }
+    const captureCompositionEnd = () => {
+      if (this.composeNetChanges) this.composeNetChanges.ending = true
     }
     return [
       EditorView.lineWrapping,
@@ -3006,6 +2998,20 @@ export class LiveEditorInstance {
       // 排除，见 runFindReplace）
       findDecorations,
       ...extraExtensions,
+      Prec.highest(EditorState.transactionFilter.of((tr) => {
+        const committed = this.committedPunctuationCaret
+        const view = this.view
+        if ((!committed && !this.composeNetChanges?.ending) || !view || tr.startState !== view.state ||
+            tr.docChanged || !tr.selection || !tr.isUserEvent('select') || !isNativeSelectionReport(view, tr.selection)) return tr
+        const annotations = imeNativeCaretReport.of(true)
+        const { main, ranges } = tr.selection
+        if (!committed || tr.startState.doc !== committed.doc || tr.startState.selection.main.head !== committed.at + 1 ||
+            !main.empty || ranges.length !== 1 || main.head < committed.lineFrom || main.head > committed.at) {
+          return [tr, { annotations }]
+        }
+        // 消化原生选区的同一事务直接保留定稿落点，装饰层不先渲染旧位置。
+        return [tr, { selection: { anchor: committed.at + 1 }, annotations, sequential: true }]
+      })),
       EditorView.updateListener.of((update) => {
         // 根特性的事务旁路观测先行（快速操作条/模式锚点/查找/大纲），
         // 与原 updateListener 内「根联动在前、同步簿记在后」的次序一致
@@ -3022,12 +3028,31 @@ export class LiveEditorInstance {
           if (this.multiCursorCompose && tr.docChanged) {
             this.multiCursorCompose.netChanges = this.multiCursorCompose.netChanges.compose(tr.changes)
           }
-          // #593 组合期通用净变更累积：与 #495 补偿材料共享累积点（组合期
-          // 外部增量经 pendingExternal 缓冲、不在此产生事务——与 #495 同
-          // 前提；取消组合的回退事务同样进累积，净变更回到原点，但补驱动
-          // 门控对空 data 不消费）
-          if (this.composeNetChanges && tr.docChanged) {
-            this.composeNetChanges.net = this.composeNetChanges.net.compose(tr.changes)
+          // #593 只组合 CM6 的候选/定稿事务及组合开始时跨行选区的首笔删除。
+          // compositionend 后还可能有独立的编辑；它们不是 IME 的 replaced。
+          const compose = this.composeNetChanges
+          const composeInput = tr.isUserEvent('input.type.compose')
+          if (compose && tr.docChanged && tr.startState.doc === compose.lastEditState.doc &&
+              (composeInput || (!compose.ending && tr.annotation(Transaction.userEvent) === 'input'))) {
+            compose.net = compose.net.compose(tr.changes)
+            compose.lastEditState = tr.state
+          }
+          const nativeSelection = tr.annotation(imeNativeCaretReport) === true
+          const committed = this.committedPunctuationCaret
+          if (committed) {
+            const { main, ranges } = tr.newSelection
+            const atCommit = ranges.length === 1 && main.empty && main.head === committed.at + 1
+            if (tr.annotation(builtinEditOrigin) && tr.startState.doc === committed.doc && atCommit) {
+              // 自动补闭合符仍属于本次提交，包含闭合符的文档继续等原生选区。
+              committed.doc = tr.newDoc
+            } else if (tr.docChanged || (tr.selection && !(nativeSelection && atCommit))) {
+              // 已纠正的原生回报不终止保护，同一次定稿可能还有旧选区回报。
+              this.committedPunctuationCaret = null
+            }
+          }
+          if (compose?.ending && tr.selection && !composeInput && !nativeSelection) {
+            // 定稿后的显式导航让位；候选高亮（包括原生非空选区）不取消校正。
+            compose.selectionTaken = true
           }
           // T07（#356）输入行为链驱动检测（内核情境门控在检测内先行）
           this.maybeDriveAddonBehaviors(tr, update.state)
@@ -3061,11 +3086,20 @@ export class LiveEditorInstance {
           // #597：符号原始键入事务（filter 放行重指定）强制暂缓出站；
           // #600：blankRow 规范化重建丢 symbolRawInput 注解——pending
           // effect 在场即同一键入路径（两载体恒同现），等价触发暂缓
+          // 晚到的起始符号定稿也要等内置补全/包裹；普通定稿不另改出站时机。
+          // 待应用的全文会清空暂缓集，沿用直接出站路径，不把输入留在其中。
+          const committedText = this.compositionCommittedText
+          const lateSymbolCommit = composeInput && !this.composing && compose?.ending === true &&
+            !this.pendingFull && committedText !== null && (
+            (this.symbolAutocompleteOn && findAutocloseEntry(committedText)?.open === committedText) ||
+            (this.symbolSelectionWrapOn && findSelectionWrapEntry(committedText) !== null)
+          )
           this.recordLocalChangeSet(
             tr.changes,
             changes,
             addonTag?.origins,
-            tr.annotation(symbolRawInput) === true || hasTypedAutoclosePending(tr),
+            lateSymbolCommit ? 'compose-symbol'
+              : tr.annotation(symbolRawInput) === true || hasTypedAutoclosePending(tr) ? 'typed-symbol' : undefined,
           )
         }
       }),
@@ -3095,14 +3129,14 @@ export class LiveEditorInstance {
         { key: 'Mod-y', run: () => this.requestHistory('redo'), stopPropagation: true },
       ])),
       ViewPlugin.fromClass(class {
-        private readonly onStart = captureCompositionStart
-
         constructor(private readonly view: EditorView) {
-          view.contentDOM.addEventListener('compositionstart', this.onStart, true)
+          view.contentDOM.addEventListener('compositionstart', captureCompositionStart, true)
+          view.contentDOM.addEventListener('compositionend', captureCompositionEnd, true)
         }
 
         destroy() {
-          this.view.contentDOM.removeEventListener('compositionstart', this.onStart, true)
+          this.view.contentDOM.removeEventListener('compositionstart', captureCompositionStart, true)
+          this.view.contentDOM.removeEventListener('compositionend', captureCompositionEnd, true)
         }
       }),
       // IME 组合状态跟踪：compositionend 后调度缓冲 flush
@@ -3140,6 +3174,7 @@ export class LiveEditorInstance {
           //（退化为此前行为，不引入新错位）
           if (!this.composing) {
             this.markPauseBoundary()
+            this.committedPunctuationCaret = null
             this.composing = true
             this.compositionInTableRegion = Boolean(this.view?.state.field(tableRegionField, false))
           }
@@ -3147,33 +3182,42 @@ export class LiveEditorInstance {
           // P2-05：组合开始 = 输入挂起态——置位 settle 检测
           this.notifyInputSettle()
         },
-        compositionend: (event) => {
-          this.compositionCommittedText = event.data || null
+        compositionend: (event, view) => {
+          const data = event.data
+          this.compositionCommittedText = data || null
           this.composing = false
           // #495 多选区组合定稿的光标补偿：DOM 组合已结束，写回选区不再
           // 中断 IME（组合进行中改选区会被浏览器当作取消组合——这是补偿
           // 放在 compositionend 而非事务过滤器的缘故）
-          this.compensateMultiCursorCompose()
+          const multiHead = this.compensateMultiCursorCompose()
+          const multi = multiHead === undefined ? null : { doc: view.state.doc, head: multiHead }
           this.scheduleFlush()
-          this.settleLineEndPunctuationCaret(event.data || '')
-          // #399 组合定稿驱动行为链。实证（CDP + Chromium）：定稿事务
-          // （insertCompositionText，userEvent 'input.type.compose'）**先于**
-          // compositionend 派发、处于组合期门控窗口内被 maybeDriveAddonBehaviors
-          // 拦截——故定稿不能靠事务路径驱动，在 compositionend 钩子补一次
-          // （与 #123 补全/#124 包裹的「定稿后微任务处理」同模式）。
-          this.maybeDriveAddonBehaviorsForComposeCommit(event.data || '')
+          const compose = this.composeNetChanges
+          const fromTable = this.blankComposition !== null || this.compositionInTableRegion
           this.compositionInTableRegion = false
+          // CM6 可能到 compositionend 后置 flush 才派发定稿事务。保留净变更
+          // 到这个微任务再读取；Prec.highest 保证本任务仍先于内置补全/包裹。
+          queueMicrotask(() => {
+            if (this.view !== view || this.composing || this.composeNetChanges !== compose) return
+            this.composeNetChanges = null
+            if (!data || fromTable) return
+            this.finishComposeCommit(view, data, compose, multi)
+          })
         },
         // #153：用户主动移光标开新撤销段（点击 / 导航键选区移动）；纯输入
         // 导致的光标后移不在此列（不派发 DOM 事件信号）
         mousedown: () => {
+          giveSelectionToUser()
           this.markUndoSegmentBoundary()
         },
         keydown: (event) => {
           if (UNDO_SEGMENT_NAV_KEYS.has(event.key)) {
+            giveSelectionToUser()
             this.markUndoSegmentBoundary()
           }
         },
+        touchstart: giveSelectionToUser,
+        blur: giveSelectionToUser,
       })),
       // #351 T02 附加组件扩展槽（数组末尾，见 addonExtensionCompartment 注释）
       this.addonExtensionCompartment.of([]),

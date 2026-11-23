@@ -14,15 +14,12 @@
 //   源码」（规格「普通点击渲染内容或编辑按钮 → 选中完整源码」）；修饰
 //   键点击（shift 扩选等）放行默认链——正反向跨块选择不扩选。
 // - 显隐切换不产生文档修改或独立撤销历史（纯装饰派生，零写回）。
-// - IME：组合发生在 CM6 文本层（组合期光标在已显形源码内 → 触及恒成立
-//   不重挂 widget；组合在片段外 → widget 与组合节点不同 DOM 区域）——
-//   与 liveInstance 组合门控族无交叉，无需额外冻结（推断依据：
-//   selectionTouchesRange 在组合期内恒命中已显形区间）。
+// - IME：复用组合起点的源码显形保护。原生光标回退到 HTML 前的缩进时，
+//   不能把仍在定稿的多行源码替换成 widget；定稿后恢复通常的显隐规则。
 import { Facet, RangeSet, StateField, type ChangeSet, type EditorState, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { BlockWrapper, Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import { ViewPlugin, ViewUpdate } from '@codemirror/view'
-import { selectionTouchesRange } from './liveDecorations'
-import { liveDecorationsField } from './liveDecorations'
+import { inlineCompositionSelection, inlineSourceTouchesRange, liveDecorationsField, type InlineCompositionSelection } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { classifyHtmlDivBlock, htmlDivWrappersOf, isPureStyleHtmlBlock, topLevelHtmlBlockSpansOfTree, type HtmlBlockSpan, type HtmlDivBlock, type HtmlDivWrapper } from '../shared/htmlBlock'
 import { htmlBlockRenderHtml } from './htmlSanitize'
@@ -317,6 +314,7 @@ export function buildLiveHtmlDecorationRanges(
   docScope: string | null,
   hits: readonly HitRange[] = [],
   divs?: ReadonlyMap<number, HtmlDivWrapper>,
+  composition?: InlineCompositionSelection | null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const span of spans) {
@@ -326,7 +324,7 @@ export function buildLiveHtmlDecorationRanges(
     if (isPureStyleHtmlBlock(span.source)) {
       continue // Q6A：纯 style 块源码常显，不占位
     }
-    const touched = selectionTouchesRange(selection, span.from, span.to) ||
+    const touched = inlineSourceTouchesRange(selection, span.from, span.to, composition) ||
       hitIntersectsRange(hits, span.from, span.to)
     if (!touched) {
       const deco = divs?.has(span.from) ? hideHtmlDivTag : liveHtmlWidgetDeco(span.source, span.from, span.to, docScope)
@@ -499,6 +497,7 @@ export const liveHtmlDecorations = StateField.define<DecorationSet>({
         state.facet(liveHtmlDocScopeFacet),
         hitRangesOf(state),
         state.field(liveHtmlDivs, false),
+        state.field(inlineCompositionSelection, false),
       ),
       true,
     )
@@ -510,7 +509,9 @@ export const liveHtmlDecorations = StateField.define<DecorationSet>({
       tr.startState.field(liveDecorationsField, false) !== tr.state.field(liveDecorationsField, false)
     const hitsChanged =
       tr.startState.field(hitRevealField, false) !== tr.state.field(hitRevealField, false)
-    if (!tr.docChanged && tr.selection === undefined && !spansChanged && !liveDecoChanged && !hitsChanged) {
+    const composition = tr.state.field(inlineCompositionSelection, false)
+    const compositionChanged = tr.startState.field(inlineCompositionSelection, false) !== composition
+    if (!tr.docChanged && tr.selection === undefined && !spansChanged && !liveDecoChanged && !hitsChanged && !compositionChanged) {
       return value
     }
     const deco = tr.state.field(liveDecorationsField, false)
@@ -525,6 +526,7 @@ export const liveHtmlDecorations = StateField.define<DecorationSet>({
         tr.state.facet(liveHtmlDocScopeFacet),
         hitRangesOf(tr.state),
         tr.state.field(liveHtmlDivs, false),
+        composition,
       ),
       true,
     )
