@@ -285,6 +285,11 @@ export const pasteRuleInlineMathSample: AddonPasteRuleDeclaration = {
   match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex' }] },
   output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, inlineMath: true } } },
 }
+export const pasteRuleBlockMathSample: AddonPasteRuleDeclaration = {
+  id: 'sample-block-math',
+  match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex-display' }] },
+  output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, blockMath: true } } },
+}
 // 既有消费者仍只需区分 discard 与 template。
 export const pasteRuleTemplate = (output: AddonPasteRuleOutput): string =>
   output.kind === 'discard' ? '' : output.template

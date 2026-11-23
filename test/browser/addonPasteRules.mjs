@@ -510,6 +510,28 @@ try {
   await page.keyboard.press('Control+Z'); await waitBoth('$abxc$ tail')
   console.log('[PASS] 普通粗体粘贴到旧行内公式时只写入 TeX 原文，一次撤销恢复')
 
+  const displayRule = {
+    addonId: 'ONEGAYI.vsidian-codex-bridge', id: 'katex-block-math', priority: 0,
+    match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex-display' }] },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, blockMath: true } } },
+  }
+  await page.evaluate(snapshot => window.pasteRules(snapshot), { version: 10, rules: [...formulaRules, displayRule] })
+  await page.evaluate(() => {
+    window.replace('前文后文')
+    window.selectRanges([{ anchor: 2, head: 2 }])
+  })
+  const displayTex = String.raw`q = \underbrace{x}_{\text{空间}}`
+  await write('q = x', '<span class="katex-display">' +
+    katexSpan(displayTex).replace('<math>', '<math display="block">') + '</span>')
+  await page.keyboard.press('Control+V')
+  await waitBoth('前文\n\n$$\n' + displayTex + '\n$$\n\n后文')
+  await page.keyboard.press('Control+End')
+  await editor.locator('.vsidian-math .katex-display').waitFor({ state: 'visible' })
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), [displayTex])
+  await page.keyboard.press('Control+Z'); await waitBoth('前文q = x后文')
+  await page.keyboard.press('Control+Z'); await waitBoth('前文后文')
+  console.log('[PASS] KaTeX 块公式以独立块粘贴、显示并分步撤销')
+
   const blockSource = '$$\na+b\n$$\n\nend'
   await page.evaluate(source => {
     window.replace(source)

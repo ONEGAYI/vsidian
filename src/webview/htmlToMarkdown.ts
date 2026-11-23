@@ -20,6 +20,8 @@ export interface ConvertedHtml {
   hasFormatting: boolean
   /** 本次由规则恢复的公式在 Markdown 中的定界符区间（含美元符）。 */
   inlineMath?: readonly { from: number; to: number }[]
+  /** 组件恢复的块公式区间，供落点校验与段界规划使用。 */
+  blockMath?: readonly { from: number; to: number }[]
 }
 /** 转换选项：addonPasteRules 为本次粘贴开始时捕获的有效规则序（快照） */
 export interface HtmlToMarkdownOptions {
@@ -36,15 +38,15 @@ const escapeText = (text: string) => escapeEntityPrefixes(text).replace(/\\/g, '
   .replace(/^(\s{0,3})([-+])(?=\s|[-+]{2})/gm, '$1\\$2').replace(/^(\s{0,3}\d+)([.)])(?=\s)/gm, '$1\\$2')
 // 来源正文里的美元不是定界符。保留身份到最终行，避免改变没有还原公式的行。
 const escapeClipboardText = (text: string) => escapeText(text).replace(/\$/g, '\u0000d\u0000')
-const PASTE_TOKEN = /\u0000(\u0000|d\u0000|m?\d+\u0000)/g
-function containsMathToken(text: string): boolean {
+const PASTE_TOKEN = /\u0000(\u0000|d\u0000|[mb]?\d+\u0000)/g
+function containsMathToken(text: string, kind = 'm'): boolean {
   for (const match of text.matchAll(PASTE_TOKEN)) {
-    if (match[1]!.startsWith('m')) return true
+    if (match[1]!.startsWith(kind)) return true
   }
   return false
 }
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
-interface InlineRun extends Marks { text: string; leadingHtmlSpace?: boolean }
+interface InlineRun extends Marks { text: string; leadingHtmlSpace?: boolean; blockMath?: true }
 const unmarked: Marks = { bold:false, italic:false, strike:false }
 const markKeys: Array<keyof Marks> = ['strike','italic','bold']
 
@@ -76,6 +78,7 @@ interface AddonPasteRuleEvaluationDeps {
   escapeSourceText(value: string): string
   /** 格式化阶段保留公式身份；最终序列化后才写入真实定界符。 */
   inlineMath(tex: string): string | null
+  blockMath(tex: string): string | null
   templateCache: Map<string, readonly AddonPasteTemplatePart[]>
   /** 正则编译缓存（本次粘贴结束即释放；编译失败缓存 null——单条失败回退） */
   regexCache: Map<string, RegExp | null>
@@ -189,11 +192,15 @@ function evaluateAddonPasteRule(rule: AddonPasteRule | AddonPasteNestedRule, el:
     }
     const slot = rule.output.slots[part.slot]
     if (!slot) return null
-    if (slot.inlineMath) {
-      const annotation = el.querySelector('math:not([display="block"]) > semantics > annotation[encoding="application/x-tex"]')
+    if (slot.inlineMath || slot.blockMath) {
+      const math = slot.blockMath ? 'math[display="block"]' : 'math:not([display="block"])'
+      const annotation = el.querySelector(math + ' > semantics > annotation[encoding="application/x-tex"]')
       const tex = annotation?.textContent?.trim()
+      if (!tex) return null
+      // 块扫描器会把任意正文行上的双美元符当作闭合符，不生成会提前关闭的块。
+      if (slot.blockMath) return tex.includes('$$') ? null : deps.blockMath(tex.replace(/\r\n?/g, '\n'))
       // 公式槽独占模板：裸 $ 会提前闭合，尾部反斜杠会改变结束定界符语义。
-      if (!tex || /[\r\n]|(^|[^\\])(?:\\\\)*\$|\\$/u.test(tex)) return null
+      if (/[\r\n]|(^|[^\\])(?:\\\\)*\$|\\$/u.test(tex)) return null
       return deps.inlineMath(tex)
     }
     // 取值：属性缺失（null）、文本/子内容为空串、正则不匹配、捕获组
@@ -248,6 +255,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   let hasFormatting = false
   const literalBlocks: string[] = []
   const mathLiterals: string[] = []
+  const blockMathLiterals: string[] = []
   let visited = 0
   // #541 T01 / #542 T02 附加组件粘贴规则：本次粘贴使用开始时捕获的有效
   // 快照（调用方传入），转换中不拼接两个注册代次；入口统一应用确定性排
@@ -280,6 +288,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
             if (table && Array.from(tex.matchAll(/\|/g)).some(hit => isEscapedAt(tex, hit.index))) return null
             return `\u0000m${mathLiterals.push(table ? tex.replace(/\|/g, '\\|') : tex) - 1}\u0000`
           },
+          blockMath: (tex) => table || el.closest('a[href]') ? null : `\n\n\u0000b${blockMathLiterals.push(tex) - 1}\u0000\n\n`,
           templateCache,
           regexCache,
           spendStep: spendAddonRuleStep,
@@ -298,6 +307,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
           // 格式；其余模板沿用行内 run 的格式合并，避免规则命中的文字
           // 脱离父层粗体等标记。
           const slots = rule.output.kind === 'template' ? Object.values(rule.output.slots) : []
+          if (slots.some(slot => slot.blockMath)) return { ...unmarked, text: output, blockMath: true }
           const convertedChildren = slots.some(slot => slot.source.kind === 'children')
           return { ...(convertedChildren ? unmarked : effectiveMarks(el, inherited)), text: output }
         }
@@ -420,23 +430,28 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     let previousOrphanItem = false
     const onlyIndent = () => runs.every(run => !run.text || (run.leadingHtmlSpace && run.text === ' '))
     const atParagraphStart = () => result ? result.endsWith('\n\n') : startsParagraph
+    const appendBlock = (block: string, orphanItem = false) => {
+      if (orphanItem && runs.every(run => !run.text.trim())) {
+        // 两个相邻的独立 li 合成紧凑列表。两侧仍留段界，避免吸收正文。
+        result = previousOrphanItem ? result.slice(0, -1) + block.slice(2) : result + block
+      } else {
+        const separated = block.startsWith('\n\n') || (!result && block.endsWith('\n\n'))
+        result += (separated && onlyIndent() ? '' : serialize(runs, atParagraphStart())) + block
+      }
+      runs = []
+      previousOrphanItem = orphanItem
+    }
     for (const node of Array.from(el.childNodes)) {
       if (node instanceof Element && isBlockContainer(node)) {
         // 透明包装继承外侧段首，但不能越过包装之前的可见行内内容。
-        const trimLeading = atParagraphStart()
-        const indent = onlyIndent()
-        const block = render(node, table, marks, trimLeading && indent)
-        const orphanItem = node.tagName === 'LI' && block.startsWith('\n\n- ') && block.endsWith('\n\n')
-        if (orphanItem && runs.every(run => !run.text.trim())) {
-          // 两个相邻的独立 li 合成紧凑列表。两侧仍留段界，避免吸收正文。
-          result = previousOrphanItem ? result.slice(0, -1) + block.slice(2) : result + block
-        } else {
-          const separated = block.startsWith('\n\n') || (!result && block.endsWith('\n\n'))
-          result += (separated && indent ? '' : serialize(runs, trimLeading)) + block
+        const block = render(node, table, marks, atParagraphStart() && onlyIndent())
+        appendBlock(block, node.tagName === 'LI' && /^\n\n-(?: |\n)/.test(block) && block.endsWith('\n\n'))
+      } else {
+        for (const run of inline(node, marks, table)) {
+          if (run.blockMath) appendBlock(run.text)
+          else runs.push(run)
         }
-        runs = []
-        previousOrphanItem = orphanItem
-      } else runs.push(...inline(node,marks,table))
+      }
     }
     return result + serialize(runs, atParagraphStart())
   }
@@ -458,7 +473,10 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const content = children(clone, table, inherited).trim().replace(/\n{3,}/g, '\n\n')
     const tail = nested.map(el => '\n' + render(el, table, effectiveMarks(li, inherited)).trim().split('\n')
       .map(part => indent + part).join('\n')).join('')
-    return prefix + task + content.replace(/\n/g, '\n' + indent) + tail
+    // 条目首块也让 $$ 单独成行，列表标记不能占据公式的开启行。
+    const marker = prefix + task
+    const head = content.startsWith('\u0000b') ? marker.trimEnd() + '\n' + indent : marker
+    return head + content.replace(/\n/g, '\n' + indent) + tail
   }
   function render(node: Node, table = false, inherited: Marks = unmarked, startsParagraph = false): string {
     if (++visited > HTML_NODE_BUDGET) throw new Error('Clipboard HTML exceeds node budget')
@@ -531,10 +549,12 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
   if (paragraphs.length > 1) hasFormatting = true
   const rendered = render(template.content)
   // 公式坐标由 CM6 消费，必须在计数前统一 CRLF/CR；无公式保留既有输出。
-  const normalizeLF = mathLiterals.length > 0 && containsMathToken(rendered)
+  const hasBlockMath = blockMathLiterals.length > 0 && containsMathToken(rendered, 'b')
+  const normalizeLF = hasBlockMath || (mathLiterals.length > 0 && containsMathToken(rendered))
   const output = (normalizeLF ? rendered.replace(/\r\n?/g, '\n') : rendered).replace(/\n{3,}/g, '\n\n').trim()
   if (!output.includes('\u0000')) return { markdown: output, hasFormatting }
   const inlineMath: { from: number; to: number }[] = []
+  const blockMath: { from: number; to: number }[] = []
   let markdown = ''
   for (const [index, line] of output.split('\n').entries()) {
     if (index > 0) markdown += '\n'
@@ -545,13 +565,21 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
       end = match.index + match[0].length
       const token = match[1]!
       if (token === '\u0000') markdown += token
-      else if (token === 'd\u0000') markdown += hasMath ? '\\$' : '$'
+      else if (token === 'd\u0000') markdown += hasMath || hasBlockMath ? '\\$' : '$'
       else if (token.startsWith('m')) {
         if (inlineMathNeedsSpace(markdown.at(-1), 'before')) markdown += ' '
         const from = markdown.length
         markdown += `$${mathLiterals[Number(token.slice(1, -1))]}$`
         inlineMath.push({ from, to: markdown.length })
         if (inlineMathNeedsSpace(line[end], 'after')) markdown += ' '
+      } else if (token.startsWith('b')) {
+        const tex = blockMathLiterals[Number(token.slice(1, -1))]!
+        // 外层列表缩进与引用前缀已落在占位行；在展开 TeX 时延续同一前缀。
+        const leading = line.slice(0, match.index)
+        const prefix = /^[\t >]*$/.test(leading) ? leading : ''
+        const from = markdown.length
+        markdown += '$$\n' + prefix + tex.replace(/\n/g, '\n' + prefix) + '\n' + prefix + '$$'
+        blockMath.push({ from, to: markdown.length })
       } else {
         const block = literalBlocks[Number(token.slice(0, -1))]!
         markdown += normalizeLF ? block.replace(/\r\n?/g, '\n') : block
@@ -559,5 +587,5 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     }
     markdown += line.slice(end)
   }
-  return { markdown, hasFormatting, ...(inlineMath.length ? { inlineMath } : {}) }
+  return { markdown, hasFormatting, ...(inlineMath.length ? { inlineMath } : {}), ...(blockMath.length ? { blockMath } : {}) }
 }

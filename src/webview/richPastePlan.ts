@@ -1,7 +1,7 @@
 import { EditorSelection, type EditorState, type Text, type Transaction } from '@codemirror/state'
 import type { PasteSelection, PasteStage } from '../shared/protocol'
-import { inlineMathNeedsSpace, scanMathRanges, type MathOccurrence } from '../shared/math'
-import { markdownTreeParser, scanMathInMarkdownLine, type MarkdownMathSource } from '../shared/markdownDoc'
+import { inlineMathNeedsSpace, MATH_CODE_CONTEXTS, scanMathRanges, type MathOccurrence } from '../shared/math'
+import { chainAt, docInput, frontmatterRange, markdownTreeParser, scanMathInMarkdownLine, type MarkdownMathSource } from '../shared/markdownDoc'
 import type { ConvertedHtml } from './htmlToMarkdown'
 
 export function pasteSelection(selection: EditorSelection): PasteSelection {
@@ -37,11 +37,14 @@ function paragraphBreak(doc: Text, at: number, side: 'before' | 'after'): string
 
 const independentPasteBlocks = new Set(['BulletList', 'OrderedList', 'Blockquote'])
 
-function blockPasteBreaks(state: EditorState, input: Text, distribute: boolean): readonly { before: string; after: string }[] {
+function blockPasteBreaks(state: EditorState, input: Text, distribute: boolean, math: NonNullable<ConvertedHtml['blockMath']>): readonly { before: string; after: string }[] {
   const ranges = state.selection.ranges
   const edges = (text: string) => {
     const tree = markdownTreeParser.parse(text).topNode
-    return { before: independentPasteBlocks.has(tree.firstChild?.name ?? ''), after: independentPasteBlocks.has(tree.lastChild?.name ?? '') }
+    return {
+      before: math[0]?.from === 0 || independentPasteBlocks.has(tree.firstChild?.name ?? ''),
+      after: math.at(-1)?.to === text.length || independentPasteBlocks.has(tree.lastChild?.name ?? ''),
+    }
   }
   const parsed = distribute ? ranges.map((_, i) => edges(input.line(i + 1).text)) : [edges(input.toString())]
   return ranges.map((range, i) => {
@@ -63,7 +66,7 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   insertions?: string[]; adjusted: boolean
 } | null {
   const ranges = state.selection.ranges
-  const { markdown: text, inlineMath = [] } = converted
+  const { markdown: text, inlineMath = [], blockMath = [] } = converted
   const scanned = new Map<number, MathOccurrence[]>()
   const existingInline: MathOccurrence[] = []
   const boundaryBlocks = new Set<MathOccurrence>()
@@ -89,8 +92,9 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   }
   const input = state.toText(text)
   const distribute = input.lines === ranges.length
-  const breaks = blockPasteBreaks(state, input, distribute)
-  if (!inlineMath.length && !breaks.some(edge => edge.before || edge.after)) return { adjusted: false }
+  if (distribute && blockMath.length) return null // 按行分发会把同一公式拆给多个选区。
+  const breaks = blockPasteBreaks(state, input, distribute, blockMath)
+  if (!inlineMath.length && !blockMath.length && !breaks.some(edge => edge.before || edge.after)) return { adjusted: false }
   const existingStarts = new Set(existingInline.map(hit => hit.from))
   const existingEnds = new Set(existingInline.map(hit => hit.to))
   const mathByLine = new Map<number, { from: number; to: number }[]>()
@@ -103,6 +107,7 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
     }
   }
   const expected: { from: number; to: number }[] = []
+  const expectedBlocks: { from: number; to: number }[] = []
   let tail: string | undefined, tailIsMath = false, shift = 0, adjusted = false
   const insertions = ranges.map((range, i) => {
     const line = distribute ? input.line(i + 1) : undefined
@@ -128,6 +133,7 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
     const insert = prefix + (before ? ' ' : '') + chunk + (after ? ' ' : '') + suffix
     const offset = range.from + shift + prefix.length + Number(before) - start
     for (const hit of math) expected.push({ from: hit.from + offset, to: hit.to + offset })
+    for (const hit of blockMath) expectedBlocks.push({ from: hit.from + offset, to: hit.to + offset })
     shift += insert.length - (range.to - range.from)
     if (suffix) {
       tail = '\n'
@@ -139,6 +145,20 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   // 校验草稿文档，不触发安装在真实事务上的行为或过滤器。
   const { changes } = pasteChanges(state, text, insertions)
   const doc = changes.apply(state.doc)
+  if (expectedBlocks.length) {
+    const draft = doc.toString()
+    const fm = frontmatterRange(draft)
+    const tree = markdownTreeParser.parse(docInput(doc))
+    // 从文档开头扫描：落点之前未闭合的块也可能抢占这次插入的开启符。
+    const actual = new Map(scanMathRanges(draft.split('\n'), 0)
+      .filter(hit => hit.kind === 'block').map(hit => [hit.from, hit.to]))
+    if (expectedBlocks.some(hit =>
+      actual.get(hit.from) !== hit.to ||
+      (fm && hit.from < fm.end) ||
+      chainAt(tree, hit.from).some(node => MATH_CODE_CONTEXTS.has(node.name) || node.name === 'CommentBlock' || node.name === 'HTMLBlock') ||
+      doc.sliceString(hit.to, doc.lineAt(hit.to).to).trim(),
+    )) return null
+  }
   // 只检查选区端点所在线的旧公式；被选区替换的公式不参与校验。
   const existing = existingInline.concat([...boundaryBlocks]).sort((a, b) => a.from - b.from)
   const closingTails: { from: number; to: number }[] = []

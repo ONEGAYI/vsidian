@@ -9,7 +9,7 @@
 // - 纯文本粘贴（总开关关闭/代码上下文）不经过规则。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
-import { EditorSelection } from '@codemirror/state'
+import { EditorSelection, EditorState } from '@codemirror/state'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { mathBlocksField } from '../../src/webview/liveMath'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -19,6 +19,7 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 import type { WebviewToHost } from '../../src/shared/protocol'
 import type { SettingsPayload } from '../../src/shared/settings'
 import * as conversion from '../../src/webview/htmlToMarkdown'
+import { prepareRichPaste } from '../../src/webview/richPastePlan'
 
 if (!Range.prototype.getClientRects) { Range.prototype.getClientRects = () => [] as unknown as DOMRectList; Range.prototype.getBoundingClientRect = () => new DOMRect() }
 let c: WebviewSyncController
@@ -83,7 +84,57 @@ function readingTexOf(source: string): (string | null)[] {
   )
 }
 
+function pasteDisplayMath(view: EditorView, tex: string, plain: string, prefix = '', suffix = '') {
+  c.handleHostMessage({ kind: 'addonPasteRules.snapshot', snapshot: { version: 1, rules: [{
+    addonId: 'fixture.demo', id: 'display-math', priority: 0, match: { tag: 'SPAN' },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, blockMath: true } } },
+  }] } })
+  paste(view, prefix + `<span class="katex-display"><math display="block"><semantics><mi>q</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span>` + suffix, plain)
+}
+
 describe('粘贴规则控制器消费链', () => {
+  it.each(['', '$$\n未闭合\n'])('段中粘贴块公式不破坏前后正文或未闭合块：%j', async (prefix) => {
+    const { view, sent } = mount(prefix + '前文后文')
+    const at = prefix.length + 2
+    view.dispatch({ selection: { anchor: at } })
+    const tex = String.raw`q = \underbrace{x}_{\text{空间}}`
+    pasteDisplayMath(view, tex, 'q = x')
+    await settle()
+    const source = view.state.doc.toString()
+    expect(source).toBe(prefix ? prefix + '前文q = x后文' : '前文\n\n$$\n' + tex + '\n$$\n\n后文')
+    if (!prefix) expect(readingTexOf(source)).toEqual([tex])
+    const first = sent.find(m => m.kind === 'edit.request')
+    expect(first?.kind === 'edit.request' && first.changes).toEqual([{ offset: at, length: 0, text: 'q = x' }])
+  })
+  it('块公式落点在已保留的 YAML 头块内时，规划只用纯文本', () => {
+    const source = '---\ntitle: sample\n---\n\nbody'
+    const at = source.indexOf('sample') + 2
+    const state = EditorState.create({ doc: source, selection: { anchor: at } })
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, []))
+      .toBeNull()
+  })
+  it('注释中的公式落点不产生不可见的格式编辑', async () => {
+    const { view } = mount('<!--\ncomment\n-->\n\nafter')
+    view.dispatch({ selection: { anchor: 5 } })
+    pasteDisplayMath(view, 'x', 'X')
+    await settle()
+    expect(view.state.doc.toString()).toBe('<!--\nXcomment\n-->\n\nafter')
+  })
+  it.each([
+    ['<ol><li>', '</li><li>后项</li></ol>', '1.\n   $$\n   x\n   $$\n2. 后项', 'ol'],
+    ['<ul><li>', '</li><li>后项</li></ul>', '-\n  $$\n  x\n  $$\n- 后项', 'ul'],
+    ['<li>', '</li><li>后项</li>', '-\n  $$\n  x\n  $$\n- 后项', 'ul'],
+  ])('公式可作为列表条目的第一块：%s', async (prefix, suffix, expected, tag) => {
+    const { view } = mount('')
+    pasteDisplayMath(view, 'x', 'x\n后项', prefix, suffix)
+    await settle()
+    const source = view.state.doc.toString()
+    expect(source).toBe(expected)
+    expect(readingTexOf(source)).toEqual(['x'])
+    expect(splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+      .flatMap(block => Array.from(block.querySelectorAll(tag + ' > li')))).toHaveLength(2)
+  })
   it('Live 展示实体解码文本，光标进入只显形当前实体，代码保持字面', () => {
     const source = '开头&#30528; &amp; &#x1F642; &missing; `&#30528;`\n结尾'
     const { view } = mount(source)

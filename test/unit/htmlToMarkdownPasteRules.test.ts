@@ -52,6 +52,47 @@ const promptLinkRule = (override: Partial<AddonPasteRule> = {}): AddonPasteRule 
 
 const convert = (html: string, rules: readonly AddonPasteRule[]) => htmlToMarkdown(html, { addonPasteRules: rules })
 
+describe('从显式块级 MathML 还原 TeX', () => {
+  const declaration = {
+    id: 'display-math', match: { tag: 'SPAN', attributes: [{ name: 'class', value: 'katex-display' }] },
+    output: { kind: 'template', template: '{{tex}}', slots: { tex: { source: { kind: 'text' }, blockMath: true } } },
+  }
+  const markup = (tex: string, display = 'block') => `<span class="katex-display"><span class="katex"><math display="${display}"><semantics><mi>x</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math><span aria-hidden="true">visual</span></span></span>`
+
+  it('块公式经注册与快照守卫后按独立行写出，保留内部 TeX 的换行', () => {
+    const result = pasteRulesModule.validateAddonPasteRuleDeclarations([declaration])
+    expect(result).toMatchObject({ ok: true })
+    if (!result.ok) throw new Error(result.detail)
+    const rules = result.rules.map(r => ({ ...r, addonId: 'fixture.demo' }))
+    expect(pasteRulesModule.isAddonPasteRulesSnapshot({ version: 1, rules })).toBe(true)
+    const tex = String.raw`\begin{aligned}x&=1\\ y&=2\end{aligned}` + '\n\n+z'
+    const frame = '$$\n' + tex + '\n$$'
+    expect(convert('<p>A</p>\n  ' + markup(tex) + '\n  <ul><li>B</li></ul>', rules)).toEqual({
+      markdown: 'A\n\n' + frame + '\n\n- B',
+      hasFormatting: true, blockMath: [{ from: 3, to: 3 + frame.length }],
+    })
+    expect(convert('<blockquote>' + markup(tex) + '</blockquote>', rules).markdown)
+      .toBe(frame.split('\n').map(line => '> ' + line).join('\n'))
+    expect(convert('<p>$$</p>' + markup('x'), rules).markdown).toBe('\\$\\$\n\n$$\nx\n$$')
+    expect(convert('<a href="https://example.com">' + markup('x') + '</a>', rules).markdown)
+      .toBe('[x](https://example.com)')
+    for (const html of [markup('x', 'inline'), markup('x\n$$\ny'), markup(' '),
+      '<table><tr><th>A</th></tr><tr><td>' + markup('x') + '</td></tr></table>']) {
+      expect(convert(html, rules)).toEqual(convert(html, []))
+    }
+  })
+
+  it('块公式槽不可与行内槽、URL 或其他模板文本共存', () => {
+    for (const output of [
+      { ...declaration.output, template: 'prefix {{tex}}' },
+      { ...declaration.output, slots: { tex: { ...declaration.output.slots.tex, inlineMath: true } } },
+      { ...declaration.output, slots: { tex: { ...declaration.output.slots.tex, url: true } } },
+    ]) {
+      expect(pasteRulesModule.validateAddonPasteRuleDeclarations([{ ...declaration, output }])).toMatchObject({ ok: false })
+    }
+  })
+})
+
 describe('粘贴规则转换：从 MathML 还原行内 TeX', () => {
   const declarations = [{
     id: 'inline-math',
