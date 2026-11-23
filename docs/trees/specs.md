@@ -47,8 +47,36 @@ vsidian/
         ├── frontmatter-table.md                  # frontmatter 表格化规格
         ├── graphic-code-block-interaction.md     # 图形化代码块交互规格
         ├── heading-fold.md                       # 正文标题折叠实施规格
-        ├── hover-embed-phase2-tickets/…          # 二期票据正文与依赖
-        ├── hover-embed-phase3-tickets/…          # 三期票据正文与依赖
+        ├── hover-embed-phase2-tickets/           # 二期票据正文与依赖
+        │   ├── 01-host-compatibility.md       # 二期P2-01任务与票据
+        │   ├── 02-live-instance-seam.md       # 二期P2-02任务与票据
+        │   ├── 03-full-document-navigation.md # 二期P2-03任务与票据
+        │   ├── 04-embed-target-editing.md     # 二期P2-04任务与票据
+        │   ├── 05-explicit-close.md           # 二期P2-05任务与票据
+        │   ├── 06-hover-live.md               # 二期P2-06任务与票据
+        │   ├── 07-mixed-list-quote-live.md    # 二期P2-07任务与票据
+        │   ├── 08-table-cell-live.md          # 二期P2-08任务与票据
+        │   ├── 09-recursive-live.md           # 二期P2-09任务与票据
+        │   ├── 10-full-live-actions.md        # 二期P2-10任务与票据
+        │   ├── 11-target-resources.md         # 二期P2-11任务与票据
+        │   ├── 12-conflict-native-diff.md     # 二期P2-12任务与票据
+        │   ├── 13-parent-close-handoff.md     # 二期P2-13任务与票据
+        │   ├── 14-phase2-closeout.md          # 二期P2-14任务与票据
+        │   └── README.md                      # 二期票据索引与依赖
+        ├── hover-embed-phase3-tickets/           # 三期票据正文与依赖
+        │   ├── 01-renderer-access-seam.md         # 多类型只读入口准备票
+        │   ├── 02-pdf-compatibility-probe.md      # PDF下界与包体验证票
+        │   ├── 03-native-text-appearance-probe.md # 文本原生外观验证票
+        │   ├── 04-image-attachment-parity.md      # 图片双链同源呈现票
+        │   ├── 05-pdf-hover-first-page.md         # PDF悬停页码闭环票
+        │   ├── 06-pdf-scroll-embed.md             # PDF全文滚动嵌入票
+        │   ├── 07-pdf-zoom-copy-links.md          # PDF缩放文本选择票
+        │   ├── 08-text-hover-native.md            # 文本原生外观悬停票
+        │   ├── 09-text-embed-sync.md              # 文本视口嵌入同步票
+        │   ├── 10-external-link-card.md           # 外链标题摘要卡片票
+        │   ├── 11-external-page-fallback.md       # 原网页与卡片退回票
+        │   ├── 12-phase3-closeout.md              # 三期组合资源收口票
+        │   └── README.md                          # 三期票据依赖与发布索引
         ├── hover-preview-embed.md                # 悬停预览与文档嵌入规格
         ├── html-comment-support.md               # HTML 注释快捷键与呈现规格
         ├── html-rendering.md                     # 原生HTML与文档样式规格
@@ -81,9 +109,37 @@ vsidian/
         ├── vault-index-backlinks.md              # 引用索引与反链实施规格
         ├── viewport-width.md                     # 可读行宽与双模式列布局规格
         ├── vsidian-addons-coverage.md            # 29 用户故事覆盖映射
-        ├── vsidian-addons-tickets/…              # 附加组件验证与实施票面
+        ├── vsidian-addons-tickets/               # 附加组件验证与实施票面
+        │   ├── t01.md # 附加组件发现与注册实施票
+        │   ├── t02.md # 页面SDK通信与生命周期票
+        │   ├── t03.md # 编辑来源与历史接入准备票
+        │   ├── t04.md # 复杂设置与作用范围实施票
+        │   ├── t05.md # 组件侧栏与设置页实施票
+        │   ├── t06.md # 视图编辑API与原子历史票
+        │   ├── t07.md # 可组合输入行为实施票
+        │   ├── t08.md # 行为冲突管理界面实施票
+        │   ├── t09.md # 自动渲染接管与恢复实施票
+        │   ├── t10.md # 组件命令菜单与快捷键票
+        │   ├── t11.md # 组件按钮与面板实施票
+        │   ├── t12.md # 组件故障诊断与恢复票
+        │   ├── t13.md # 公开API声明与指南实施票
+        │   ├── t14.md # API基线与兼容门禁实施票
+        │   ├── t15.md # 三类公开SDK消费样例票
+        │   ├── t16.md # 附加组件双VSIX安装回归票
+        │   ├── t17.md # Remote同宿主接入验证票
+        │   ├── t18.md # 附加组件公开接入验收收口票
+        │   ├── v01.md # 原子历史与目标归属验证票
+        │   └── v02.md # 页面SDK与CM6装载验证票
         ├── vsidian-addons.md                     # 附加组件接入与公开API规格草案
-        ├── wikilink-completion-tickets/…         # 双链联想验证与实施票面
+        ├── wikilink-completion-tickets/          # 双链联想验证与实施票面
+        │   ├── t01.md # T01 Markdown 候选闭环
+        │   ├── t02.md # T02 全文件登记与维护
+        │   ├── t03.md # T03 目标区与按键仲裁
+        │   ├── t04.md # T04 标题候选与重名提示
+        │   ├── t05.md # T05 块 ID 与撤销收尾
+        │   ├── t06.md # T06 表格与内部 Live
+        │   ├── t07.md # T07 容量回归与交付收口
+        │   └── v01.md # V01 补 ID 与撤销验证
         └── wikilink-completion.md                # 双链文件输入联想规格
 <!-- file-tree:tree^id=specs:end -->
 ```
