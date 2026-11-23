@@ -465,7 +465,8 @@ try {
   console.log('[PASS] 外层列表和尾部引用各保住段界；两次撤销分别恢复纯文本和原文')
 
   const spacedPlain = '段落\n续行\n\n条目 n'
-  await write(spacedPlain, '<p><strong>段落</strong><br>续行</p>\n  <ul><li>条目 ' + katexSpan('n') + '</li></ul>')
+  await write(spacedPlain, '<p><strong>段落</strong><br>续行</p>\n  <section>\n  <ul><li>条目 ' +
+    katexSpan('n') + '</li></ul>\n  </section>')
   await selectAll(); await page.keyboard.press('Control+V')
   await waitBoth('**段落**  \n续行\n\n- 条目 $n$')
   await page.keyboard.press('Control+Home')

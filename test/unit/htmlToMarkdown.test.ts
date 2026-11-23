@@ -26,6 +26,16 @@ describe('剪贴板HTML可表达格式', () => {
     expect(htmlToMarkdown(html).markdown).toBe('**标题**  \n续行\n\n- 条目')
   })
   it.each([
+    ['<p>A</p>\n  <section>\n  <ul><li>B</li></ul>\n  </section>', 'A\n\n- B', '<ul>'],
+    ['<section><p>A</p>\n  </section>\n  <ul><li>B</li></ul>', 'A\n\n- B', '<ul>'],
+    ['<p>A</p>\n<!--a-->\n<!--b-->\n<!--c-->\n<div><ul><li>B</li></ul></div>', 'A\n\n- B', '<ul>'],
+    ['<p>A</p><section>\n<!--a-->\n<!--b-->\n<!--c-->\n<p>B</p></section>', 'A\n\nB', '<p>B</p>'],
+  ])('块包装和 HTML 注释不会增加空行或把内容变成代码：%s', (html, expected, block) => {
+    const { markdown } = htmlToMarkdown(html)
+    expect(markdown).toBe(expected)
+    expect(new MarkdownIt().render(markdown)).toContain(block)
+  })
+  it.each([
     ['<li>甲</li>\n  <li>乙<ul><li>子项</li></ul></li>', '- 甲\n- 乙\n  - 子项'],
     ['<p>前文</p><li><input type="checkbox" checked>完成</li><p>后文</p>', '前文\n\n- [x] 完成\n\n后文'],
   ])('独立条目保留列表结构：%s', (html, markdown) => {

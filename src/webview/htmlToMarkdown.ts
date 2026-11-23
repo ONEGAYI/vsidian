@@ -409,6 +409,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     const marks=el instanceof Element ? effectiveMarks(el,inherited) : inherited
     let result='',runs:InlineRun[]=[]
     let previousOrphanItem = false
+    const onlyIndent = () => runs.every(run => run.text === ' ')
     for (const node of Array.from(el.childNodes)) {
       if (node instanceof Element && isBlockContainer(node)) {
         const block = render(node, table, marks)
@@ -417,15 +418,15 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
           // 两个相邻的独立 li 合成紧凑列表。两侧仍留段界，避免吸收正文。
           result = previousOrphanItem ? result.slice(0, -1) + block.slice(2) : result + block
         } else {
-          // HTML 文本的缩进已折成空格；只在两侧都有段界时去掉它，不消费 <br>。
-          const blockIndent = result.endsWith('\n\n') && block.startsWith('\n\n') && runs.every(run => run.text === ' ')
-          result += (blockIndent ? '' : serialize(runs)) + block
+          // 缩进已折成空格，遇到真实段界才略过；透明包装逐层处理，不吞 <br> 或行内空格。
+          const separated = result.endsWith('\n\n') || block.startsWith('\n\n') || (!result && block.endsWith('\n\n'))
+          result += (separated && onlyIndent() ? '' : serialize(runs)) + block
         }
         runs = []
         previousOrphanItem = orphanItem
       } else runs.push(...inline(node,marks,table))
     }
-    return result+serialize(runs)
+    return result.endsWith('\n\n') && onlyIndent() ? result : result + serialize(runs)
   }
   function mark(text: string, marker: string): string {
     if (!text.trim()) return text
