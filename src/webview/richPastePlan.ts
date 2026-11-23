@@ -91,10 +91,10 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   const boundaryBlocks = new Set<MathOccurrence>()
   let blockIndex = 0
   for (const range of ranges) {
-    // 不拆现有列表；光标在完整列表两侧时仍可插入独立块。
+    // 不拆现有列表或引用；光标在完整容器两侧时仍可插入独立块。
     if (blockMath.length && sourceTree && [range.from, range.to].some(at =>
       chainAt(sourceTree, at).some(node =>
-        (node.name === 'BulletList' || node.name === 'OrderedList') && node.from < at && at < node.to))) return null
+        independentPasteBlocks.has(node.name) && node.from < at && at < node.to))) return null
     for (const at of [range.from, range.to]) {
       const line = state.doc.lineAt(at)
       // 光标或选区端点在已有公式内部：沿纯文本编辑，不把 Markdown 定界符写入 TeX。

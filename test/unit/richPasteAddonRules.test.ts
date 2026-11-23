@@ -137,6 +137,14 @@ describe('粘贴规则控制器消费链', () => {
       .flatMap(block => [...block.querySelectorAll('ul > li')]).map(li => li.textContent?.trim()))
       .toEqual(['甲', '乙'])
   })
+  it('引用内的列表起点不是独立落点，只插入原纯文本', async () => {
+    const { view, sent } = mount('> - 甲\n> - 乙')
+    view.dispatch({ selection: { anchor: 2 } })
+    pasteDisplayMath(view, 'x', 'X ')
+    await settle()
+    expect(view.state.doc.toString()).toBe('> X - 甲\n> - 乙')
+    expect(sent.filter(m => m.kind === 'edit.request')).toHaveLength(1)
+  })
   it('在远离旧块的长文档末尾保留公式，不复制全文为字符串', () => {
     const doc = Text.of(['$$', 'old', '$$', '', ...'段落\n\n'.repeat(20_000).split('\n')])
     const state = EditorState.create({ doc, selection: { anchor: doc.length } })
