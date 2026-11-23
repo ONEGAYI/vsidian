@@ -4,8 +4,8 @@
 //   dispatch（避免打断输入 / 破坏组合 DOM），缓冲到组合结束后按最新版本对账
 // - 缓冲期间 baseVersion 不推进：组合结束产生的 edit.request 携带组合前版本，
 //   由宿主重定位（错位会静默破坏坐标，故为关键正确性用例）
-// - flush 时外部增量坐标映射穿过组合编辑（CM6 ChangeSet）；区间重叠无法安全
-//   映射时保守请求全文重同步（sync.request → doc.resync），不静默丢字
+// - flush 时依次应用外部增量并推进已确认编辑的坐标；映射有歧义时暂停并
+//   上报本地快照，不静默丢字
 // - 组合取消（无文本变化）时缓冲仍被应用（flush 兜底）
 // - 组合期间到达的全文消息（doc.resync / ack 失败附全文）以全文形态缓冲，
 //   flush 时直接采用全文
@@ -372,6 +372,83 @@ describe('组合期间外部增量缓冲', () => {
     commitCompositionText(c, 3, '中文')
     await waitFlush()
     expect(c.getView()!.state.doc.toString()).toBe('甲bc中文def尾')
+  })
+
+  it.each(['ZZZZ', 'ZZZZZZ'])('组合中有部分确认：后续增量以已缓冲的前缀 %s 为基准', async (prefix) => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c, 'abcdefghijkl')
+      const view = c.getView()!
+      view.dispatch({ changes: { from: 3, insert: 'XX' } })
+      view.dispatch({ changes: { from: 14, insert: 'Y' } })
+      c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 2 })
+      startComposition(c)
+      c.handleHostMessage({ kind: 'doc.changed', version: 3, origin: 'external',
+        changes: [{ offset: 0, length: 0, text: prefix }] })
+      c.handleHostMessage({ kind: 'doc.changed', version: 4, origin: 'external',
+        changes: [{ offset: prefix.length, length: 1, text: 'Q' }] })
+      commitCompositionText(c, 8, '，')
+      expect(view.state.doc.toString()).toBe('abcXXdef，ghijklY')
+      endComposition(c)
+      await waitFlush()
+      c.handleHostMessage({ kind: 'edit.ack', seq: 2, ok: true, version: 5 })
+
+      expect(view.state.doc.toString()).toBe(prefix + 'QbcXXdef，ghijklY')
+      expect(sent.filter(({ kind }) => kind === 'conflict.report')).toHaveLength(0)
+      const requests = sent.filter(({ kind }) => kind === 'edit.request')
+      expect(requests).toHaveLength(3)
+      expect(requests[2]).toMatchObject({ baseVersion: 5, changes: [{ offset: prefix.length + 8, length: 0, text: '，' }] })
+    } finally {
+      c.dispose()
+    }
+  })
+
+  it('组合期间确认夹在两条外部增量之间，只影响第二条的参考系', async () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c, 'abcdef')
+      const view = c.getView()!
+      view.dispatch({ changes: { from: 1, insert: 'XX' } })
+      view.dispatch({ changes: { from: 8, insert: 'Y' } })
+      startComposition(c)
+      // v2: abcdef → abcRRef；此时宿主尚未应用 XX。
+      c.handleHostMessage({ kind: 'doc.changed', version: 2, origin: 'external',
+        changes: [{ offset: 3, length: 1, text: 'RR' }] })
+      c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 3 })
+      c.handleHostMessage({ kind: 'doc.changed', version: 4, origin: 'external',
+        changes: [{ offset: 7, length: 1, text: 'T' }] })
+      endComposition(c)
+      await waitFlush()
+      expect(view.state.doc.toString()).toBe('aXXbcRRTfY')
+      expect(sent.filter(({ kind }) => kind === 'conflict.report')).toHaveLength(0)
+    } finally {
+      c.dispose()
+    }
+  })
+
+  it('组合中在已确认插入后新增字符，后续增量仍能定位该字符', async () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c, 'abcdef')
+      const view = c.getView()!
+      view.dispatch({ changes: { from: 1, insert: 'XX' } })
+      view.dispatch({ changes: { from: 8, insert: 'Y' } })
+      c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 2 })
+      startComposition(c)
+      c.handleHostMessage({ kind: 'doc.changed', version: 3, origin: 'external',
+        changes: [{ offset: 3, length: 0, text: 'Z' }] })
+      c.handleHostMessage({ kind: 'doc.changed', version: 4, origin: 'external',
+        changes: [{ offset: 3, length: 1, text: 'Q' }] })
+      endComposition(c)
+      await waitFlush()
+      expect(view.state.doc.toString()).toBe('aXXQbcdefY')
+      expect(sent.filter(({ kind }) => kind === 'conflict.report')).toHaveLength(0)
+    } finally {
+      c.dispose()
+    }
   })
 
   it('组合期间收到全文消息以全文形态缓冲，flush 采用全文', async () => {

@@ -414,12 +414,8 @@ interface BufferedIncremental {
   version: number
   /** 增量（权威变更前系；入队时点的参考系） */
   changes: SerChange[]
-  /** 入队时逆穿当时已确认链得到的 baseVersion 系增量；null = 与当时已确认
-   *  编辑二义，无法安全逆映射（flush 时按冲突暂停处理）。
-   *  为何入队即逆穿：组合编辑的 ack 可能在 flush 之前到达并复合进已确认链，
-   *  届时缓冲增量的参考系（不含组合编辑）与已确认链（含）不再一致，迟到
-   *  的逆穿会多平移组合编辑部分（#12 表格 IME 场景实测暴露） */
-  baseChanges: SerChange[] | null
+  /** 本组之后、下一组之前收到的确认。回放时先推进本组坐标，再纳入确认链。 */
+  ackSeqsAfter: number[]
 }
 
 /** 右键保选区（#186 关键 bug 1）：Chrome contenteditable 上右键 mousedown
@@ -1604,29 +1600,27 @@ export class LiveEditorInstance {
       return
     }
     if (message.ok) {
-      this.inFlight.delete(message.seq)
-      {
-        // T06（#355）SDK 凭据结算：version 与 ack 同源（宿主确认后的凭据）
-        const originsOfSeq = this.originsOfSeq(message.seq)
-        if (originsOfSeq !== undefined) {
-          for (const o of originsOfSeq) {
-            this.settleAddonOrigin(o.opId, { ok: true, credential: { opId: o.opId, version: message.version } })
-          }
-        }
+      const txn = this.inFlight.delete(message.seq) ? this.sentTxns.find((t) => t.seq === message.seq) : undefined
+      // T06（#355）SDK 凭据结算：version 与 ack 同源（宿主确认后的凭据）
+      for (const o of txn?.origins ?? []) {
+        this.settleAddonOrigin(o.opId, { ok: true, credential: { opId: o.opId, version: message.version } })
       }
       // #314 粘贴元数据回读：剥离已确认队列**之前**找本事务（confirmSentTxn
       //  会 splice 掉），根据此标记 pasteFeedback 落定（时机对齐 main 版
       //  ok 分支开头；无元数据的事务零回调）
-      const txn = this.sentTxns.find((t) => t.seq === message.seq)
       if (txn && (txn.paste || txn.plainPasteFeedback)) {
         this.deps.onPasteTxnAcked?.({
           paste: txn.paste ?? null,
           plainPasteFeedback: txn.plainPasteFeedback ?? null,
         })
       }
-      // 按 seq 剥离已确认事务并复合进已确认链（C-2）：外部增量逆穿
-      // 它平移回 baseVersion 系；宿主按序确认，通常命中队首
-      this.confirmSentTxn(message.seq)
+      // ACK 的结算照常；若外部增量还没回放，只延后把这笔纳入坐标链。
+      // 否则旧增量会逆穿它尚未见到的确认，或者新增量会用到尚未推进的坐标。
+      if (txn) {
+        const preceding = this.pendingExternal.at(-1)
+        if (preceding) preceding.ackSeqsAfter.push(message.seq)
+        else this.confirmSentTxn(message.seq)
+      }
       // 未确认集的清空延后到缓冲 flush（组合输入映射仍需它）；
       // 全部确认且无缓冲挂起时本地与权威一致
       if (this.inFlight.size === 0 && !this.hasBufferedSync() && !this.deferredLocal) {
@@ -1713,14 +1707,12 @@ export class LiveEditorInstance {
     }
     if (buffer) {
       // 组合中不打断输入；缓冲挂起期间到达的增量一并对齐到 flush。
-      // 入队即逆穿到 base 系（参考系一致性见 BufferedIncremental 注释）；
+      // 保留宿主版本坐标：回放时每组先推进确认链，再解释下一组。
       // #314 分步撤销的 reason/paste 随组缓冲（flush 收敛时随末组回调根）
       this.pendingExternal.push({
         version: message.version,
         changes: message.changes,
-        baseChanges: this.ackedChain
-          ? unmapSerGroupThroughAcked(message.changes, this.ackedChain)
-          : message.changes,
+        ackSeqsAfter: [],
         ...(message.reason !== undefined ? { reason: message.reason } : {}),
         ...(message.paste !== undefined ? { paste: message.paste } : {}),
       })
@@ -2000,35 +1992,18 @@ export class LiveEditorInstance {
   }
 
   /**
-   * 外部增量组（坐标 = 权威当前系，直发路径）应用的统一入口：
+   * 外部增量组（坐标 = 权威当前系）应用的统一入口：
    * 1. 有已确认事务时先逆穿已确认链，平移回 unconfirmed 定义域（baseVersion
    *    系）——外部坐标已含已确认编辑，直接穿未确认集会多平移已确认部分（C-2）
    * 2. 再穿未确认集映射到本地系；两阶段任一二义（真重叠）返回 null（冲突暂停）
    * 3. 应用成功后，未确认集与已确认链都以 base 系增量 rebase（定义域推进，
    *    CM6 mapDesc 精确保持段语义），baseVersion 由调用方推进
-   *
-   * 组合缓冲 flush 路径不经过此入口的逆穿阶段（缓冲增量已在入队时逆穿，
-   * 见 BufferedIncremental.baseChanges），直接调 applyBaseChanges。
    */
   private applyExternalGroup(changes: readonly SerChange[]): SerChange[] | null {
-    let baseChanges: readonly (SerChange & Partial<UnmappedChange>)[] = changes
-    if (this.ackedChain) {
-      const rev = unmapSerGroupThroughAcked(changes, this.ackedChain)
-      if (!rev) {
-        return null
-      }
-      baseChanges = rev
-    }
-    return this.applyBaseChanges(baseChanges)
-  }
-
-  /**
-   * baseVersion 系增量穿未确认集映射到本地系并 rebase 参考系
-   * （直发与组合 flush 共用的后半段；返回本地系增量，二义返回 null）。
-   */
-  private applyBaseChanges(
-    baseChanges: readonly (SerChange & Partial<UnmappedChange>)[],
-  ): SerChange[] | null {
+    const baseChanges: readonly UnmappedChange[] | null = this.ackedChain
+      ? unmapSerGroupThroughAcked(changes, this.ackedChain)
+      : changes
+    if (!baseChanges) return null
     if (!this.unconfirmed) {
       // 已确认链非空时未确认集必非空（同源清空）；异常态自愈
       this.ackedChain = null
@@ -2039,38 +2014,49 @@ export class LiveEditorInstance {
     if (!mapped) {
       return null
     }
-    if (this.deferredLocal) {
-      // 外部变更已映射到可见文档；逆穿未发队列，得到队首段的外部坐标。
-      const externalInView = ChangeSet.of(mapped.map((c) => ({
-        from: c.offset, to: c.offset + c.length, insert: c.text,
-      })), this.unconfirmed.newLength).desc
-      const externalAtHead = externalInView.mapDesc(this.deferredLocal.invertedDesc)
-      const visible = externalInView.toJSON()
-      const roundTrip = externalAtHead.mapDesc(this.deferredLocal, true).toJSON()
-      // 已确认写入的同点关联不能擅自套给尚未写出的输入。两条路径不能
-      // 表达同一顺序时保留本地文本，绝不发一个与画面不一致的写回坐标。
-      if (roundTrip.length !== visible.length || roundTrip.some((n, i) => n !== visible[i])) return null
-      let externalAtSegment = externalAtHead
-      this.deferredSegments = this.deferredSegments.map((segment) => {
-        const changes = segment.changes.map(externalAtSegment)
-        externalAtSegment = externalAtSegment.mapDesc(segment.changes, true)
-        return { ...segment, changes }
-      })
-      this.deferredLocal = this.deferredLocal.map(externalAtHead)
-    }
-    const gCs = ChangeSet.of(
+    const externalInBase = ChangeSet.of(
       [...baseChanges]
         .sort((a, b) => a.offset - b.offset)
         .map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
       this.unconfirmed.length,
-    )
+    ).desc
+    const insertsAfterAck = baseChanges.some((c) => c.length === 0 && c.fromAssoc === 1)
+    let localFirst = false
+    if (insertsAfterAck || this.deferredLocal) {
+      const externalInView = ChangeSet.of(mapped.map((c) => ({
+        from: c.offset, to: c.offset + c.length, insert: c.text,
+      })), this.unconfirmed.newLength).desc
+      const visible = externalInView.toJSON()
+      const agreesWithView = (desc: typeof externalInView) => {
+        const sections = desc.toJSON()
+        return sections.length === visible.length && sections.every((n, i) => n === visible[i])
+      }
+      if (insertsAfterAck && !agreesWithView(externalInBase.mapDesc(this.unconfirmed, true))) {
+        // 正文中外部字符排在已确认插入之后，推进坐标链也要保留这个次序。
+        // 若同一批的端点不能用同一顺序表达，暂停而不是留下错位的坐标链。
+        if (!agreesWithView(externalInBase.mapDesc(this.unconfirmed, false))) return null
+        localFirst = true
+      }
+      if (this.deferredLocal) {
+        // 逆穿未发队列得到队首坐标；已确认写入的同点关联不能套给未发输入。
+        const externalAtHead = externalInView.mapDesc(this.deferredLocal.invertedDesc)
+        if (!agreesWithView(externalAtHead.mapDesc(this.deferredLocal, true))) return null
+        let externalAtSegment = externalAtHead
+        this.deferredSegments = this.deferredSegments.map((segment) => {
+          const changes = segment.changes.map(externalAtSegment)
+          externalAtSegment = externalAtSegment.mapDesc(segment.changes, true)
+          return { ...segment, changes }
+        })
+        this.deferredLocal = this.deferredLocal.map(externalAtHead)
+      }
+    }
     // 待确认事务与 unconfirmed/ackedChain 共用定义域；外部增量推进定义域时
     // 也要同步平移其坐标，否则稍后 ack 会把旧位置复合进 ackedChain。
     this.sentTxns = this.sentTxns.map((txn) => {
       const cs = ChangeSet.of(
         txn.changes.map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
         this.unconfirmed!.length,
-      ).mapDesc(gCs, false) as ChangeSet
+      ).map(externalInBase, localFirst)
       const rebased: SerChange[] = []
       cs.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
         rebased.push({
@@ -2082,9 +2068,9 @@ export class LiveEditorInstance {
       // #314：rebase 只重算坐标，粘贴元数据原样随事务保留
       return { ...txn, changes: rebased }
     })
-    this.unconfirmed = this.unconfirmed.mapDesc(gCs, false) as ChangeSet
+    this.unconfirmed = this.unconfirmed.map(externalInBase, localFirst)
     if (this.ackedChain) {
-      this.ackedChain = this.ackedChain.mapDesc(gCs, false) as ChangeSet
+      this.ackedChain = this.ackedChain.map(externalInBase, localFirst)
     }
     return mapped
   }
@@ -2581,11 +2567,8 @@ export class LiveEditorInstance {
         this.enterSuspended()
         return
       }
-      // 外部增量已在入队时逆穿到 base 系（迟到逆穿会多平移组合编辑，见
-      // BufferedIncremental 注释）；base 系增量直接穿未确认集应用（C-2 后半段）
-      const mapped = group.baseChanges
-        ? this.applyBaseChanges(group.baseChanges)
-        : null // 入队时即与已确认编辑二义：无法安全映射
+      // 以前一组和两组之间的 ACK 推进确认链，再解释本组的宿主坐标。
+      const mapped = this.applyExternalGroup(group.changes)
       if (!mapped) {
         // 外部区间与本地未确认编辑真重叠：无法安全映射。保留本地输入、
         // 暂停写回并上报冲突（#4；不再 sync.request 全文覆盖丢组合输入）
@@ -2593,6 +2576,7 @@ export class LiveEditorInstance {
         return
       }
       this.dispatchExternalChanges(this.view, mapped)
+      for (const seq of group.ackSeqsAfter) this.confirmSentTxn(seq)
       lastVersion = group.version
     }
     if (this.inFlight.size === 0) {
