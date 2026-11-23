@@ -201,6 +201,37 @@ describe('粘贴规则控制器消费链', () => {
       .toEqual(['x'])
     expect(reading.flatMap(block => [...block.querySelectorAll('h2')])).toHaveLength(0)
   })
+  it.each([
+    ['<ul>', '</ul>', 'ul', '-', '  '],
+    ['<ol start="12">', '</ol>', 'ol', '12.', '    '],
+  ])('列表首块是引用时，两种视图都保留引用和多行公式：%s', async (open, close, tag, marker, indent) => {
+    const { view } = mount('')
+    const tex = 'x+1\n+y'
+    pasteDisplayMath(view, tex, 'x+1\n+y\n后项', open + '<li><blockquote>', '</blockquote></li><li>后项</li>' + close)
+    await settle()
+    const source = view.state.doc.toString()
+    const frame = ['$$', ...tex.split('\n'), '$$'].map(line => indent + '> ' + line)
+    expect(source).toBe([marker, ...frame, (tag === 'ul' ? '-' : '13.') + ' 后项'].join('\n'))
+    expect(readingTexOf(source)).toEqual([tex])
+    const reading = splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+    expect(reading.flatMap(block => [...block.querySelectorAll(tag + ' > li > blockquote annotation')])
+      .map(node => node.textContent?.trim())).toEqual([tex])
+    expect(view.state.field(mathBlocksField).map(hit => hit.tex.trim())).toEqual([tex])
+  })
+  it('重新打开时仍识别列表内引用中的公式，缩进代码里的同形标记不抢占定界符', () => {
+    const code = '    > $$\n    > 字面内容'
+    const list = '-\n  > $$\n  > x+1\n  > $$'
+    const { view } = mount(code + '\n\n' + list)
+    expect(view.state.field(mathBlocksField).map(hit => hit.tex.trim())).toEqual(['x+1'])
+  })
+  it('整段替换带引用公式的列表后，不保留旧公式区间', () => {
+    const original = '-\n  > $$\n  > x+1\n  > $$\n- 后项'
+    const { view } = mount(original)
+    expect(view.state.field(mathBlocksField)).toHaveLength(1)
+    view.dispatch({ changes: { from: 0, to: original.length, insert: '新正文' }, selection: { anchor: 0 } })
+    expect(view.state.doc.toString()).toBe('新正文')
+    expect(view.state.field(mathBlocksField)).toEqual([])
+  })
   it.each([false, true])('只有块公式的任务条目保留勾选状态：%s', async (checked) => {
     const { view } = mount('')
     pasteDisplayMath(view, 'x', 'x', `<ul><li><input type="checkbox"${checked ? ' checked' : ''}>`, '</li></ul>')

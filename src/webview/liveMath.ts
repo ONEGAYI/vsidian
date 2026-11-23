@@ -26,10 +26,10 @@
 import { EditorSelection, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { Tree } from '@lezer/common'
-import { chainAt, scanMathInMarkdownLine, visitRange, type SourceRange } from '../shared/markdownDoc'
+import { chainAt, parsedQuoteMarks, scanMathInMarkdownLine, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
 import { inlineCompositionSelection, inlineSourceTouchesRange, liveDecorationsField, type InlineCompositionSelection } from './liveDecorations'
-import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathRanges, stripQuotePrefix, type MathOccurrence } from '../shared/math'
+import { MATH_CLASS_NAMES, MATH_CODE_CONTEXTS, opensMathBlockLine, scanMathRanges, stripQuotePrefix, type MathOccurrence, type QuoteMarkAt } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
 import { t } from '../shared/i18n'
 import { isEscapedAt } from '../shared/tableCells'
@@ -132,8 +132,8 @@ function docLines(doc: Text): string[] {
 }
 
 /** 全量扫描：只保留跨行块（单行形态由 ViewPlugin 行扫描负责——屏外不装饰） */
-function scanAllBlocks(doc: Text): readonly MathOccurrence[] {
-  return scanMathRanges(docLines(doc), 0).filter((hit) =>
+function scanAllBlocks(doc: Text, quoteMarkAt?: QuoteMarkAt): readonly MathOccurrence[] {
+  return scanMathRanges(docLines(doc), 0, undefined, quoteMarkAt).filter((hit) =>
     doc.lineAt(hit.from).number !== doc.lineAt(hit.to - 1).number)
 }
 
@@ -149,6 +149,7 @@ function rebuildBlocks(
 ): readonly MathOccurrence[] {
   const changes = tr.changes
   const doc = tr.state.doc
+  const quoteMarkAt = parsedQuoteMarks(tr.state.field(liveDecorationsField, false)?.tree)
   let seedFrom = doc.length + 1
   let seedTo = -1
   changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
@@ -158,11 +159,12 @@ function rebuildBlocks(
   if (seedTo < 0) {
     return prev
   }
+  // 整块替换会使两端交叉或重合；该旧区间不能保留到新文档。
   const mapped = prev.map((b) => ({
     from: changes.mapPos(b.from, 1),
     to: changes.mapPos(b.to, -1),
     hit: b,
-  }))
+  })).filter(b => b.from < b.to)
   for (const b of mapped) {
     if (b.to >= seedFrom && b.from <= seedTo) {
       seedFrom = Math.min(seedFrom, b.from)
@@ -180,25 +182,26 @@ function rebuildBlocks(
     return out
   }
   let lines = collectLines(firstLine, lastLine)
+  const start = doc.line(firstLine).from
   // 末尾处于未闭合块中时延伸到闭合、文末或熔断上限；扫描按增量续扫
   // （只扫新 concat 的行段，open 状态延续）——从零重扫会让未闭合长尾
   // 呈平方级成本（#59 评审 C3）
-  let openFrom = scanOpenIncrement(lines, 0, null)
+  let openFrom = scanOpenIncrement(lines, 0, null, start, quoteMarkAt)
   let scanned = lines.length
   let extended = 0
   mathBlockExtendStats.batches = 0
   while (openFrom !== null && lastLine < doc.lines && extended < MATH_BLOCK_EXTEND_LIMIT) {
+    const batchStart = doc.line(lastLine + 1).from
     const nextLast = Math.min(lastLine + MATH_BLOCK_EXTEND_BATCH, doc.lines)
     lines = lines.concat(collectLines(lastLine + 1, nextLast))
     lastLine = nextLast
     extended += MATH_BLOCK_EXTEND_BATCH
     mathBlockExtendStats.batches += 1
-    openFrom = scanOpenIncrement(lines, scanned, openFrom)
+    openFrom = scanOpenIncrement(lines, scanned, openFrom, batchStart, quoteMarkAt)
     scanned = lines.length
   }
-  const start = doc.line(firstLine).from
   const end = doc.line(lastLine).to
-  const rebuilt = scanMathRanges(lines, start).filter((hit) =>
+  const rebuilt = scanMathRanges(lines, start, undefined, quoteMarkAt).filter((hit) =>
     doc.lineAt(hit.from).number !== doc.lineAt(hit.to - 1).number)
   // 合并：重扫区间 [start, end] 外的旧块保留（坐标已映射）
   const out: MathOccurrence[] = []
@@ -228,9 +231,11 @@ function rebuildBlocks(
  *  为剥引用前缀后的裸行 trim（引用内 `> $$` 同样开块）；块模式跨容器
  *  延续（层数不足的断开行不终止——与 @vscode/markdown-it-katex 的贪婪
  *  口径一致），闭合判定只看剥前缀后的行内是否含 `$$`。 */
-function scanOpenIncrement(lines: readonly string[], fromIndex: number, open: number | null): number | null {
+function scanOpenIncrement(lines: readonly string[], fromIndex: number, open: number | null, lineStart: number, quoteMarkAt?: QuoteMarkAt): number | null {
   for (let i = fromIndex; i < lines.length; i++) {
-    const trimmed = stripQuotePrefix(lines[i]!).bare.trim()
+    const line = lines[i]!
+    const trimmed = stripQuotePrefix(line, quoteMarkAt, lineStart).bare.trim()
+    lineStart += line.length + 1
     if (open === null) {
       if (opensMathBlockLine(trimmed)) {
         open = i
@@ -245,7 +250,7 @@ function scanOpenIncrement(lines: readonly string[], fromIndex: number, open: nu
 /** 跨行块表（#59）：docChanged 时增量重建；选区/视口变化零成本 */
 export const mathBlocksField = StateField.define<readonly MathOccurrence[]>({
   create(state) {
-    return scanAllBlocks(state.doc)
+    return scanAllBlocks(state.doc, parsedQuoteMarks(state.field(liveDecorationsField, false)?.tree))
   },
   update(value, tr) {
     if (!tr.docChanged) {

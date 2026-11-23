@@ -481,7 +481,7 @@ export function htmlToMarkdown(html: string, options?: HtmlToMarkdownOptions): C
     }).join('')
     // 条目首块也让 $$ 单独成行，列表标记不能占据公式的开启行。
     // 任务标记后用空格实体保留渲染器所需的分隔空格（行尾字面空格会被裁掉）。
-    const head = content.startsWith('\u0000b')
+    const head = /^(?:> )*\u0000b/.test(content)
       ? (task ? prefix + task + '&#32;' : prefix.trimEnd()) + '\n' + indent
       : prefix + task
     return head + content.replace(/\n/g, '\n' + indent) + tail

@@ -18,13 +18,18 @@ import type { Text } from '@codemirror/state'
 import { markdownLanguage } from '@codemirror/lang-markdown'
 import type { InlineContext, MarkdownParser } from '@lezer/markdown'
 import type { Input, SyntaxNode, Tree } from '@lezer/common'
-import { scanMathInLine, type MathLinkLabel, type MathLinkRanges } from './math'
+import { scanMathInLine, type MathLinkLabel, type MathLinkRanges, type QuoteMarkAt } from './math'
 import { normalizeReferenceLabel } from './wikilink'
 
 /** 源文本区间（UTF-16 offset，end 不含）——与协议 SerChange 坐标同构 */
 export interface SourceRange {
   start: number
   end: number
+}
+
+/** 区分缩进中的真实引用标记和代码中的字面 `>`。 */
+export function parsedQuoteMarks(tree: Tree | undefined): QuoteMarkAt | undefined {
+  return tree && (pos => tree.resolve(pos, 1).name === 'QuoteMark')
 }
 
 /** 高亮定界符（#105）：配对解析为 Highlight 节点、定界符转 HighlightMark。

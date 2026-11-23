@@ -532,6 +532,16 @@ try {
   await page.keyboard.press('Control+Z'); await waitBoth('前文后文')
   console.log('[PASS] KaTeX 块公式以独立块粘贴、显示并分步撤销')
 
+  const quotedTex = 'x+1\n+y'
+  await write('x+1\n+y\n后项', '<ul><li><blockquote><span class="katex-display">' +
+    katexSpan(quotedTex).replace('<math>', '<math display="block">') + '</span></blockquote></li><li>后项</li></ul>')
+  await selectAll(); await page.keyboard.press('Control+V')
+  await waitBoth('-\n  > $$\n  > x+1\n  > +y\n  > $$\n- 后项')
+  await page.keyboard.press('Control+End')
+  await editor.locator('.vsidian-math .katex-display').waitFor({ state: 'visible' })
+  assert.deepEqual((await editor.locator('.vsidian-math annotation').allTextContents()).map(tex => tex.trim()), [quotedTex])
+  console.log('[PASS] 列表首块为引用时，保留列表层级并显示原多行公式')
+
   const blockSource = '$$\na+b\n$$\n\nend'
   await page.evaluate(source => {
     window.replace(source)
