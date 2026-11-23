@@ -271,6 +271,352 @@ try {
       })
   }
 
+  const nestedListDoc = [
+    '1. 数字电路：受限于拓扑，扫一遍即可',
+    '   - 在经典电路诊断语境中，一个测量点就是「某一根导线的信号值」。',
+    '   - 要拿到可测清单，只需要遍历一次网表，拿到所有导线名去重。完全不需要推理或解方程显然是多项式时间。',
+  ].join('\n')
+  const nestedListCaret = nestedListDoc.indexOf('显然')
+  await scenario('行中定稿标点：CM6 在 compositionend 后读取最后一笔原生文本变更',
+    { doc: nestedListDoc, cursor: nestedListCaret }, async (page) => {
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+      try {
+        // 将最后一笔 DOM 变更留给 CM6 的 compositionend 后置 flush。
+        await page.evaluate((at) => {
+          const content = document.querySelector('.cm-content')
+          const { focusNode, focusOffset } = getSelection()
+          focusNode.replaceData(focusOffset - 1, 1, '，')
+          window.moveNativeCaret(at - 2)
+          content.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '，' }))
+        }, nestedListCaret)
+        await nextPaint(page)
+        await check(page, nestedListDoc.replace('解方程显然', '解方程，显然'), nestedListCaret + 1, '最终事务落定后恢复光标')
+      } finally {
+        // CDP 的原生候选并未被合成事件结束，避免留给下一场景。
+        await cdpSession.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 })
+      }
+    })
+  for (const [phase, staleBy, afterHandler] of [
+    ['input', 2, false], ['compositionend', 2, false], ['compositionend', 0, false], ['compositionend', 2, true],
+  ]) {
+    const at = nestedListCaret
+    await scenario(`行中定稿标点光标：${phase}${afterHandler ? ' 处理器之后' : ''} 上报起点偏移 -${staleBy}`,
+      { doc: nestedListDoc, cursor: at }, async (page) => {
+        await page.evaluate(({ phase, staleAt, afterHandler }) => {
+          const content = document.querySelector('.cm-content')
+          let inputs = 0
+          content.addEventListener(phase, (event) => {
+            if ((phase === 'input' && ++inputs !== 2) || event.data !== '，') return
+            if (afterHandler) queueMicrotask(() => window.moveNativeCaret(staleAt))
+            else window.moveNativeCaret(staleAt)
+          }, !afterHandler)
+        }, { phase, staleAt: at - staleBy, afterHandler })
+        await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+        await cdpSession.send('Input.insertText', { text: '，' })
+        await nextPaint(page)
+        await check(page, nestedListDoc.replace('解方程显然', '解方程，显然'), at + 1, '定稿后光标应在逗号后')
+        await page.keyboard.type('X')
+        await check(page, nestedListDoc.replace('解方程显然', '解方程，X显然'), at + 2, '后续输入不打断原词')
+      })
+  }
+
+  for (const [mark, closing, inFrame] of [['，', '', true], ['“', '”', false]]) {
+    const doc = '测试\n  - 好还好好'
+    await scenario(`IME 独立旧选区：${inFrame ? '动画帧内上报' : '引号补全后上报'}`,
+      { doc, cursor: doc.length }, async (page) => {
+        await page.evaluate(({ at, mark, inFrame }) => {
+          const content = document.querySelector('.cm-content')
+          window.lateSelectionReported = new Promise((resolve) => {
+            content.addEventListener('compositionend', (event) => {
+              if (event.data !== mark) return
+              const report = () => {
+                window.moveNativeCaret(at - 2)
+                document.addEventListener('selectionchange', resolve, { once: true })
+              }
+              if (inFrame) requestAnimationFrame(report)
+              else queueMicrotask(report)
+            }, inFrame)
+          })
+        }, { at: doc.length, mark, inFrame })
+        await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+        await cdpSession.send('Input.insertText', { text: mark })
+        await page.evaluate(() => window.lateSelectionReported)
+        await check(page, doc + mark + closing, doc.length + 1, '独立选区不能覆盖定稿落点')
+        await page.keyboard.type('X')
+        await check(page, doc + mark + 'X' + closing, doc.length + 2, '下一键仍落在定稿之后')
+      })
+  }
+
+  for (const [name, retainRange] of [['候选范围尚未收起', true], ['连续两次回报旧落点', false]]) {
+    const at = nestedListCaret
+    await scenario(`IME 定稿光标持续保护：${name}`, { doc: nestedListDoc, cursor: at }, async (page) => {
+      if (retainRange) {
+        await page.evaluate(() => {
+          document.querySelector('.cm-content').addEventListener('input', (event) => {
+            if (event.data !== '，') return
+            const selection = getSelection()
+            const { focusNode, focusOffset } = selection
+            selection.setBaseAndExtent(focusNode, focusOffset - 1, focusNode, focusOffset)
+          }, true)
+        })
+      }
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+      await cdpSession.send('Input.insertText', { text: '，' })
+      await nextPaint(page)
+      const committed = nestedListDoc.replace('解方程显然', '解方程，显然')
+      for (let i = 0; i < (retainRange ? 1 : 2); i++) {
+        await page.evaluate((stale) => window.moveNativeCaret(stale), at - 2)
+        await nextPaint(page)
+        await check(page, committed, at + 1, `第 ${i + 1} 次原生回报后保留定稿落点`)
+      }
+      await page.keyboard.type('X')
+      await check(page, committed.replace('，显然', '，X显然'), at + 2, '下一键仍写在逗号后')
+    })
+  }
+
+  {
+    const doc = '测试\n  - 好还好好'
+    await scenario('IME 选中过候选，不视为用户主动移走光标', { doc, cursor: doc.length }, async (page) => {
+      await page.evaluate((at) => {
+        document.querySelector('.cm-content').addEventListener('input', (event) => {
+          if (event.data === '，') window.moveNativeCaret(at - 2)
+        }, true)
+      }, doc.length)
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 0, selectionEnd: 1 })
+      await page.waitForFunction((at) => window.readEditor().from === at && window.readEditor().to === at + 1, doc.length)
+      await cdpSession.send('Input.insertText', { text: '，' })
+      await nextPaint(page)
+      await check(page, doc + '，', doc.length + 1, '候选选区收起后应恢复正确落点')
+    })
+  }
+
+  const html = '  <div>abc\n  more\n  </div>\n\n正文'
+  await scenario('块级 HTML 内定稿标点：原生光标误报到缩进时源码不折叠',
+    { doc: html, cursor: html.indexOf('c') }, async (page) => {
+      await page.evaluate(() => {
+        document.querySelector('.cm-content').addEventListener('input', (event) => {
+          if (event.data === '，') window.moveNativeCaret(1)
+        }, true)
+      })
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+      await cdpSession.send('Input.insertText', { text: '，' })
+      await nextPaint(page)
+      const committed = '  <div>ab，c\n  more\n  </div>\n\n正文'
+      await check(page, committed, html.indexOf('c') + 1, 'HTML 定稿光标应在标点后')
+      const paintedLines = (await page.locator('.cm-content').innerText()).split('\n').filter(Boolean)
+      assert.deepEqual(paintedLines, committed.split('\n').filter(Boolean), '源码显形时所有非空行均绘制')
+      await page.evaluate((at) => window.locate(at), committed.indexOf('正文'))
+      const rendered = page.locator('.vsidian-live-html-content > div')
+      assert.ok(await rendered.isVisible(), '离开源码后仍绘制原生 HTML')
+      assert.equal((await rendered.innerText()).trimEnd(), 'ab，c\n  more', '渲染保留定稿标点和后续行')
+    })
+
+  for (const [doc, expectedCalls] of [['> ```language\n> 例子\n> ```', 0], ['> language', 1]]) {
+    const at = doc.indexOf('uage')
+    await scenario(`IME 定稿行为链：${expectedCalls ? '正文按定稿光标触发一次' : '围栏内不触发'}`,
+      { doc, cursor: at }, async (page) => {
+        await page.evaluate(() => {
+          window.composeAddonInputs = []
+          window.attachAddonBehaviorDrive(({ inputText, userEvent, replaced }) => {
+            window.composeAddonInputs.push({ inputText, userEvent, replaced, head: window.readEditor().head })
+          })
+          document.querySelector('.cm-content').addEventListener('input', (event) => {
+            if (event.data === '，') window.moveNativeCaret(0)
+          }, true)
+        })
+        await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+        await cdpSession.send('Input.insertText', { text: '，' })
+        await nextPaint(page)
+        await check(page, doc.replace('language', 'lang，uage'), at + 1, '定稿光标')
+        assert.deepEqual(await page.evaluate(() => window.composeAddonInputs), expectedCalls === 0 ? [] : [
+          { inputText: '，', userEvent: 'input.type.compose', replaced: null, head: at + 1 },
+        ])
+      })
+  }
+
+  for (const [name, doc, kind] of [
+    ['保留附加组件显式导航', '汉字推理解方程显然', 'addon-selection'],
+    ['保留恰好落在旧原生位置的显式导航', '汉字推理解方程显然', 'same-target-selection'],
+    ['定稿载荷不混入其他编辑', '汉字推理解方程显然', 'observer-edit'],
+    ['移出围栏不改变定稿的代码上下文', '> ```language\n> 例子\n> ```', 'observer-selection'],
+  ]) {
+    const at = kind === 'observer-selection' ? doc.indexOf('uage') : doc.indexOf('显然')
+    await scenario(`IME 定稿行为链：${name}`, { doc, cursor: at }, async (page) => {
+      await page.evaluate(({ at, kind }) => {
+        window.composeAddonInputs = []
+        window.attachAddonBehaviorDrive(({ inputText, replaced }) => {
+          window.composeAddonInputs.push({ inputText, replaced })
+          if (kind === 'same-target-selection') window.moveNativeCaret(at - 2)
+          if (kind.endsWith('selection') && kind !== 'observer-selection') {
+            window.dispatchEditor({ selection: { anchor: at - 2 }, userEvent: 'select' })
+          }
+        })
+        if (kind.startsWith('observer-')) {
+          window.observeComposeEnd(() => queueMicrotask(() => window.dispatchEditor(kind === 'observer-edit'
+            ? { changes: { from: 0, to: 2, insert: '甲乙' } }
+            : { selection: { anchor: 0 }, userEvent: 'select' })))
+        }
+      }, { at, kind })
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+      await cdpSession.send('Input.insertText', { text: '，' })
+      await nextPaint(page)
+      const text = doc.slice(0, at) + '，' + doc.slice(at)
+      if (kind === 'observer-edit') await check(page, '甲乙' + text.slice(2), at + 1, name)
+      else await check(page, text, kind === 'observer-selection' ? 0 : at - 2, name)
+      assert.deepEqual(await page.evaluate(() => window.composeAddonInputs), kind === 'observer-selection' ? [] : [
+        { inputText: '，', replaced: null },
+      ])
+    })
+  }
+
+  {
+    const fence = '> ```language\n> 例子\n> ```'
+    const at = fence.indexOf('uage')
+    await scenario('IME 围栏内晚定稿多个字，不按陈旧选区触发行为链', { doc: fence, cursor: at }, async (page) => {
+      await page.evaluate(() => {
+        window.composeAddonInputs = []
+        window.attachAddonBehaviorDrive(({ inputText }) => window.composeAddonInputs.push(inputText))
+      })
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+      try {
+        await page.evaluate(() => {
+          const { focusNode, focusOffset } = getSelection()
+          focusNode.replaceData(focusOffset - 1, 1, '你好')
+          window.moveNativeCaret(0)
+          document.querySelector('.cm-content').dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '你好' }))
+        })
+        await nextPaint(page)
+        await check(page, fence.replace('language', 'lang你好uage'), undefined, '围栏内正常定稿')
+        assert.deepEqual(await page.evaluate(() => window.composeAddonInputs), [], '代码上下文仍不触发行为链')
+      } finally {
+        await cdpSession.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0 })
+      }
+    })
+    const multi = fence + '\n\n尾行'
+    await scenario('IME 多光标补偿后，行为链仍以围栏内主光标门控', { doc: multi, cursor: at }, async (page) => {
+      await page.evaluate((offsets) => window.setCursors(offsets), [at, multi.length])
+      const start = await read(page)
+      assert.equal(start.head, at, '主光标在围栏内')
+      assert.equal(start.ranges.length, 2, '保留第二光标')
+      await page.evaluate(() => {
+        window.composeAddonInputs = []
+        window.attachAddonBehaviorDrive(({ inputText }) => window.composeAddonInputs.push(inputText))
+        document.querySelector('.cm-content').addEventListener('input', (event) => {
+          if (event.data === '，') window.moveNativeCaret(0)
+        }, true)
+      })
+      await cdpSession.send('Input.imeSetComposition', { text: '；', selectionStart: 1, selectionEnd: 1 })
+      await cdpSession.send('Input.insertText', { text: '，' })
+      await nextPaint(page)
+      const after = await read(page)
+      assert.equal(after.text, multi.replace('language', 'lang，uage') + '，')
+      assert.equal(after.head, at + 1)
+      assert.deepEqual(after.ranges, [{ from: at + 1, to: at + 1 }, { from: multi.length + 2, to: multi.length + 2 }])
+      assert.deepEqual(await page.evaluate(() => window.composeAddonInputs), [], '主光标在代码上下文，不触发行为链')
+    })
+  }
+
+  for (const [name, cursor, inserted, external, baseText, offset, afterEnd] of [
+    ['开闭引号一笔写回', 4, '“”', null, '测试正文', 4],
+    ['并发前缀平移完整符号对的写回坐标', 4, '“”', { offset: 0, length: 0, text: 'Z' }, 'Z测试正文', 5],
+    ['并发前缀不妨碍正文前的单引号', 2, '“', { offset: 0, length: 0, text: 'Z' }, 'Z测试正文', 3],
+    ['相邻删除保留新定稿标点', 4, '“”', { offset: 3, length: 1, text: '' }, '测试正', 3],
+    ['定稿后发出前收到非重叠增量', 4, '“”', { offset: 0, length: 0, text: 'Z' }, 'Z测试正文', 5, true],
+  ]) {
+    const doc = '测试正文'
+    await scenario(`IME 无候选且定稿文本晚到：${name}`, { doc, cursor }, async (page) => {
+      await page.evaluate(({ cursor, external, afterEnd }) => {
+        const content = document.querySelector('.cm-content')
+        content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+        if (external && !afterEnd) window.applyExternalChanges(2, [external])
+        const { focusNode, focusOffset } = getSelection()
+        focusNode.insertData(focusOffset, '“')
+        window.moveNativeCaret(cursor - 1)
+        content.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '“' }))
+        if (afterEnd) queueMicrotask(() => window.applyExternalChanges(2, [external]))
+      }, { cursor, external, afterEnd })
+      await nextPaint(page)
+      await check(page, baseText.slice(0, offset) + inserted + baseText.slice(offset), offset + 1, name)
+      await page.waitForFunction(() => window.readHostMessages().some((message) => message.kind === 'edit.request'))
+      const reads = await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'edit.request')
+        .map(({ baseVersion, changes }) => ({ baseVersion, changes })))
+      const baseVersion = external ? 2 : 1
+      assert.deepEqual(reads, [{ baseVersion, changes: [{ offset, length: 0, text: inserted }] }], '写回一笔且使用当前宿主坐标')
+      await page.evaluate(({ offset, inserted, baseVersion }) =>
+        window.ackAndExternalUndo([{ offset, length: inserted.length, text: '' }], baseVersion + 1),
+      { offset, inserted, baseVersion })
+      await check(page, baseText, offset, '一次撤销只恢复本次输入')
+    })
+  }
+
+  for (const [ackAt, externalAt, replacement, expected] of [
+    [2, 3, 'Q', 'XYZQ“乙AB丙丁C'],
+    [3, 5, 'QQ', 'XYZ甲“乙QQAB丁C'],
+  ]) {
+    await scenario(`IME 定稿待发时连续两条外部增量按各自版本合并：${replacement}`,
+      { doc: '甲乙丙丁' }, async (page) => {
+        await page.evaluate(({ ackAt, externalAt, replacement }) => {
+          const content = document.querySelector('.cm-content')
+          window.dispatchEditor({ changes: { from: ackAt, insert: 'AB' }, userEvent: 'input.type' })
+          window.dispatchEditor({ changes: { from: 6, insert: 'C' }, userEvent: 'input.type' })
+          const [first] = window.readHostMessages().filter(({ kind }) => kind === 'edit.request')
+          window.ackEdit(first.seq, 2)
+          window.locate(1)
+          content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+          const { focusNode, focusOffset } = getSelection()
+          focusNode.insertData(focusOffset, '“')
+          content.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '“' }))
+          queueMicrotask(() => {
+            window.applyExternalChanges(3, [{ offset: 0, length: 0, text: 'XYZ' }])
+            // 第二条的 offset 以已插入 XYZ 的宿主版本为基准。
+            window.applyExternalChanges(4, [{ offset: externalAt, length: 1, text: replacement }])
+          })
+        }, { ackAt, externalAt, replacement })
+        await nextPaint(page)
+        await check(page, expected, undefined, '两条外部修改与本地定稿都显示')
+        await page.evaluate(() => window.ackLastEdit(5))
+        const requests = await page.evaluate(() => window.readHostMessages().filter(({ kind }) => kind === 'edit.request'))
+        assert.equal(requests.length, 3, '不误判为冲突，定稿只写回一笔')
+        assert.equal(requests[2].baseVersion, 5)
+        assert.deepEqual(requests[2].changes, [{ offset: 4, length: 0, text: '“' }])
+      })
+  }
+
+  for (const [name, atEnd] of [['已确认边界同点插入保留本地快照，不错位写回', true], ['无关确认不让相邻删除吞标点', false]]) {
+    await scenario(`IME 组合增量逆穿已确认编辑：${name}`, { doc: '甲乙丙丁' }, async (page) => {
+      const remaining = await page.evaluate((atEnd) => {
+        const content = document.querySelector('.cm-content')
+        window.dispatchEditor({ changes: { from: atEnd ? 4 : 0, insert: 'A' }, userEvent: 'input.type' })
+        window.dispatchEditor({ changes: { from: atEnd ? 0 : 5, insert: 'B' }, userEvent: 'input.type' })
+        const [first, second] = window.readHostMessages().filter(({ kind }) => kind === 'edit.request')
+        window.ackEdit(first.seq, 2)
+        window.locate(atEnd ? 6 : 3)
+        content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+        window.applyExternalChanges(3, [atEnd ? { offset: 5, length: 0, text: 'Z' } : { offset: 3, length: 1, text: '' }])
+        const { focusNode, focusOffset } = getSelection()
+        focusNode.insertData(focusOffset, '“')
+        content.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '“' }))
+        return second.seq
+      }, atEnd)
+      await nextPaint(page)
+      await nextPaint(page)
+      await page.evaluate((seq) => window.ackEdit(seq, 4), remaining)
+      const messages = await page.evaluate(() => window.readHostMessages())
+      const requests = messages.filter(({ kind }) => kind === 'edit.request')
+      if (atEnd) {
+        assert.equal(requests.length, 2, '归属有歧义时不向宿主写错误偏移')
+        await check(page, 'B甲乙丙丁A“”', 7, '保留未发的引号')
+        assert.equal(messages.findLast(({ kind }) => kind === 'conflict.report')?.text, 'B甲乙丙丁A“”', '冲突时可以恢复本地输入')
+      } else {
+        await check(page, 'A甲乙“丁B', undefined, '本地引号和相邻外部删除都生效')
+        assert.equal(requests.length, 3, '不重叠时继续写回')
+        assert.equal(requests[2].baseVersion, 4)
+        assert.deepEqual(requests[2].changes, [{ offset: 3, length: 0, text: '“' }], '宿主写回与画面的字符次序一致')
+      }
+    })
+  }
+
   for (const formula of ['$OBS$', '$$OBS$$']) {
     const at = formula.length
     await scenario(`同行公式 ${formula} 后 IME 句号：定稿后才恢复渲染`,
