@@ -296,6 +296,17 @@ try {
         line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top)
       assert.ok(Math.abs(restoredTop - savedTop) <= 2,
         `隐藏并重建 Live 后应保留末行的可见位置（${scenario}：${savedTop} → ${restoredTop}）`)
+      if (scenario === '表格') {
+        // 重挂后再到底，不能被尚未校准的行号列高度拉出多余行程。
+        await page.mouse.wheel(0, 100_000)
+        await page.waitForFunction(() => {
+          const scroller = document.querySelector('.vsidian-view-live .cm-scroller')
+          return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 1
+        })
+        const top = await lastLine.evaluate((line) =>
+          line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top)
+        assert.ok(Math.abs(top - savedTop) <= 2, `文末表格重挂后再次触底应对齐（${savedTop} → ${top}）`)
+      }
     }
     assert.ok(!(await page.evaluate(() => window.readHostMessages())).some(({ kind }) => kind === 'edit.request'),
       '滚过末行和调整窗口大小不应写回源文')

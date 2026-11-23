@@ -505,6 +505,16 @@ export type ViewMode = 'live' | 'reading'
 // 定高的主 Live 正文才需要尾部留白。按末行起点到正文末端的实际
 // 高度计算，兼顾标题、折行与 Callout 等外层容器的末端内边距。
 const LIVE_END_SPACE = '--_vsidian-live-end-space'
+const liveEndSpaceTheme = EditorView.theme({
+  // 留白不是 CodeMirror 的 documentPadding：否则行号列会把虚拟行高
+  // 的估算误差一起带到滚动末端。只影响主编辑器直属的正文。
+  '& > .cm-scroller > .cm-content::after': {
+    content: '""',
+    display: 'block',
+    height: `var(${LIVE_END_SPACE}, 0px)`,
+    pointerEvents: 'none',
+  },
+})
 const liveEndSpace = ViewPlugin.fromClass(class {
   private measuring = false
 
@@ -519,15 +529,15 @@ const liveEndSpace = ViewPlugin.fromClass(class {
     if (this.measuring) return
     this.measuring = true
     view.requestMeasure({
-      read: (measured) => this.endLayout(measured).padding,
+      read: (measured) => this.endLayout(measured).space,
       write: (height) => {
         this.measuring = false
-        this.setPadding(view, height)
+        this.setSpace(view, height)
       },
     })
   }
 
-  private endLayout(view: EditorView): { padding: number; scrollTop?: number } {
+  private endLayout(view: EditorView): { space: number; scrollTop?: number } {
     const end = view.state.doc.length
     const block = view.lineBlockAt(end)
     const { contentDOM, scrollDOM, documentPadding, scaleY } = view
@@ -549,19 +559,20 @@ const liveEndSpace = ViewPlugin.fromClass(class {
           (lineTop - scrollDOM.getBoundingClientRect().top - documentPadding.top) / scaleY
       }
     }
-    return { padding: Math.max(0, scrollDOM.clientHeight - (height + documentPadding.top) / scaleY), scrollTop }
+    const insets = documentPadding.top + documentPadding.bottom
+    return { space: Math.max(0, scrollDOM.clientHeight - (height + insets) / scaleY), scrollTop }
   }
 
-  private setPadding(view: EditorView, height: number): void {
+  private setSpace(view: EditorView, height: number): void {
     const style = view.scrollDOM.style
     const value = `${height}px`
     if (style.getPropertyValue(LIVE_END_SPACE) !== value) style.setProperty(LIVE_END_SPACE, value)
   }
 
   restore(view: EditorView, endGap: number): void {
-    // 挂载末行后用实测行的位置恢复；此时行号列未必已刷入新的留白高度。
+    // 挂载末行后，按实测行的位置恢复，不拿虚拟高度估算作为锚点。
     const layout = this.endLayout(view)
-    this.setPadding(view, layout.padding)
+    this.setSpace(view, layout.space)
     const scroller = view.scrollDOM
     const end = layout.scrollTop ?? scroller.scrollHeight - scroller.clientHeight
     scroller.scrollTop = end - endGap
@@ -2023,7 +2034,7 @@ export class WebviewSyncController {
     return [
       // 只给主 Live 正文留末行滚动空间；嵌入编辑器的卡片高度不受影响。
       liveEndSpace,
-      EditorView.contentAttributes.of({ style: `padding-bottom: var(${LIVE_END_SPACE})` }),
+      liveEndSpaceTheme,
       // T04（#672）callout 容器 BlockWrapper（结构层）：根正文独有装配
       //（引用嵌入实例不接——边界登记）；内部类名，视觉迁移归 T05
       liveCalloutWrap,
