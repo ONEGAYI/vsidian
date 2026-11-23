@@ -163,6 +163,20 @@ describe('粘贴规则控制器消费链', () => {
     expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source))
       .toBeNull()
   })
+  it.each([false, true])('定界符回查不越过读取预算（附近有可确定的闭合行：%s）', (nearClose) => {
+    const doc = Text.of([...Array.from({ length: 1_024 }, () => ['旧'.repeat(512), '']).flat(),
+      ...(nearClose ? ['$$', 'a$$', '', ''] : [''])])
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const source = { doc, tree: markdownTreeParser.parse(docInput(doc)), fm: null }
+    const iter = vi.spyOn(Text.prototype, 'iterRange')
+    const markdown = '$$\nx\n$$'
+    const prepared = prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source)
+    const reverseRanges = iter.mock.calls.filter(([from, to]) => to !== undefined && from > to)
+    expect(reverseRanges).not.toHaveLength(0)
+    expect(reverseRanges.every(([from, to]) => from - to! <= 256 * 1024)).toBe(true)
+    if (nearClose) expect(prepared?.insertions).toEqual([markdown])
+    else expect(prepared).toBeNull()
+  })
   it('远处的未闭合块仍不能吞入新公式的开符', () => {
     const doc = '$$\n' + '段落\n\n'.repeat(600)
     const state = EditorState.create({ doc, selection: { anchor: doc.length } })

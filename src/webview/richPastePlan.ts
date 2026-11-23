@@ -41,20 +41,25 @@ const independentPasteBlocks = new Set(['BulletList', 'OrderedList', 'Blockquote
 const BLOCK_PASTE_DRAFT_MARGIN = 256 * 1024
 const BLOCK_PASTE_DRAFT_LIMIT = Symbol('block paste draft input limit')
 
-/** 在已知闭合的位置之后，检查到达新开启行之前是否仍在旧公式中。
- *  非开启形态的双美元行必使状态回到闭合；开启形态的行则切换状态。 */
-function hasOpenMathBefore(doc: Text, from: number, backTo: number, quoteMarkAt?: QuoteMarkAt): boolean {
-  if (from <= backTo) return false
-  const cursor = doc.iterRange(from, backTo)
+/** 逆扫只读预算内的完整行：非开启形态的双美元行重置为闭合，开启形态
+ *  切换状态。若尚未扫到重置行或已知闭合点，就不能确认新开符独立。 */
+function confirmClosedMathBefore(doc: Text, from: number, backTo: number, budget: number, quoteMarkAt?: QuoteMarkAt) {
+  if (from <= backTo) return { closed: true, read: 0 }
+  const cut = Math.max(backTo, from - budget)
+  const line = doc.lineAt(cut)
+  const stop = cut === backTo || cut === line.from ? cut : Math.min(from, line.to + 1)
+  const cursor = doc.iterRange(from, stop)
   let open = false
   let pos = from
   while (!cursor.next().done) {
     pos -= cursor.value.length
     if (!cursor.value.includes('$$')) continue
-    if (!opensMathBlockLine(stripQuotePrefix(cursor.value, quoteMarkAt, pos).bare)) break
+    if (!opensMathBlockLine(stripQuotePrefix(cursor.value, quoteMarkAt, pos).bare)) {
+      return { closed: !open, read: from - pos }
+    }
     open = !open
   }
-  return open
+  return { closed: stop === backTo && !open, read: from - stop }
 }
 
 function blockPasteBreaks(state: EditorState, input: Text, distribute: boolean, math: NonNullable<ConvertedHtml['blockMath']>): readonly { before: string; after: string }[] {
@@ -209,10 +214,12 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
       const first = doc.lineAt(hit.from).from, last = doc.lineAt(hit.to).to
       if ((fm && hit.from < fm.end) ||
           chainAt(tree, hit.from).some(node => MATH_CODE_CONTEXTS.has(node.name) || node.name === 'CommentBlock' || node.name === 'HTMLBlock') ||
-          doc.sliceString(hit.to, last).trim() ||
-          hasOpenMathBefore(doc, first, closedAt, draftQuoteMarks) ||
+          doc.sliceString(hit.to, last).trim()) return null
+      const prefix = confirmClosedMathBefore(doc, first, closedAt, remaining, draftQuoteMarks)
+      if (!prefix.closed ||
           !scanMathRanges(doc.sliceString(first, last).split('\n'), first, undefined, draftQuoteMarks)
             .some(block => block.kind === 'block' && block.from === hit.from && block.to === hit.to)) return null
+      remaining -= prefix.read
       closedAt = last
     }
   }
