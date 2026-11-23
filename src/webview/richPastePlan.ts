@@ -37,6 +37,9 @@ function paragraphBreak(doc: Text, at: number, side: 'before' | 'after'): string
 }
 
 const independentPasteBlocks = new Set(['BulletList', 'OrderedList', 'Blockquote'])
+// 语法树片段可复用；额外读取的旧文给固定预算，不让大段落阻塞粘贴。
+const BLOCK_PASTE_DRAFT_MARGIN = 256 * 1024
+const BLOCK_PASTE_DRAFT_LIMIT = Symbol('block paste draft input limit')
 
 /** 在已知闭合的位置之后，检查到达新开启行之前是否仍在旧公式中。
  *  非开启形态的双美元行必使状态回到闭合；开启形态的行则切换状态。 */
@@ -88,10 +91,10 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   const boundaryBlocks = new Set<MathOccurrence>()
   let blockIndex = 0
   for (const range of ranges) {
-    // 补块边界会使已有条目的前后内容分家；不改条目缩进或选区外文本。
+    // 不拆现有列表；光标在完整列表两侧时仍可插入独立块。
     if (blockMath.length && sourceTree && [range.from, range.to].some(at =>
       chainAt(sourceTree, at).some(node =>
-        node.name === 'ListItem' && (node.from < range.from || range.to < node.to)))) return null
+        (node.name === 'BulletList' || node.name === 'OrderedList') && node.from < at && at < node.to))) return null
     for (const at of [range.from, range.to]) {
       const line = state.doc.lineAt(at)
       // 光标或选区端点在已有公式内部：沿纯文本编辑，不把 Markdown 定界符写入 TeX。
@@ -168,9 +171,35 @@ export function prepareRichPaste(state: EditorState, converted: ConvertedHtml, b
   if (expectedBlocks.length) {
     const fm = frontmatterRange(doc.sliceString(0, FM_SCAN_LIMIT))
     const touched: ChangedRange[] = []
-    changes.iterChangedRanges((fromA, toA, fromB, toB) => touched.push({ fromA, toA, fromB, toB }))
+    let remaining = BLOCK_PASTE_DRAFT_MARGIN
+    changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      touched.push({ fromA, toA, fromB, toB })
+      remaining += toB - fromB
+    })
     const fragments = sourceTree && TreeFragment.applyChanges(TreeFragment.addTree(sourceTree), touched)
-    const tree = markdownTreeParser.parse(docInput(doc), fragments)
+    const draftInput = docInput(doc)
+    const spend = (size: number) => {
+      remaining -= size
+      if (remaining < 0) throw BLOCK_PASTE_DRAFT_LIMIT
+    }
+    let tree
+    try {
+      tree = markdownTreeParser.parse({
+        ...draftInput,
+        chunk(pos) {
+          const chunk = draftInput.chunk(pos)
+          spend(chunk.length)
+          return chunk
+        },
+        read(from, to) {
+          spend(to - from)
+          return draftInput.read(from, to)
+        },
+      }, fragments)
+    } catch (error) {
+      if (error === BLOCK_PASTE_DRAFT_LIMIT) return null
+      throw error
+    }
     let closedAt = 0
     for (const hit of expectedBlocks) {
       const first = doc.lineAt(hit.from).from, last = doc.lineAt(hit.to).to

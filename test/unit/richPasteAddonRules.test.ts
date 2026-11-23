@@ -123,6 +123,20 @@ describe('粘贴规则控制器消费链', () => {
     expect(view.state.doc.toString()).toBe('- 前X后\n- 次项')
     expect(sent.filter(m => m.kind === 'edit.request')).toHaveLength(1)
   })
+  it.each([true, false])('可在完整列表外侧粘贴独立公式（前侧：%s）', async (before) => {
+    const list = '- 甲\n- 乙'
+    const { view } = mount(list)
+    view.dispatch({ selection: { anchor: before ? 0 : list.length } })
+    pasteDisplayMath(view, 'x', 'X')
+    await settle()
+    const source = view.state.doc.toString()
+    const formula = '$$\nx\n$$'
+    expect(source).toBe((before ? [formula, list] : [list, formula]).join('\n\n'))
+    expect(readingTexOf(source)).toEqual(['x'])
+    expect(splitReadingBlocks(source).map(b => createReadingBlockElement(b, source))
+      .flatMap(block => [...block.querySelectorAll('ul > li')]).map(li => li.textContent?.trim()))
+      .toEqual(['甲', '乙'])
+  })
   it('在远离旧块的长文档末尾保留公式，不复制全文为字符串', () => {
     const doc = Text.of(['$$', 'old', '$$', '', ...'段落\n\n'.repeat(20_000).split('\n')])
     const state = EditorState.create({ doc, selection: { anchor: doc.length } })
@@ -132,6 +146,14 @@ describe('粘贴规则控制器消费链', () => {
     expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source))
       .toMatchObject({ insertions: [markdown] })
     expect(copies.mock.contexts.some(value => (value as Text).length >= doc.length)).toBe(false)
+  })
+  it('草稿需要重新解析超长的旧段落时使用纯文本，不在粘贴中重解析整段', () => {
+    const doc = Text.of(Array.from({ length: 1024 }, () => '旧'.repeat(512)))
+    const state = EditorState.create({ doc, selection: { anchor: doc.length } })
+    const source = { doc, tree: markdownTreeParser.parse(docInput(doc)), fm: null }
+    const markdown = '$$\nx\n$$'
+    expect(prepareRichPaste(state, { markdown, hasFormatting: true, blockMath: [{ from: 0, to: markdown.length }] }, [], source))
+      .toBeNull()
   })
   it('远处的未闭合块仍不能吞入新公式的开符', () => {
     const doc = '$$\n' + '段落\n\n'.repeat(600)
