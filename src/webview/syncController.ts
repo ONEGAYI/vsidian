@@ -4591,8 +4591,12 @@ export class WebviewSyncController {
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: 'center' }),
     })
-    // #66：模式切换即时重算（live 以已渲染行的首可见行换算）
-    this.updateOutlineLocated()
+    // #66：等这次 Live 定位完成首帧布局，再按实际首行更新。目标在文首时
+    // scrollTop 可能没有变化，不能等一个不一定发生的 scroll 事件。
+    const liveView = this.view
+    requestAnimationFrame(() => {
+      if (this.view === liveView && this.viewMode === 'live') this.updateOutlineLocated()
+    })
     // 查找会话跨模式保活（#14）：选区恢复到当前匹配（非仅块首）
     if (this.findOpen) {
       this.findEnsureFresh()
