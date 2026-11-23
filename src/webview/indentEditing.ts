@@ -205,14 +205,17 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     const { offset, delta } = unit
     if (!delta) continue
     const indent = /^[ \t]*/u.exec(line.text.slice(offset))![0]
-    if ((prefix?.mark || movedItem) && indent.includes('\t')) {
+    const structural = !!prefix?.mark || movedItem !== null
+    if (structural && indent.includes('\t')) {
       changes.push(resizeListIndent(line, offset, indent, delta))
     } else if (delta > 0) {
       // 裸 > 新增空白后第一格会成为引用分隔符，不计入列表的缩进量。
       const separator = (item || movedItem) && line.text[offset - 1] === '>' ? 1 : 0
       changes.push({ from: line.from + offset, insert: ' '.repeat(delta + separator) })
     } else {
-      const cut = dedentCutOf(line.text, { offset, width: -delta })
+      // 列表的位移只消费 Markdown 缩进。惰性续行开头的 NBSP 等仍属正文。
+      const width = structural ? Math.min(-delta, indent.length) : -delta
+      const cut = dedentCutOf(line.text, { offset, width })
       if (cut) changes.push({ from: line.from + cut.from, to: line.from + cut.to })
     }
     if (unit.restartNumber) changes.push({ ...unit.restartNumber, insert: '1' })

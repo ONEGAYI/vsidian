@@ -260,6 +260,26 @@ describe('Tab 选区多行缩进', () => {
     expect(edits).toBe(1)
   })
 
+  it.each([
+    ['普通列表的 NBSP', '', '\u00a0'],
+    ['普通列表的全角空格', '', '\u3000'],
+    ['引用内列表的 NBSP', '> ', '\u00a0'],
+    ['引用内列表的全角空格', '> ', '\u3000'],
+  ])('成组 Tab 左移保留%s续行正文且可一次撤销', (_, quote, space) => {
+    const doc = ['- parent', '', '10. first', '   11. second', `${space}lazy`, ` ${space}continued`]
+      .map((line) => quote + line).join('\n')
+    const expected = ['- parent', '', '  10. first', '  11. second', `${space}lazy`, `${space}continued`]
+      .map((line) => quote + line).join('\n')
+    const undoTexts: string[] = []
+    const view = makeEditView(doc, { anchor: doc.indexOf('10.'), head: doc.length }, [
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) undoTexts.push(update.changes.invert(update.startState.doc).apply(update.state.doc).toString())
+      }),
+    ])
+    expect(typed(view)).toEqual({ text: expected, from: expected.indexOf('10.'), to: expected.length })
+    expect(undoTexts).toEqual([doc])
+  })
+
   it('只移动选区内的内容，续段、围栏和子列表跟随各自的列表项', () => {
     const content = '- first\n\n  continued\n\n  \u00a0\n\n  ```txt\n  code\n  ```\n  - child\n- second'
     const doc = `10. parent\n${content}\n- untouched`

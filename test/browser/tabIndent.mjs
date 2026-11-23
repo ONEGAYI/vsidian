@@ -42,6 +42,8 @@ const ORDERED_CHILDREN = '1. parent\n   1. first\n   2. second\n2. next\n10. gap
 const ORDERED_PROMOTED = '1. parent\n2. first\n3. second\n4. next\n10. gap\n1. explicit'
 const MISALIGNED = '- parent\n\n10. first\n   11. second\n       - owned'
 const ALIGNED = '- parent\n\n  10. first\n  11. second\n      - owned'
+const QUOTED_MISALIGNED = '> - parent\n> \n> 10. first\n>    11. second\n> \u00a0lazy\n> \u3000wide'
+const QUOTED_ALIGNED = '> - parent\n> \n>   10. first\n>   11. second\n> \u00a0lazy\n> \u3000wide'
 
 // #420 降级 frontmatter 文档对（嵌套 map 源码态；Tab 前后互为镜像）
 const DEGRADED_FM = '---\nperm:\n  bash: deny\n---\nbody'
@@ -106,6 +108,11 @@ const scenarios = [
     range: [MISALIGNED.indexOf('10.'), MISALIGNED.length], keys: ['Tab'],
     text: ALIGNED, from: ALIGNED.indexOf('10.'), to: ALIGNED.length,
     bullets: ['•', '▪'],
+  },
+  {
+    name: 'tab-selection-preserves-unicode-in-quoted-continuation', doc: QUOTED_MISALIGNED,
+    range: [QUOTED_MISALIGNED.indexOf('10.'), QUOTED_MISALIGNED.length], keys: ['Tab'],
+    text: QUOTED_ALIGNED, from: QUOTED_ALIGNED.indexOf('10.'), to: QUOTED_ALIGNED.length,
   },
   {
     name: 'tab-table-nav-priority', doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('1') + 1,
