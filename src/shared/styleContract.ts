@@ -1626,7 +1626,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     category: 'math',
     kind: 'selector',
     target: '.vsidian-math',
-    purpose: '公式渲染态稳定容器：live 为行内 widget 外层、阅读为 KaTeX 外层 span/p（内含 KaTeX .katex 结构）；颜色继承编辑器前景。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。',
+    purpose: '公式渲染态稳定容器：live 为 widget 外层，阅读为 KaTeX 外层 span/p（内含 KaTeX .katex 结构）。实时预览默认使用编辑器前景色；粗体、斜体或高亮内的行内公式继承外层颜色。阅读公式继承外层颜色。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。',
     views: ['live', 'reading'],
     states: 'live 侧光标进入公式范围显源码（见 live-math-source）。',
     dom: 'live：行内替换 widget；阅读：行内 span 或块级 p.katex-block（KaTeX HTML 由 KaTeX 产出）。',

@@ -121,7 +121,7 @@ try {
   const formulaDoc = [
     '普通 $2$', '**$2$**', '_$2$_', '==$2$==', '<span style="color: purple">$2$</span>',
     '***$2$***', '___$2$___', '***<span>$2$</span>***', '_**$2$**_', String.raw`**$\color{red}{2}$**`,
-    '1. **用 $2$ 与 $3$ 划分边界**：普通正文 $4$。',
+    '1. **用 $2$ 与 $3$ 划分边界**：普通正文 $4$。', '**$$W$$**',
   ].join('\n\n')
   const mathHtml = path.join(path.dirname(output), 'math.html')
   writeFileSync(mathHtml, '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="main.css"><div id="app"></div><script src="main.js"></script>')
@@ -129,11 +129,14 @@ try {
   await mathPage.addStyleTag({ content: `
     :root { --vscode-editor-foreground: rgb(17, 18, 19); }
     #app { --vsidian-highlight-background: rgb(255, 228, 128); }
+    .cm-line { color: rgb(30, 130, 70); }
+    .cm-strong { opacity: 0.6; }
+    .cm-highlight { color: rgb(95, 71, 36); }
     .markdown-preview-view strong, .cm-strong { color: rgb(42, 83, 124); }
     .markdown-preview-view em, .cm-emphasis { color: rgb(131, 64, 86); }
   ` })
   await mathPage.evaluate((doc) => window.initAlias(doc), formulaDoc)
-  const paint = (mode) => mathPage.locator(`.vsidian-view-${mode} .vsidian-math .katex-html .mord:not(:has(.mord))`)
+  const paint = (mode) => mathPage.locator(`.vsidian-view-${mode} .vsidian-math:not(.vsidian-math-block) .katex-html .mord:not(:has(.mord))`)
     .evaluateAll((items) => items.map((el) => {
       const style = getComputedStyle(el)
       return [style.color, style.fontWeight, style.fontStyle]
@@ -144,8 +147,14 @@ try {
   const texRed = 'rgb(255, 0, 0)'
   const normalGlyph = (color) => [color, '400', 'normal']
   // Live 的三连与相邻文字一样沿用 Lezer 的内层粗体，阅读三连另有 Obsidian 顺序。
-  const livePaint = [plain, strong, emphasis, plain, strong, strong, strong, texRed, strong, strong, plain].map(normalGlyph)
-  assert.deepEqual(await paint('live'), livePaint, 'Live 公式匹配外层强调色，包括列表内混排；普通公式与 TeX 显式颜色不变')
+  const livePaint = [plain, strong, emphasis, 'rgb(95, 71, 36)', strong, strong, strong, texRed, strong, strong, plain].map(normalGlyph)
+  const liveBlockOpacity = await mathPage.locator('.vsidian-view-live .vsidian-math-block .katex-html').evaluate((el) => {
+    let opacity = 1
+    for (let layer = el; layer; layer = layer.parentElement) opacity *= Number(getComputedStyle(layer).opacity)
+    return opacity
+  })
+  assert.deepEqual({ glyphs: await paint('live'), blockOpacity: liveBlockOpacity }, { glyphs: livePaint, blockOpacity: 1 },
+    '只有强调内的行内公式跟随强调色；自定义行色、粗体透明度不改变普通行内及共边界块公式的绘制')
   assert.equal(await mathPage.locator('.cm-highlight:has(.katex-html)')
     .evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(255, 228, 128)', 'Live 只在高亮内写公式时底色也覆盖公式')
   const openItalic = formulaDoc.indexOf('_$2$_') + 2

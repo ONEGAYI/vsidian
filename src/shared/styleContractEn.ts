@@ -615,7 +615,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   // ---- 公式（math，5 条；#59）----
   'live-math': {
     purpose:
-      'The stable container of the rendered math state: in live view the outer wrapper of the inline widget; in reading view the KaTeX outer span/p (containing the KaTeX .katex structure); color inherits the editor foreground. Obsidian splits the .cm-math-begin/end delimiter classes; this project replaces the range as a whole and has no split classes.',
+      'Stable container for rendered math: the widget wrapper in Live Preview and the outer span/p in Reading View (containing the KaTeX .katex structure). Live Preview uses the editor foreground by default; inline math inside bold, italic, or highlighted text inherits its surrounding color. Reading View math inherits its surrounding color. Obsidian splits the .cm-math-begin/end delimiter classes; Vsidian replaces the range as a whole and has no split classes.',
     states: 'In live view the source is revealed while the cursor is inside the math range (see live-math-source).',
     dom: 'Live: an inline replacement widget; reading: an inline span or a block-level p.katex-block (the KaTeX HTML is produced by KaTeX).',
     obsidian: { counterpart: '.cm-math (the Obsidian live math token)' },

@@ -4842,10 +4842,17 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
    字体文件（仅 woff2）产物化到 out/webview/assets/。此处只做主题适配、
    布局与降级态；类名入口见 docs/design/obsidian-selector-map.md 数学节。 */
 
-/* live 行内公式沿 DOM 继承外层颜色，与同段文字共用样式。 */
+/* 保留公式默认前景；粗体、斜体或高亮内的行内公式跟随相邻文字。 */
+#app .cm-editor .cm-content .vsidian-math {
+  color: var(--vscode-editor-foreground);
+}
+
+#app .cm-editor .cm-content :where(.vsidian-strong, .vsidian-emphasis, .vsidian-highlight) .vsidian-math:not(:where(.vsidian-math-block)) {
+  color: inherit;
+}
+
 /* live 块级公式（$$…$$ 折叠为单视觉行）：独立块 + 居中 + 横向滚动 */
 #app .cm-editor .cm-content .vsidian-math-block {
-  color: var(--vscode-editor-foreground);
   display: block;
   text-align: center;
   overflow-x: auto;
