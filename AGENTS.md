@@ -11,13 +11,13 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **CI 敏感期处置（用户授权，至 #684 清零）**：纯文档提交（`.md`/`.txt`）直推 `main`（`ci.yml` 自动跳过全量检查）；代码变更合并仍以全绿为准，仅[跟踪集合 #684](https://github.com/ONEGAYI/vsidian/issues/684)内的已知未定性抖动挂红不重跑不回滚。
 - **插件设置入口**：用户设置统一在 Vsidian 自有设置页展示与修改，不复用 VSCode 设置中心；新增设置项须验证持久化、回显与生效。
 - **用户可见文字一律 i18n**：webview、设置页、宿主提示及 `package.json` 命令标题/描述必须经 `src/shared/locales/` 与 `t()` 添加，禁止硬编码中/英文字面量；`package.nls.*.json` 由构建脚本生成。
-- **视觉层断言（评审必查）**：呈现/样式/渲染类变更须断言用户可见结果（可见性、对齐、颜色，如 `view.state.paint` 探针），不能只测 DOM 存在性或几何坐标；CSS 关键规则由契约测试钉住。
+- **视觉层断言（评审必查）**：呈现/样式/渲染类变更须断言用户可见结果（可见性、对齐、颜色），不能只测 DOM 存在性或几何坐标；**涉及呈现的新特性至少一条集成断言落在绘制层**（`view.state.paint` 探针），CSS 关键规则由契约测试钉住。
 - **操作与快捷键注册**：可绑定操作须在 `src/shared/keybindings.ts` 评估并登记入口、默认绑定与生效模式（写操作仅 Live 正文覆盖宿主），支持显式清空与恢复默认且清空不因重启恢复。
 - **大纲样式原则**：结构装饰与正文标题同源引用 `--vsidian-heading-color-1..6`；条目固定字重 400，强调与透传白名单仅由显式行内标记触发（`OutlineSpanKind` / `SPAN_KIND_BY_NODE`）。
 
 ### 领域落档指针（修改对应领域前必读目标章节）
 - **附加组件公开 API（1.1.0 已稳定）**：修改发现/调用、公开 API、台账或门禁前，必读 [ADR-0012](docs/adr/0012-vsidian-addons-distribution-api-governance.md)、[开发者指南](docs/addons/developer-guide.md)「文档维护入口」及 [API 门禁规格](docs/specs/addons-api-gate.md)；事实源在 `src/shared/addonApiCatalog.ts`，改后同步 `npm run gen:addonapi` / `check:addonapi` / `check:addoncompat`。
-- **公开样式契约**：修改 webview DOM、类名、CSS 变量、主题或片段加载路径前，加载技能 **style-contract**（`.agents/skills/style-contract/SKILL.md`）；结构化清单在 `src/shared/styleContract.ts`，门禁见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)。
+- **公开样式契约**：修改 webview DOM、类名、CSS 变量、主题、片段加载路径，或样式指南、样式兼容测试、历史基线及相关 CI 时，加载技能 **style-contract**（`.agents/skills/style-contract/SKILL.md`）；结构化清单在 `src/shared/styleContract.ts`。修改检查器、历史基线或门禁工作流前，必读 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)（须先跑 `npm run check:stylecontract:baseline` 复验基线再跑 `npm run check:stylecontract`）。
 - **UI 元素形态契约**：新增或修改自绘 UI 元素前，必读 [docs/specs/ui-patterns.md](docs/specs/ui-patterns.md) 并加载技能 **ui-patterns**（`.agents/skills/ui-patterns/SKILL.md`）。
 - **图形化代码块**：改支持语言、按钮组、弹窗或导出前，必读 [docs/specs/graphic-code-block-interaction.md](docs/specs/graphic-code-block-interaction.md)「扩展约定（落档）」。
 - **符号输入与行内围栏**：改符号对、成对行内标记、选区包裹、Tab 越界或 IME 组合输入前，必读 [docs/specs/symbol-input.md](docs/specs/symbol-input.md)。
@@ -37,7 +37,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 ## 技术栈、构建与测试
 
 - **架构红线**：TypeScript + CodeMirror 6（单包组合，**禁 `codemirror` 聚合包与 `basicSetup`/`history`**，撤销归宿主 `WorkspaceEdit`）；`src/shared/` 为两端纯逻辑共享层（禁 `vscode`/DOM 依赖）；webview 全程 LF 坐标，宿主 `NewlineCoordinator` 负责双向转换。
-- **构建与依赖**：esbuild 多产物（`npm run compile` 串联 `tsc --noEmit`）；依赖锁精确版本（无 `^`），`engines.vscode ^1.82.3` 与 `@types/vscode 1.82.0` 对齐；worktree 用 `node scripts/linkDeps.mjs <工作树>` 链接共享 `.deps` 缓存（**junction 在场禁 `npm ci/install`**）。
+- **构建与依赖**：esbuild 多产物（`npm run compile` 串联 `tsc --noEmit`）；依赖锁精确版本（无 `^`），`engines.vscode ^1.82.3` 与 `@types/vscode 1.82.0` 对齐，`@types/node` 锁 22.x 但**宿主代码仍按 Node 18 API 面编码**；worktree 用 `node scripts/linkDeps.mjs <工作树>` 链接共享 `.deps` 缓存（**junction 在场禁 `npm ci/install`**）。
 - **测试门禁**：命令清单见 `package.json`。
   - 涉及 webview 输入/光标行为变更，合并前必跑 `npm run test:browser`（三并发，`out/test/browser-runs/`）。
   - 集成测试按 `VSIDIAN_TEST_GROUP=core|sensitive` 分组与 `VSIDIAN_ITEST_SHARDS=4` 分片，完整名单、耗时预算与 `_test.*` 钩子门控见 [docs/specs/integration-test-groups.md](docs/specs/integration-test-groups.md)；复核失败优先读 `.vscode-test/` 或下载 CI artifact 报告，不为补看信息重跑。
