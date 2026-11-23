@@ -236,7 +236,7 @@ export type HostToWebview =
   /** 性能探针（#5）：webview 测量输入延迟/长任务/滚动回收并回报 perf.report。
    *  探针编辑带 externalSync 注解，不产生写回（测量不污染宿主文档） */
   | { kind: 'perf.probe'; typingRounds: number; scrollRounds: number }
-  /** #292 骨架屏测试钩子（VSIDIAN_TEST_HOOKS=1 集成装配专用）：release
+  /** #292 骨架屏专项测试：release
    *  解除宿主 HTML 嵌入的撤除冻结并立即撤除。状态观测走 getLastSkeletonReport
    *  轮询（adopt/hold/release 路径均主动回报，无需独立查询消息） */
   | { kind: '_test.skeleton.release' }

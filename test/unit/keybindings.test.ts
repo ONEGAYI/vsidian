@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   KEYBINDING_OPERATIONS, getEffectiveBindings, normalizeChord,
   findBindingConflicts, findConflictedOperationIds, operationMatchesFilter,
-  applyBindingChange, resolveKeybinding, formatBindingLabel,
+  applyBindingChange, resolveKeybinding, formatBindingLabel, sanitizeStoredOverrides,
   setKeybindingLabelPlatform, __resetKeybindingLabelPlatformForTest,
   type KeybindingOverrides,
 } from '../../src/shared/keybindings'
@@ -67,6 +67,25 @@ describe('快捷键契约', () => {
     expect(findBindingConflicts(custom, 'italic', 'ctrl+k')).toContain('bold')
     expect(findBindingConflicts(custom, 'italic', 'ctrl+k ctrl+b')).toContain('bold')
     expect(findBindingConflicts({ toReading: ['ctrl+k'] }, 'toLive', 'ctrl+k')).toEqual([])
+  })
+
+  it('正文动作与 PDF 浮层可以复用按键，同场景的同键和前缀仍冲突', () => {
+    const overrides = { pdfPagePrev: ['alt+up'], pdfPageNext: ['alt+down'] }
+    expect(resolveKeybinding(overrides, 'live', 'alt+down')).toEqual({ kind: 'command', id: 'moveLineDown' })
+    expect(resolveKeybinding(overrides, 'reading', 'alt+down')).toEqual({ kind: 'none' })
+    expect(resolveKeybinding(overrides, 'reading', 'alt+down', false, 'pdfHover'))
+      .toEqual({ kind: 'command', id: 'pdfPageNext' })
+    expect(findBindingConflicts(overrides, 'moveLineDown', 'alt+down')).toEqual([])
+    expect(findConflictedOperationIds(overrides)).toEqual(new Set())
+    expect(applyBindingChange({}, 'pdfPageNext', ['alt+down'], false))
+      .toEqual({ ok: true, overrides: { pdfPageNext: ['alt+down'] } })
+    const custom = { pdfPageNext: ['alt+j'], moveLineDown: ['alt+j'] }
+    expect(applyBindingChange({ pdfPageNext: ['alt+j'] }, 'moveLineDown', ['alt+j'], false))
+      .toEqual({ ok: true, overrides: custom })
+    expect(findConflictedOperationIds(custom)).toEqual(new Set())
+    expect(findBindingConflicts(overrides, 'pdfZoomIn', 'alt+down ctrl+k')).toEqual(['pdfPageNext'])
+    expect(applyBindingChange(overrides, 'pdfZoomIn', ['alt+down'], true))
+      .toEqual({ ok: true, overrides: { ...overrides, pdfPageNext: [], pdfZoomIn: ['alt+down'] } })
   })
 
   it('显式替换只移走冲突项并保留其余绑定', () => {
@@ -372,8 +391,124 @@ describe('默认键位规范序契约（#417：pastePlain mac 默认键序永不
   })
 })
 
+// VSCode 编辑器操作族（2026-11-23）：视口按行滚动、上下插入空行、上下移动当前行。
+// 默认键对齐 VSCode 的 scrollLineUp/Down 与 insertLineBefore/After；「移动当前行」
+// 对齐 VSCode 的 editor.action.moveLinesUpAction/DownAction（Alt+↑/↓）——此前该族
+// 一直是 CM6 defaultKeymap 的裸内建绑定，不经注册表故无法在设置页配置，本批补登记。
+describe('视口滚动与插入空行快捷键（VSCode 编辑器操作族）', () => {
+  const ops = [
+    { id: 'scrollLineUp', command: 'onegayi.vsidian.editor.scrollLineUp',
+      titleKey: 'command.editor.scrollLineUp.title', defaults: ['ctrl+up'] },
+    { id: 'scrollLineDown', command: 'onegayi.vsidian.editor.scrollLineDown',
+      titleKey: 'command.editor.scrollLineDown.title', defaults: ['ctrl+down'] },
+    { id: 'insertLineAbove', command: 'onegayi.vsidian.editor.insertLineAbove',
+      titleKey: 'command.editor.insertLineAbove.title', defaults: ['ctrl+shift+enter', 'shift+meta+enter'] },
+    { id: 'insertLineBelow', command: 'onegayi.vsidian.editor.insertLineBelow',
+      titleKey: 'command.editor.insertLineBelow.title', defaults: ['ctrl+enter', 'meta+enter'] },
+    { id: 'moveLineUp', command: 'onegayi.vsidian.editor.moveLineUp',
+      titleKey: 'command.editor.moveLineUp.title', defaults: ['alt+up'] },
+    { id: 'moveLineDown', command: 'onegayi.vsidian.editor.moveLineDown',
+      titleKey: 'command.editor.moveLineDown.title', defaults: ['alt+down'] },
+  ] as const
+  const writesOf: Record<string, boolean> = {
+    scrollLineUp: false, scrollLineDown: false, insertLineAbove: true, insertLineBelow: true,
+    moveLineUp: true, moveLineDown: true,
+  }
+
+  it('六操作登记：仅 Live 生效、读写标记按「是否写权威文本」、默认键对齐 VSCode', () => {
+    for (const expected of ops) {
+      const op = KEYBINDING_OPERATIONS.find((item) => item.id === expected.id)
+      expect(op, expected.id).toBeDefined()
+      expect(op, expected.id).toMatchObject({
+        mode: 'live', writes: writesOf[expected.id]!, command: expected.command, titleKey: expected.titleKey,
+      })
+      expect(getEffectiveBindings({}, expected.id), expected.id).toEqual([...expected.defaults])
+    }
+  })
+
+  it('阅读模式不消费（Live 编辑器视图态/编辑能力）；写操作受写门约束、滚动不受', () => {
+    expect(resolveKeybinding({}, 'live', 'ctrl+up')).toEqual({ kind: 'command', id: 'scrollLineUp' })
+    expect(resolveKeybinding({}, 'live', 'ctrl+down')).toEqual({ kind: 'command', id: 'scrollLineDown' })
+    expect(resolveKeybinding({}, 'live', 'ctrl+enter')).toEqual({ kind: 'command', id: 'insertLineBelow' })
+    expect(resolveKeybinding({}, 'live', 'ctrl+shift+enter')).toEqual({ kind: 'command', id: 'insertLineAbove' })
+    expect(resolveKeybinding({}, 'live', 'alt+up')).toEqual({ kind: 'command', id: 'moveLineUp' })
+    expect(resolveKeybinding({}, 'live', 'alt+down')).toEqual({ kind: 'command', id: 'moveLineDown' })
+    for (const chord of ['ctrl+up', 'ctrl+down', 'ctrl+enter', 'ctrl+shift+enter', 'alt+up', 'alt+down']) {
+      expect(resolveKeybinding({}, 'reading', chord), chord).toEqual({ kind: 'none' })
+    }
+    // allowWrites=false（焦点在查找输入框等非正文域）：滚动仍可用，插入与移动行不拦截
+    expect(resolveKeybinding({}, 'live', 'ctrl+down', false)).toEqual({ kind: 'command', id: 'scrollLineDown' })
+    expect(resolveKeybinding({}, 'live', 'ctrl+enter', false)).toEqual({ kind: 'none' })
+    expect(resolveKeybinding({}, 'live', 'ctrl+shift+enter', false)).toEqual({ kind: 'none' })
+    expect(resolveKeybinding({}, 'live', 'alt+up', false)).toEqual({ kind: 'none' })
+    expect(resolveKeybinding({}, 'live', 'alt+down', false)).toEqual({ kind: 'none' })
+  })
+
+  it('显式清空后回落 none、改绑生效（清空不因升级恢复）', () => {
+    const cleared = { scrollLineUp: [], scrollLineDown: [], insertLineAbove: [], insertLineBelow: [],
+      moveLineUp: [], moveLineDown: [] }
+    for (const expected of ops) {
+      for (const chord of expected.defaults) {
+        expect(resolveKeybinding(cleared, 'live', chord), `${expected.id} ${chord}`).toEqual({ kind: 'none' })
+      }
+    }
+    expect(resolveKeybinding({ insertLineBelow: ['ctrl+alt+enter'] }, 'live', 'ctrl+alt+enter'))
+      .toEqual({ kind: 'command', id: 'insertLineBelow' })
+    expect(resolveKeybinding({ insertLineBelow: ['ctrl+alt+enter'] }, 'live', 'ctrl+enter'))
+      .toEqual({ kind: 'none' })
+    expect(resolveKeybinding({ moveLineUp: ['ctrl+alt+up'] }, 'live', 'ctrl+alt+up'))
+      .toEqual({ kind: 'command', id: 'moveLineUp' })
+    expect(resolveKeybinding({ moveLineUp: ['ctrl+alt+up'] }, 'live', 'alt+up'))
+      .toEqual({ kind: 'none' })
+    // sanitizeStoredOverrides 保留显式清空（重启后仍禁用）
+    expect(sanitizeStoredOverrides({ insertLineBelow: [] })).toEqual({ insertLineBelow: [] })
+  })
+
+  it('与全部既有默认键位零冲突（Alt+方向键与多光标 Ctrl+Alt+方向键共存）', () => {
+    for (const expected of ops) {
+      for (const chord of expected.defaults) {
+        expect(findBindingConflicts({}, expected.id, chord), `${expected.id} ${chord}`).toEqual([])
+      }
+    }
+    expect([...findConflictedOperationIds({})]).toEqual([])
+    // Alt+方向键归本族（moveLine*）；Ctrl+Alt+方向键仍是多光标，两者修饰组合不同
+    expect(resolveKeybinding({}, 'live', 'ctrl+alt+up')).toEqual({ kind: 'command', id: 'addCursorAbove' })
+    expect(resolveKeybinding({}, 'live', 'ctrl+alt+down')).toEqual({ kind: 'command', id: 'addCursorBelow' })
+    // 移动行不登记 mac 形态：Cmd+Alt+↑/↓ 在 CM6 是 addCursorAbove/Below
+    // （defaultKeymap 的 Mod-Alt-ArrowUp），抢来当移动行会把多光标按钮夺走
+    expect(getEffectiveBindings({}, 'moveLineUp')).toEqual(['alt+up'])
+    expect(getEffectiveBindings({}, 'moveLineDown')).toEqual(['alt+down'])
+    for (const op of ops) {
+      expect(op.defaults.some((chord) => chord.includes('meta') && chord.includes('alt')), op.id).toBe(false)
+    }
+  })
+
+  it('manifest 命令已登记（三面同源）', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+    const commands = manifest.contributes.commands.map((item: { command: string }) => item.command)
+    for (const expected of ops) {
+      expect(commands, expected.command).toContain(expected.command)
+    }
+  })
+})
+
 describe('键位标签平台渲染（#444：meta 不再固定 Win）', () => {
   afterEach(() => __resetKeybindingLabelPlatformForTest())
+
+  it('命名键按 VSCode 标签惯例给出词形（Enter / Up，而非 ENTER / UP）', () => {
+    // 插入空行批次的暴露点：此前别名表无 enter，Ctrl+Shift+Enter 渲染成
+    // Ctrl+Shift+ENTER；方向键同落 toUpperCase 显示 Ctrl+UP。命名键统一
+    // 给词形，字母数字键仍大写（Ctrl+K）——物理键名表只有符号键的字符形态。
+    setKeybindingLabelPlatform('windows')
+    expect(formatBindingLabel('ctrl+shift+enter')).toBe('Ctrl+Shift+Enter')
+    expect(formatBindingLabel('ctrl+enter')).toBe('Ctrl+Enter')
+    expect(formatBindingLabel('shift+meta+enter')).toBe('Shift+Win+Enter')
+    expect(formatBindingLabel('ctrl+up')).toBe('Ctrl+Up')
+    expect(formatBindingLabel('ctrl+alt+down')).toBe('Ctrl+Alt+Down')
+    expect(formatBindingLabel('ctrl+left')).toBe('Ctrl+Left')
+    expect(formatBindingLabel('ctrl+pagedown')).toBe('Ctrl+PageDown')
+    expect(formatBindingLabel('ctrl+k')).toBe('Ctrl+K')
+  })
 
   it('mac 平台 meta 渲染为 Cmd（设置页 pastePlain 显示 Cmd+Shift+V，与用户视角描述一致）', () => {
     setKeybindingLabelPlatform('mac')

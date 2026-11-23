@@ -1042,6 +1042,13 @@ export const zhCn: Record<MessageKey, string> = {
   /** #237 多光标：在上方/下方行添加光标（仅实时预览；Alt+点击在指针处添加） */
   'command.editor.addCursorAbove.title': '在上方添加光标',
   'command.editor.addCursorBelow.title': '在下方添加光标',
+  /** VSCode 编辑器操作族：视口按行滚动 / 在上方、下方插入空行（实时预览，默认键对齐 VSCode） */
+  'command.editor.scrollLineUp.title': '向上滚动一行',
+  'command.editor.scrollLineDown.title': '向下滚动一行',
+  'command.editor.insertLineAbove.title': '在上方插入空行',
+  'command.editor.insertLineBelow.title': '在下方插入空行',
+  'command.editor.moveLineUp.title': '上移当前行',
+  'command.editor.moveLineDown.title': '下移当前行',
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
   'command.ui.hoverPdfPageNext.title': 'PDF 预览：下一页',

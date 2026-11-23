@@ -93,6 +93,30 @@ try {
     await page.keyboard.type('Z')
     assert.equal(await nameSearch.inputValue(), '粗Z体', '替换中段选区后应保留两侧文本')
     assert.equal(await nameSearch.evaluate((input) => input.selectionStart), 2)
+    // VSCode 编辑器操作族（视口按行滚动/插入空行）：经设置页统一管理——
+    // 按操作名可检索到，默认键位牌与注册表一致
+    await nameSearch.fill('插入空行')
+    assert.deepEqual(await page.locator('.vsidian-keybindings-row').evaluateAll(
+      els => els.map(e => e.dataset.operationId)), ['insertLineAbove', 'insertLineBelow'])
+    // 插入空行双登记（Win/Linux 键 + mac 形态），故每个操作两张牌。meta 的
+    // 平台标签随运行环境变化（Win/Cmd/Super），只钉不随平台变的部分，不用
+    // 整串字面量（CI 在 Linux 上 meta 显示 Super）
+    const insertAboveTags = page.locator('[data-operation-id="insertLineAbove"] kbd')
+    assert.equal(await insertAboveTags.count(), 2, 'insertLineAbove 应双登记两条默认键位')
+    assert.equal(await insertAboveTags.first().innerText(), 'Ctrl+Shift+Enter')
+    const insertAboveMac = await insertAboveTags.nth(1).innerText()
+    assert.ok(insertAboveMac.includes('Shift'), `mac 形态牌应含 Shift（实际 ${insertAboveMac}）`)
+    assert.ok(insertAboveMac.endsWith('+Enter'), `mac 形态牌应以 Enter 收尾（实际 ${insertAboveMac}）`)
+    const insertBelowTags = page.locator('[data-operation-id="insertLineBelow"] kbd')
+    assert.equal(await insertBelowTags.count(), 2, 'insertLineBelow 应双登记两条默认键位')
+    assert.equal(await insertBelowTags.first().innerText(), 'Ctrl+Enter')
+    const insertBelowMac = await insertBelowTags.nth(1).innerText()
+    assert.ok(insertBelowMac.endsWith('+Enter'), `mac 形态牌应以 Enter 收尾（实际 ${insertBelowMac}）`)
+    await nameSearch.fill('滚动一行')
+    assert.deepEqual(await page.locator('.vsidian-keybindings-row').evaluateAll(
+      els => els.map(e => e.dataset.operationId)), ['scrollLineUp', 'scrollLineDown'])
+    assert.equal(await page.locator('[data-operation-id="scrollLineUp"] kbd').first().innerText(), 'Ctrl+Up')
+    assert.equal(await page.locator('[data-operation-id="scrollLineDown"] kbd').first().innerText(), 'Ctrl+Down')
     await nameSearch.fill('')
     // 捕获签流（#155）：＋ 原位变 ✓，点 ＋ 后立即聚焦（术语契约「立即捕获
     // 键盘输入」），真实键盘路径录 Ctrl+B（不借 press 自动聚焦），pointer 提交
@@ -187,7 +211,8 @@ try {
     // 筛选签（#155）：冲突计数与四维过滤（真实点击路径）
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message',
       { source: window, data: { kind: 'keybindings.snapshot',
-        overrides: { bold: [], italic: ['ctrl+b'], find: ['ctrl+b'], inlineMath: [] } } })))
+        overrides: { bold: [], italic: ['ctrl+b'], find: ['ctrl+b'], inlineMath: [],
+          pdfPagePrev: ['alt+up'], pdfPageNext: ['alt+down'] } } })))
     const chip = (kind) => page.locator(`.vsidian-keybindings-filter[data-filter="${kind}"]`)
     assert.equal(await chip('conflict').innerText(), `${zhCn['keybindingSettings.filterConflicts']} (2)`)
     await chip('conflict').click()
@@ -195,7 +220,7 @@ try {
       els => els.map(e => e.dataset.operationId)), ['italic', 'find'])
     await chip('userAssigned').click()
     assert.deepEqual(await page.locator('.vsidian-keybindings-row').evaluateAll(
-      els => els.map(e => e.dataset.operationId)), ['bold', 'italic', 'inlineMath', 'find'])
+      els => els.map(e => e.dataset.operationId)), ['bold', 'italic', 'inlineMath', 'find', 'pdfPageNext', 'pdfPagePrev'])
     await chip('unassigned').click()
     const unassignedIds = await page.locator('.vsidian-keybindings-row').evaluateAll(
       els => els.map(e => e.dataset.operationId))

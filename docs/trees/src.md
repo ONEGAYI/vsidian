@@ -281,6 +281,7 @@ vsidian/
         ├── jsonDialects.ts               # JSONC与JSON5词法模式
         ├── keybindingRouter.ts           # 编辑器按键分发器
         ├── keybindingSettings.ts         # 快捷键设置分页
+        ├── lineCommands.ts               # 按行滚动、插入空行与移动行命令
         ├── listEditing.ts                # Enter 延续与退格清层（#119）
         ├── liveBlockId.ts                # 块 id 标记 live 淡化装饰
         ├── liveCalloutWrap.ts            # Callout wrapper 容器扩展

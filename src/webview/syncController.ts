@@ -40,7 +40,7 @@ import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
 import { PDF_ZOOM_STEP } from './pdfRender'
-import { KeybindingRouter, keyStep } from './keybindingRouter'
+import { KeybindingRouter } from './keybindingRouter'
 import {
   applyHeadingFoldOperation,
   collectHeadingFoldPaint,
@@ -65,7 +65,7 @@ import { innermostCalloutAt, type LiveCalloutTarget } from './liveDecorations'
 import { planCalloutRemove, planCalloutRetype, planCalloutWrap } from '../shared/calloutPlan'
 import { isValidCalloutTypeInput } from '../shared/calloutSyntax'
 import type { CalloutMenuHit } from '../shared/contextMenu'
-import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
+import { formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
 import { ToastChannel } from './toast'
 import { RichPasteDialog } from './richPasteDialog'
@@ -241,6 +241,7 @@ import {
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  hoverPdfShortcutRoot,
   turnHoverPdfPage,
   zoomHoverPdf,
   resetHoverPdfZoom,
@@ -421,6 +422,10 @@ import {
   selectWordRight,
   type JiebaResources,
 } from './wordMotion'
+// VSCode 编辑器操作族：视口按行滚动与上下插入空行（router 本地分支与
+// ui.command 两入口共用 runLineScroll / runLineInsert；执行体与 defaultKeymap
+// 的 Mod-Enter 接管 keymap 同在 lineCommands）
+import { insertLineAt, moveLineAt, scrollByLine, type LineDirection, type LineInsertSide } from './lineCommands'
 import { decorateReadingFrontmatterCard, FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
 import { FM_POPOVER_CLASS_NAMES, closeFmPopover, isFmPopoverOpen } from './frontmatterPopover'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -1232,6 +1237,16 @@ export class WebviewSyncController {
       else if (id === 'calloutChangeType') {
         this.runCalloutChangeTypeCommand()
       }
+      // VSCode 编辑器操作族：视口按行滚动（纯视图态零写回，本地分支直执行，
+      // 不出站宿主往返；router 已按注册表 mode: live 过滤路由）与上下插入
+      // 空行（写操作走 CM6 事务 → edit.request 标准出站链）；命令面板经
+      // ui.command 回发与本入口共用同一执行体（lineCommands）
+      else if (id === 'scrollLineUp') this.runLineScroll(-1)
+      else if (id === 'scrollLineDown') this.runLineScroll(1)
+      else if (id === 'insertLineAbove') this.runLineInsert('above')
+      else if (id === 'insertLineBelow') this.runLineInsert('below')
+      else if (id === 'moveLineUp') this.runLineMove(-1)
+      else if (id === 'moveLineDown') this.runLineMove(1)
       // #567（T02）编辑当前 HTML 源码：本地分支直执行（纯选区事务零写
       // 回，不出站宿主往返）；命令面板经 ui.command 回发共用
       // runHtmlEditSourceCommand（目标按焦点实例光标解析，无命中静默）
@@ -1399,6 +1414,7 @@ export class WebviewSyncController {
       mountPopupRoot: (args) => this.embedCards?.mountPopupRoot(args) ?? null,
       // T06（#355）：浮层关闭收口 → 悬停只读句柄注销
       onPopupClosed: (instanceId) => this.addonViews?.unregister(`hover:${instanceId}`),
+      onPdfPopupChanged: () => this.keybindingRouter.cancel(),
     })
     // #299 跳转目标提示上下文：与悬停预览同源装配（session/send 同款）；
     // enabled 投影 hover.targetTip（缺省视为开），dispose 清空随会话
@@ -1712,19 +1728,13 @@ export class WebviewSyncController {
         !(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)
       const withinEditor = !!target && (target === document ||
         !!this.bodyEl?.contains(target) || !!this.findPanel?.contains(target))
-      // 默认普通粘贴保留原生 paste 事件（包括图片文件名/表格处理）。
-      // 改绑入口和右键读取多格式快照；两入口最终仍进入同一 paste 处理链。
-      // 嵌入焦点（embedFocused）不走根改绑判定——嵌入实例有自身 keymap。
-      const step = keyStep(e)
-      if (liveFocused && (step === 'ctrl+v' || step === 'meta+v') &&
-          resolveKeybinding(this.keybindingOverrides, 'live', step, true).kind === 'command' &&
-          getEffectiveBindings(this.keybindingOverrides, 'paste').includes(step)) {
-        e.stopPropagation()
-        return
-      }
+      const inEditor = liveFocused || readingFocused || withinEditor || embedFocused
+      // 指针悬停时焦点仍可能留在正文；键盘打开后焦点则进入 PDF 浮层。
+      const pdfRoot = embedFocused ? null : hoverPdfShortcutRoot()
+      const inPdfHover = pdfRoot !== null && (inEditor || pdfRoot.contains(target))
       if (this.keybindingRouter.handle(e, embedFocused ? 'live' : this.viewMode,
-        liveFocused || readingFocused || withinEditor || embedFocused,
-        liveFocused || embedFocused)) return
+        inEditor, liveFocused || embedFocused,
+        { context: inPdfHover ? 'pdfHover' : undefined, nativePaste: liveFocused })) return
 
       if (this.findOpen && e.key === 'Escape') {
         e.preventDefault()
@@ -3413,6 +3423,14 @@ export class WebviewSyncController {
           // 本地分支直达），与本地分支共用同一执行体
           case 'calloutInsert': this.runCalloutInsertCommand(); break
           case 'calloutChangeType': this.runCalloutChangeTypeCommand(); break
+          // VSCode 编辑器操作族（命令面板入口；快捷键走 router 本地分支直达，
+          // 两入口共用 lineCommands 同一执行体）
+          case 'scrollLineUp': this.runLineScroll(-1); break
+          case 'scrollLineDown': this.runLineScroll(1); break
+          case 'insertLineAbove': this.runLineInsert('above'); break
+          case 'insertLineBelow': this.runLineInsert('below'); break
+          case 'moveLineUp': this.runLineMove(-1); break
+          case 'moveLineDown': this.runLineMove(1); break
           // #567（T02）编辑当前 HTML 源码：命令面板入口（快捷键走 router
           // 本地分支直达），两入口共用 runHtmlEditSourceCommand——目标按
           // 焦点实例光标解析（焦点在嵌入内部 Live 时落 B 的 html 块），
@@ -4470,8 +4488,7 @@ export class WebviewSyncController {
     this.reportSkeletonState()
   }
 
-  /** 测试冻结在位判定：宿主 HTML 嵌入 hold 全局（仅 VSIDIAN_TEST_HOOKS
-   *  装配写入）且尚未收到 release。生产环境恒 false。 */
+  /** 显式预约冻结的测试面板在收到 release 之前保持骨架。 */
   private skeletonHoldActive(): boolean {
     return !this.skeletonHoldReleased &&
       (globalThis as Record<string, unknown>)[SKELETON_HOLD_GLOBAL] === true
@@ -7105,6 +7122,41 @@ export class WebviewSyncController {
       addCursorAbove(view)
     } else {
       addCursorBelow(view)
+    }
+  }
+
+  /** VSCode 编辑器操作族：视口上移/下移一个行高（scrollLineUp/Down）。目标
+   *  按 P2-10 焦点分派（焦点在嵌入内部 Live 内时滚 B 的视口）；主正文仅在
+   *  Live 态滚动（router 已按注册表 mode: live 过滤路由，此处拦命令面板
+   *  入口——阅读态视口是阅读容器，非 CM6 视口）。只读视图操作：不要求
+   *  可编辑（查找输入框聚焦时同样可滚，与宿主 Ctrl+方向一致） */
+  private runLineScroll(direction: LineDirection): void {
+    const resolved = this.actionTarget()
+    if (!resolved || (!resolved.embed && this.viewMode !== 'live')) {
+      return
+    }
+    scrollByLine(resolved.view, direction)
+  }
+
+  /** VSCode 编辑器操作族：在光标所在行上方/下方插入空行（insertLineAbove/
+   *  Below）。仅 Live 正文（router 的 writes 门控已限焦点域；阅读模式只读
+   *  静默不接管）；P2-10 起焦点在嵌入内部 Live 内时目标为 B。边界与落点
+   *  展开见 lineCommands.insertLineAt */
+  private runLineInsert(side: LineInsertSide): void {
+    const resolved = this.actionTarget()
+    if (resolved && this.targetEditable(resolved.view, resolved.embed)) {
+      insertLineAt(resolved.view, side)
+    }
+  }
+
+  /** VSCode 编辑器操作族：上移/下移当前行（moveLineUp/Down）。仅 Live
+   *  正文（router 的 writes 门控已限焦点域）；P2-10 起焦点在嵌入内部
+   *  Live 内时目标为 B。表格内沿用原整行移动行为，首末行边界由 CM6 moveLine 处理，
+   *  见 lineCommands.moveLineAt */
+  private runLineMove(direction: LineDirection): void {
+    const resolved = this.actionTarget()
+    if (resolved && this.targetEditable(resolved.view, resolved.embed)) {
+      moveLineAt(resolved.view, direction)
     }
   }
 

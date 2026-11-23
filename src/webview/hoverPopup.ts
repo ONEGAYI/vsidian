@@ -309,6 +309,8 @@ export interface HoverPreviewContext {
   /** T06（#355）浮层关闭通知（一切关闭路径的唯一收口 closeHoverPopup）：
    *  根控制器据此注销悬停只读句柄；缺省不通知 */
   onPopupClosed?(instanceId: string): void
+  /** PDF 快捷键场景进入或退出时通知控制器，取消上一个场景的待输入键。 */
+  onPdfPopupChanged?(): void
 }
 
 interface HoverPopupState {
@@ -1160,6 +1162,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
       : null,
   }
   popup = state
+  if (state.pdfView) context?.onPdfPopupChanged?.()
   claimPopup(closeHoverPopup)
   resetScrollStabilityLog()
   applyDisplay(state, 'loading', t('hover.loading'))
@@ -1572,6 +1575,7 @@ export function closeHoverPopup(): void {
     return
   }
   popup = null
+  if (state.pdfView) context?.onPdfPopupChanged?.()
   // T05（#544）附加组件请求：装载中被关闭（替换/移出/域失效/Esc/停用/
   // 页面释放）统一结算 closed——settled 守卫幂等（已按 content/error 兑现
   // 的请求不重复回调，内容态关闭不产生第二结局）
@@ -2240,6 +2244,11 @@ export function notifyHoverImageResult(msg: ImageResultPayload): void {
 export function notifyHoverImageInvalidate(srcs: readonly string[]): void {
   popup?.image?.invalidate(srcs)
   popup?.content.invalidateImages(srcs)
+}
+
+/** PDF 浮层快捷键的作用域根；加载中和边界页也仍属于 PDF 场景。 */
+export function hoverPdfShortcutRoot(): HTMLElement | null {
+  return popup?.pdfView ? popup.container : null
 }
 
 /**

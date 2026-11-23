@@ -154,16 +154,26 @@ try {
   assert.ok(px, 'canvas 在场')
   assert.ok(px.nonWhiteRatio > 0.5, `非白像素比例应过半（实测 ${px.nonWhiteRatio}）`)
   assert.ok(px.center[0] > 180 && px.center[1] < 100, `第一页中心应为红色（实测 ${px.center}）`)
-  await escClose()
+  // 换目标不需要按键：在 A 按首段，再经命令入口切到 B，旧次段必须释放。
+  await page.evaluate(() => {
+    window.setHoverPdfBindings({ pdfPageNext: ['ctrl+k alt+down'] })
+    window.forwardedPdfSuffixes = 0
+    window.addEventListener('keydown', (event) => {
+      if (event.altKey && event.key === 'ArrowDown') window.forwardedPdfSuffixes++
+    })
+  })
+  await page.locator('.vsidian-hover-popup').focus()
+  await page.keyboard.press('Control+k')
   passed++
 
-  // ---- 场景 B：指定页双链 #page=2 → 宿主解析页码 → 绿页绘制 ----
-  await page.mouse.move(5, 5)
-  await page.waitForTimeout(80)
+  // ---- 场景 B：换到指定页双链 #page=2 → 旧次段释放 → 绿页绘制 ----
   const pageLink = page.locator('.vsidian-view-reading .vsidian-wikilink').filter({ hasText: '资料.pdf#page=2' }).first()
-  await pageLink.hover()
-  await page.waitForTimeout(OPEN_WAIT)
+  await pageLink.focus()
+  await page.evaluate(() => window.previewFocusedLink())
   req = await lastRequest()
+  await page.keyboard.press('Alt+ArrowDown')
+  assert.equal(await page.evaluate(() => window.forwardedPdfSuffixes), 1,
+    '换到另一个 PDF 后，旧次段不应被浮层消费')
   assert.equal(req.target, '资料.pdf#page=2', '指定页双链 target 原文携带锚点')
   await respondPdf(req, { page: 2 })
   await page.waitForTimeout(RENDER_WAIT)
@@ -173,8 +183,10 @@ try {
   px = await pixels(2)
   assert.ok(px.center[1] > 180 && px.center[0] < 100, `第二页中心应为绿色（实测 ${px.center}）`)
 
-  // 翻页操作：下一页到蓝页（乐观页码 + 绘制追上）
-  assert.ok(await page.evaluate(() => window.turnPdfPage(1)), '翻页操作应生效')
+  // 同一快捷键在编辑器默认用于移动行；PDF 浮层获得焦点后用于翻页。
+  await page.evaluate(() => window.setHoverPdfBindings({ pdfPageNext: ['alt+down'] }))
+  await page.locator('.vsidian-hover-popup').focus()
+  await page.keyboard.press('Alt+ArrowDown')
   await page.waitForTimeout(RENDER_WAIT)
   probe = await readPopup()
   assert.equal(probe.pdf.page, 3, '翻页推进到第 3 页')

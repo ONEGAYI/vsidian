@@ -1101,6 +1101,13 @@ export const en = {
   /** #237 multi-cursor: add a cursor on the line above/below (live preview only; Alt+click adds at the pointer) */
   'command.editor.addCursorAbove.title': 'Add cursor above',
   'command.editor.addCursorBelow.title': 'Add cursor below',
+  /** VSCode 编辑器操作族：视口按行滚动 / 在上方、下方插入空行（实时预览，默认键对齐 VSCode） */
+  'command.editor.scrollLineUp.title': 'Scroll Line Up',
+  'command.editor.scrollLineDown.title': 'Scroll Line Down',
+  'command.editor.insertLineAbove.title': 'Insert Line Above',
+  'command.editor.insertLineBelow.title': 'Insert Line Below',
+  'command.editor.moveLineUp.title': 'Move Line Up',
+  'command.editor.moveLineDown.title': 'Move Line Down',
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
   'command.ui.hoverPdfPageNext.title': 'PDF preview: next page',

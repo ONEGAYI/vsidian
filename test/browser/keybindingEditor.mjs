@@ -250,6 +250,135 @@ try {
   assert.equal((await page.evaluate(() => window.keyState())).text, '| A | B |\n| --- | --- |\n| left | rightQ |',
     '表格的独立输入框也应恢复原焦点，首个字符写入原单元格')
 
+  // VSCode 编辑器操作族：视口按行滚动（Ctrl+方向）与上下插入空行
+  // （Ctrl+Enter / Ctrl+Shift+Enter）。滚动断言落在绘制层——首行相对滚动
+  // 容器的渲染偏移随按键平移一个行高，光标不动
+  const longDoc = Array.from({ length: 80 }, (_, i) => `第 ${i + 1} 行`).join('\n')
+  // initKeys 是消息驱动的装载：必须等新正文真正落地再按方向键/Home，
+  // 否则按键落在上一场景的旧文档上，装载后光标被映射到新文档中段
+  const waitDoc = (text) => page.waitForFunction(
+    (expected) => window.keyState().text === expected, text)
+  await page.evaluate((text) => {
+    // 限高编辑器：长文在 cm-scroller 内产生纵向滚动面
+    document.getElementById('app').style.height = '600px'
+    window.initKeys(text)
+    window.updateKeys({})
+    window.enableLineNumbers()
+  }, longDoc)
+  await waitDoc(longDoc)
+  await content.focus()
+  await page.keyboard.press('Control+Home')
+  await page.waitForFunction(() => window.keyState().cursor === 0)
+  // 首行相对 cm-scroller 顶缘的布局偏移（像素）。
+  const firstLineTop = () => page.evaluate(() => {
+    const scrollerTop = document.querySelector('.cm-scroller').getBoundingClientRect().top
+    const line = [...document.querySelectorAll('.cm-content .cm-line')]
+      .find((node) => node.textContent === '第 1 行')
+    return line ? Math.round((line.getBoundingClientRect().top - scrollerTop) * 100) / 100 : null
+  })
+  const near = (actual, expected, tolerance, message) =>
+    assert.ok(Math.abs(actual - expected) <= tolerance, `${message}（实际 ${actual}，期望 ${expected}）`)
+  let scroll = await page.evaluate(() => window.keyState())
+  assert.ok(scroll.lineHeight > 0, 'CM6 应实测出行高')
+  assert.equal(scroll.scrollTop, 0)
+  const topBefore = await firstLineTop()
+  const paintedBefore = await page.evaluate(() => window.readPaintedLineNumbers())
+  assert.ok(paintedBefore.includes('1'), '起始位置应实际绘制首行行号')
+  const forwardedBeforeScroll = scroll.forwarded
+  await page.keyboard.press('Control+ArrowDown')
+  scroll = await page.evaluate(() => window.keyState())
+  near(scroll.scrollTop, scroll.lineHeight, 1, 'Ctrl+↓ 应下移一个行高')
+  near(await firstLineTop(), topBefore - scroll.lineHeight, 1, '首行应在布局上上移一个行高')
+  await page.waitForFunction((before) => {
+    const after = window.readPaintedLineNumbers()
+    return after.length > 0 && (!after.includes('1') || after.some((line) => !before.includes(line)))
+  }, paintedBefore)
+  assert.equal(scroll.cursor, 0, '视口滚动不移动光标')
+  assert.equal(scroll.forwarded, forwardedBeforeScroll, 'Ctrl+方向被面板消费，不应到达 window 冒泡转发层')
+  await page.keyboard.press('Control+ArrowUp')
+  scroll = await page.evaluate(() => window.keyState())
+  assert.equal(scroll.scrollTop, 0, 'Ctrl+↑ 应回到顶部')
+  near(await firstLineTop(), topBefore, 1, '首行应回到原布局位置')
+  assert.deepEqual(await page.evaluate(() => window.readPaintedLineNumbers()), paintedBefore,
+    '上移一行回顶后，实际绘制的行号应恢复')
+  await page.keyboard.press('Control+ArrowUp')
+  assert.equal((await page.evaluate(() => window.keyState())).scrollTop, 0, '已在顶部时 Ctrl+↑ 零操作')
+  for (let i = 0; i < 120; i++) await page.keyboard.press('Control+ArrowDown')
+  scroll = await page.evaluate(() => window.keyState())
+  near(scroll.scrollTop, scroll.maxScrollTop, 1, '连续 Ctrl+↓ 应停在视口底部')
+  await page.keyboard.press('Control+ArrowDown')
+  near((await page.evaluate(() => window.keyState())).scrollTop, scroll.maxScrollTop, 1, '已在底部时 Ctrl+↓ 零操作')
+
+  const editsCount = async () => (await page.evaluate(() => window.keyState())).messages
+    .filter(message => message.kind === 'edit.request').length
+  await page.evaluate(() => { window.initKeys('    - nested item\nnext'); window.updateKeys({}) })
+  await waitDoc('    - nested item\nnext')
+  await content.focus()
+  await page.keyboard.press('Control+Home')
+  await page.waitForFunction(() => window.keyState().cursor === 0)
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight')
+  await page.waitForFunction(() => window.keyState().cursor === 8)
+  const editsBeforeInsert = await editsCount()
+  await page.keyboard.press('Control+Enter')
+  let insert = await page.evaluate(() => window.keyState())
+  assert.equal(insert.text, '    - nested item\n    \nnext', 'Ctrl+Enter 应在下方插入空行并继承当前行缩进')
+  assert.equal(insert.cursor, '    - nested item\n    '.length, '光标应落在新行缩进之后')
+  assert.equal(await editsCount(), editsBeforeInsert + 1, '插入空行应经单笔写回提交')
+  await page.keyboard.press('Control+Shift+Enter')
+  insert = await page.evaluate(() => window.keyState())
+  assert.equal(insert.text, '    - nested item\n    \n    \nnext', 'Ctrl+Shift+Enter 应在上方插入空行')
+  assert.equal(insert.cursor, '    - nested item\n    '.length, '光标应落在上方的新空行')
+  // 夹具假宿主不回执 edit.ack：按同步协议在途未清前暂缓集不出站，第二笔
+  // 显示为本地已落、尚未出站。故以「此刻」为基准比较——清空后的按键
+  // 既不得改文本，也不得追加写回（含暂缓集中的隐性累积）
+  const editsAfterInsert = await editsCount()
+  // 显式清空：两条命令都不再执行，defaultKeymap 内建的 Mod-Enter 不复活
+  await page.evaluate(() => window.updateKeys({ insertLineBelow: [], insertLineAbove: [] }))
+  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press('Control+Shift+Enter')
+  assert.equal((await page.evaluate(() => window.keyState())).text, '    - nested item\n    \n    \nnext',
+    '显式清空后 Ctrl+Enter / Ctrl+Shift+Enter 不应插入（内建绑定不复活）')
+  assert.equal(await editsCount(), editsAfterInsert, '清空后的按键不产生写回')
+
+  // VSCode 编辑器操作族：上移/下移当前行（Alt+↑/↓）。真宿主验收报告
+  // 「没生效」，故这里必须走真实 Chromium 键盘路径，不能只靠 jsdom 单测
+  await page.evaluate(() => {
+    window.initKeys('alpha\nbeta\ngamma')
+    window.updateKeys({ pdfPagePrev: ['alt+up'], pdfPageNext: ['alt+down'] })
+  })
+  await waitDoc('alpha\nbeta\ngamma')
+  await content.focus()
+  await page.keyboard.press('Control+Home')
+  await page.waitForFunction(() => window.keyState().cursor === 0)
+  const forwardedBeforeMove = (await page.evaluate(() => window.keyState())).forwarded
+  const editsBeforeMove = await editsCount()
+  await page.keyboard.press('Alt+ArrowDown')
+  let moved = await page.evaluate(() => window.keyState())
+  assert.equal(moved.text, 'beta\nalpha\ngamma', '无 PDF 浮层时，共用的 Alt+↓ 应下移当前行')
+  assert.equal(moved.forwarded, forwardedBeforeMove, 'Alt+方向键应被面板消费，不透传到 window 层')
+  assert.equal(await editsCount(), editsBeforeMove + 1, '下移一行应发出一笔写回')
+  await page.evaluate(() => window.ackLastEdit())
+  await page.keyboard.press('Alt+ArrowUp')
+  moved = await page.evaluate(() => window.keyState())
+  assert.equal(moved.text, 'alpha\nbeta\ngamma', 'Alt+↑ 应上移当前行')
+  assert.equal(await editsCount(), editsBeforeMove + 2, '上移一行应发出下一笔写回')
+  await page.evaluate(() => window.ackLastEdit())
+  // 首行上移 / 末行下移：零操作、零新增写回
+  const editsBeforeBoundary = await editsCount()
+  await page.keyboard.press('Alt+ArrowUp')
+  await page.keyboard.press('Control+End')
+  await page.keyboard.press('Alt+ArrowDown')
+  assert.equal((await page.evaluate(() => window.keyState())).text, 'alpha\nbeta\ngamma',
+    '首行上移与末行下移都应是零操作')
+  // 显式清空后不移动（CM6 内建 moveLine 不复活）
+  await page.evaluate(() => window.updateKeys({ moveLineUp: [], moveLineDown: [] }))
+  await page.keyboard.press('Control+Home')
+  await page.keyboard.press('Alt+ArrowDown')
+  assert.equal((await page.evaluate(() => window.keyState())).text, 'alpha\nbeta\ngamma',
+    '清空绑定后 Alt+↓ 不应移动（内建 moveLine 不复活）')
+  assert.equal(await editsCount(), editsBeforeBoundary, '边界操作和清空后的原键都不得新增写回')
+  await page.evaluate(() => window.updateKeys({}))
+
   await page.evaluate(() => {
     // 附加组件可以在编辑器根节点直接挂载自己的输入框；它不是表格输入。
     const addonInput = document.createElement('textarea')
@@ -260,5 +389,23 @@ try {
   assert.equal(await page.evaluate(() => document.activeElement === document.body), true,
     '独立组件输入框失焦时，不能把后续输入重定向到 Markdown')
   await page.close()
+
+  // 在 bundle 加载前设置平台，使实际 CM6 keymap 选中 mac 分支。
+  const mac = await browser.newPage()
+  await mac.addInitScript(() => Object.defineProperty(navigator, 'platform', { value: 'MacIntel' }))
+  await mac.goto('about:blank')
+  await mac.setContent('<html><body><div id="app" hidden></div><div id="mac-paging"></div></body></html>')
+  await mac.addScriptTag({ path: output })
+  for (const [key, direction] of [['ArrowUp', -1], ['ArrowDown', 1]]) {
+    const before = await mac.evaluate(() => window.mountMacPagingProbe(false))
+    await mac.keyboard.press('Control+' + key)
+    assert.ok(((await mac.evaluate(() => window.macPagingHead())) - before) * direction > 0,
+      '裸 CM6 键位应在 mac 平台沿对应方向移动光标')
+    const takenOver = await mac.evaluate(() => window.mountMacPagingProbe(true))
+    await mac.keyboard.press('Control+' + key)
+    assert.equal(await mac.evaluate(() => window.macPagingHead()), takenOver,
+      '接管后 mac 原键不能触发内建光标翻页')
+  }
+  await mac.close()
   console.log('[编辑器快捷键][PASS] 原生键盘绑定与转发；行内格式和引用；跳转到行；行内插入提示；窗口还焦与原位输入')
 } finally { await browser.close() }

@@ -3,6 +3,7 @@ import { FORMAT_OPERATIONS } from './formatOperations'
 import type { MessageKey } from './locales/en'
 
 export type BindingMode = 'live' | 'reading' | 'both'
+export type BindingScope = 'editor' | 'pdfHover'
 export interface KeybindingOperation {
   id: string
   command: string
@@ -13,6 +14,8 @@ export interface KeybindingOperation {
    *  归属句式 title 拆键分持） */
   titleKey: MessageKey
   mode: BindingMode
+  /** 省略时为编辑器；临时场景在自己的层内复用按键。 */
+  scope?: BindingScope
   writes: boolean
   defaults: readonly string[]
 }
@@ -146,15 +149,15 @@ export const UI_OPERATIONS = [
   // 控制预览呈现），作用于在场的 PDF 悬停浮层（无 PDF 浮层或翻出界时静默
   // 无效）；默认不占键位——翻页属 P3-06 全文滚动接入前的最小页码操作，
   // 评估记录见 docs/specs/keybindings.md
-  { id: 'pdfPageNext', command: 'onegayi.vsidian.ui.hoverPdfPageNext', titleKey: 'command.ui.hoverPdfPageNext.title', mode: 'both', writes: false, defaults: [] },
-  { id: 'pdfPagePrev', command: 'onegayi.vsidian.ui.hoverPdfPagePrev', titleKey: 'command.ui.hoverPdfPagePrev.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'pdfPageNext', command: 'onegayi.vsidian.ui.hoverPdfPageNext', titleKey: 'command.ui.hoverPdfPageNext.title', mode: 'both', scope: 'pdfHover', writes: false, defaults: [] },
+  { id: 'pdfPagePrev', command: 'onegayi.vsidian.ui.hoverPdfPagePrev', titleKey: 'command.ui.hoverPdfPagePrev.title', mode: 'both', scope: 'pdfHover', writes: false, defaults: [] },
   // #339（P3-07）PDF 缩放三操作：只读（只改预览呈现，不写任何文档），与
   // 翻页同款作用于**在场的 PDF 悬停浮层**（无 PDF 浮层或已达 scale 上限/
   // 下限时静默无效）；缩放受 PDF_RENDER_MAX_SCALE 费用上限与画布预算约束。
   // 默认不占键位——用户经快捷键设置自配（评估记录见 docs/specs/keybindings.md）
-  { id: 'pdfZoomIn', command: 'onegayi.vsidian.ui.hoverPdfZoomIn', titleKey: 'command.ui.hoverPdfZoomIn.title', mode: 'both', writes: false, defaults: [] },
-  { id: 'pdfZoomOut', command: 'onegayi.vsidian.ui.hoverPdfZoomOut', titleKey: 'command.ui.hoverPdfZoomOut.title', mode: 'both', writes: false, defaults: [] },
-  { id: 'pdfZoomReset', command: 'onegayi.vsidian.ui.hoverPdfZoomReset', titleKey: 'command.ui.hoverPdfZoomReset.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'pdfZoomIn', command: 'onegayi.vsidian.ui.hoverPdfZoomIn', titleKey: 'command.ui.hoverPdfZoomIn.title', mode: 'both', scope: 'pdfHover', writes: false, defaults: [] },
+  { id: 'pdfZoomOut', command: 'onegayi.vsidian.ui.hoverPdfZoomOut', titleKey: 'command.ui.hoverPdfZoomOut.title', mode: 'both', scope: 'pdfHover', writes: false, defaults: [] },
+  { id: 'pdfZoomReset', command: 'onegayi.vsidian.ui.hoverPdfZoomReset', titleKey: 'command.ui.hoverPdfZoomReset.title', mode: 'both', scope: 'pdfHover', writes: false, defaults: [] },
   // P2-04（#281）切换焦点嵌入的内部模式（Reading ↔ Live）：与嵌入卡片头部
   // 模式按钮同一实现（焦点不在嵌入编辑器内零操作）。切换本身只建/拆目标
   // 编辑端口、不写正文（writes: false——写门控按「是否写权威文本」判定）。
@@ -283,6 +286,38 @@ export const UI_OPERATIONS = [
   // 取消零编辑；不在 callout 内静默。Live 写操作，默认不占键位（评估记录
   // 见 docs/specs/keybindings.md）
   { id: 'calloutChangeType', command: 'onegayi.vsidian.callout.changeType', titleKey: 'command.callout.changeType.title', mode: 'live', writes: true, defaults: [] },
+  // VSCode 编辑器操作族：视口按行滚动（对齐宿主 scrollLineUp/Down）。Live
+  // 编辑器视图态零写回（writes: false——仅 Live 生效：阅读态视口是阅读
+  // 容器，非 CM6 视口）；光标不动，每次平移一个行高。默认 ctrl+up/down
+  // （2026-11-23 用户指定：用 Ctrl+方向键滚视口，不占 Alt+方向键的既有
+  // 语义）。接管分平台：Windows/Linux 无内建绑定；mac 上 standardKeymap
+  // 把 Ctrl+ArrowUp/Down 绑给 cursorPageUp/Down，由 lineCommands 的接管
+  // keymap 以 mac: 键名退役。评估记录见 docs/specs/keybindings.md
+  { id: 'scrollLineUp', command: 'onegayi.vsidian.editor.scrollLineUp', titleKey: 'command.editor.scrollLineUp.title', mode: 'live', writes: false, defaults: ['ctrl+up'] },
+  { id: 'scrollLineDown', command: 'onegayi.vsidian.editor.scrollLineDown', titleKey: 'command.editor.scrollLineDown.title', mode: 'live', writes: false, defaults: ['ctrl+down'] },
+  // VSCode 编辑器操作族：在上方/下方插入空行（对齐宿主 insertLineBefore/
+  // After）。Live 写操作（一笔 CM6 事务 = 一笔 edit.request = 一步宿主
+  // 撤销）：光标所在行行尾/行首断行，新行继承当前行前导空白，光标落新
+  // 行。默认 ctrl+shift+enter / ctrl+enter（mac 形态 shift+meta+enter /
+  // meta+enter，与 paste 的 meta+v 双登记同款）。defaultKeymap 内建
+  // Mod-Enter（insertBlankLine）由 lineCommands 的接管 keymap 退役——键位
+  // 所有权归注册表，用户清空/改绑后内建绑定不得复活；执行体在
+  // keybindingRouter 本地分支与 ui.command 回发（两入口同一实现）
+  { id: 'insertLineAbove', command: 'onegayi.vsidian.editor.insertLineAbove', titleKey: 'command.editor.insertLineAbove.title', mode: 'live', writes: true, defaults: ['ctrl+shift+enter', 'shift+meta+enter'] },
+  { id: 'insertLineBelow', command: 'onegayi.vsidian.editor.insertLineBelow', titleKey: 'command.editor.insertLineBelow.title', mode: 'live', writes: true, defaults: ['ctrl+enter', 'meta+enter'] },
+  // VSCode 编辑器操作族：上移/下移当前行（对齐宿主 editor.action.
+  // moveLinesUpAction/DownAction）。Live 写操作（一笔事务 = 一笔
+  // edit.request = 一步宿主撤销）。此前 Alt+方向键是 CM6 defaultKeymap 的
+  // 裸内建绑定（moveLineUp/moveLineDown），不经注册表——设置页看不见、
+  // 改不了，也无法清空；本批登记为可配置操作，内建绑定由 lineCommands 的
+  // 接管 keymap 退役（键位所有权归注册表）。执行走 CM6 内建命令（多选区/
+  // 跨行块/首末行边界由它处理，事务带 userEvent 'move.line'——CM6 自己的
+  // 结构命令，不属本仓库 input 键入路径门控）。**不登记 mac 形态**：
+  // VSCode 在 mac 上移动行同样是 Option+Up/Down（即 alt+up），而
+  // Cmd+Alt+↑/↓ 在 CM6 是 addCursorAbove/Below（defaultKeymap 的
+  // Mod-Alt-ArrowUp），登记 alt+meta+up 会把「添加光标」抢走
+  { id: 'moveLineUp', command: 'onegayi.vsidian.editor.moveLineUp', titleKey: 'command.editor.moveLineUp.title', mode: 'live', writes: true, defaults: ['alt+up'] },
+  { id: 'moveLineDown', command: 'onegayi.vsidian.editor.moveLineDown', titleKey: 'command.editor.moveLineDown.title', mode: 'live', writes: true, defaults: ['alt+down'] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {
@@ -418,8 +453,12 @@ export function sanitizeStoredOverrides(stored: unknown): KeybindingOverrides {
   return result
 }
 
-function modesOverlap(a: BindingMode, b: BindingMode): boolean {
-  return a === 'both' || b === 'both' || a === b
+function operationScope(op: KeybindingOperation): BindingScope {
+  return op.scope ?? 'editor'
+}
+function scopesOverlap(a: KeybindingOperation, b: KeybindingOperation): boolean {
+  return operationScope(a) === operationScope(b) &&
+    (a.mode === 'both' || b.mode === 'both' || a.mode === b.mode)
 }
 function chordOverlap(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b} `) || b.startsWith(`${a} `)
@@ -430,7 +469,7 @@ export function findBindingConflicts(overrides: KeybindingOverrides, operationId
   const normalized = normalizeChord(chord)
   if (!operation || !normalized) return []
   return allKeybindingOperations().filter((other) => other.id !== operationId &&
-    modesOverlap(operation.mode, other.mode) &&
+    scopesOverlap(operation, other) &&
     getEffectiveBindings(overrides, other.id).some((binding) => chordOverlap(binding, normalized)))
     .map((other) => other.id)
 }
@@ -443,7 +482,7 @@ export const KEYBINDING_FILTER_KINDS: readonly KeybindingFilterKind[] =
 
 /**
  * 当前生效键位存在冲突的操作 id 集合（筛选签「冲突」的判定源）：双方生效
- * 模式可交叠且任一键位重叠（含两段前缀重叠）即各自计入；单侧无绑定不构成
+ * 场景相同、模式可交叠且任一键位重叠（含两段前缀重叠）即各自计入；单侧无绑定不构成
  * 冲突。纯函数，不与录入路径（findBindingConflicts）共享状态。
  */
 export function findConflictedOperationIds(overrides: KeybindingOverrides): Set<string> {
@@ -455,7 +494,7 @@ export function findConflictedOperationIds(overrides: KeybindingOverrides): Set<
     if (!sourceBindings.length) continue
     for (let j = i + 1; j < operations.length; j++) {
       const other = operations[j]
-      if (!modesOverlap(source.mode, other.mode)) continue
+      if (!scopesOverlap(source, other)) continue
       const otherBindings = getEffectiveBindings(overrides, other.id)
       if (sourceBindings.some((chord) => otherBindings.some((candidate) => chordOverlap(chord, candidate)))) {
         conflicted.add(source.id)
@@ -504,7 +543,8 @@ export function applyBindingChange(overrides: KeybindingOverrides, operationId: 
 }
 
 export function resolveKeybinding(overrides: KeybindingOverrides, mode: 'live' | 'reading',
-  chord: string, allowWrites = true): { kind: 'none' } | { kind: 'prefix' } | { kind: 'command'; id: string } {
+  chord: string, allowWrites = true, scope: BindingScope = 'editor'
+): { kind: 'none' } | { kind: 'prefix' } | { kind: 'command'; id: string } {
   const normalized = normalizeChord(chord)
   if (!normalized) return { kind: 'none' }
   // 用户覆盖优先于后来加入/修改的默认值，升级不能让新默认抢走旧自定义。
@@ -512,7 +552,8 @@ export function resolveKeybinding(overrides: KeybindingOverrides, mode: 'live' |
   for (const custom of [true, false]) {
     for (const op of operations) {
       if (Object.prototype.hasOwnProperty.call(overrides, op.id) !== custom ||
-        (op.mode !== 'both' && op.mode !== mode) || (!allowWrites && op.writes)) continue
+        operationScope(op) !== scope || (op.mode !== 'both' && op.mode !== mode) ||
+        (!allowWrites && op.writes)) continue
       for (const binding of getEffectiveBindings(overrides, op.id)) {
         if (binding === normalized) return { kind: 'command', id: op.id }
         if (binding.startsWith(`${normalized} `)) return { kind: 'prefix' }
@@ -562,7 +603,13 @@ export function formatBindingLabel(chord: string): string {
     // #413：符号物理键名渲染为字符形态（bracketleft → [），设置页标签与
     // 捕获框不出现 BRACKETLEFT 式大写名；与 keyStep 别名同一份键名词表。
     // #444：meta 按平台渲染（mac: Cmd / Windows: Win / Linux: Super）
+    // 命名键按 VSCode 标签惯例用首字母大写（Enter / Up / PageUp / Delete），
+    // 不再落 toUpperCase 的 ENTER / UP 形态——用户绑定含命名键时标签
+    // 与物理键名（方向键是箭头而非字母）一致；字母数字键仍走大写分支。
     ({ ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: metaLabel, escape: 'Esc', space: 'Space',
+      enter: 'Enter', tab: 'Tab', up: 'Up', down: 'Down', left: 'Left', right: 'Right',
+      home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown',
+      backspace: 'Backspace', delete: 'Delete',
       minus: '-', equal: '=', comma: ',', period: '.', slash: '/', backslash: '\\',
       semicolon: ';', quote: "'", bracketleft: '[', bracketright: ']' })[part] ?? part.toUpperCase()
   return chord.split(' ').map((step) => {

@@ -454,6 +454,36 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.editor.scrollLineUp",
+        "title": "%command.editor.scrollLineUp.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.editor.scrollLineDown",
+        "title": "%command.editor.scrollLineDown.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.editor.insertLineAbove",
+        "title": "%command.editor.insertLineAbove.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.editor.insertLineBelow",
+        "title": "%command.editor.insertLineBelow.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.editor.moveLineUp",
+        "title": "%command.editor.moveLineUp.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.editor.moveLineDown",
+        "title": "%command.editor.moveLineDown.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.hoverPreviewLink",
         "title": "%command.ui.hoverPreviewLink.title%",
         "category": "Vsidian"

@@ -114,9 +114,7 @@ describe('宿主装配接线（provider 词法钉住）', () => {
     expect(providerSource).toContain('window.${SKELETON_SHOWN_AT_GLOBAL} = performance.now()')
   })
 
-  it('测试冻结门控：hold 全局仅在 VSIDIAN_TEST_HOOKS=1 时嵌入', () => {
-    // 门控两段钉住：调用侧以 env 判定传参；模板内按参数条件拼接嵌入脚本
-    expect(providerSource).toContain('window.${SKELETON_HOLD_GLOBAL} = true')
-    expect(providerSource).toContain("holdSkeleton: process.env.VSIDIAN_TEST_HOOKS === '1'")
+  it('只有显式要求冻结时才嵌入 hold 全局', () => {
+    expect(providerSource).toContain('initial.holdSkeleton ? `window.${SKELETON_HOLD_GLOBAL} = true;`')
   })
 })
