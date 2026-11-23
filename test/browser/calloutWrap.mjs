@@ -194,13 +194,15 @@ try {
   // 动入场再断言（waitForSelector 前置于滚动会永远等不到）
   const filler = Array.from({ length: 150 }, (_, i) => `填充行 ${i + 1}`)
   const longDoc = [...filler, ...DOC.split('\n'), ...filler.map((l) => `${l} 后`)].join('\n')
-  await page.evaluate((text) => window.initCallout(text), longDoc)
-  await page.evaluate(() => {
+  await page.evaluate(async (text) => {
+    window.initCallout(text)
+    // 新面板的初始高度是估算值。先等正文完成首轮测量，再按实测行高滚入。
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     // 直接驱动滚动层（目标区约在 151 行 × ~21px；行 DOM 未渲染时
     // scrollIntoView 无目标可寻）
     window.controller.getView().scrollDOM.scrollTop = 3000
-    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-  })
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  }, longDoc)
   await page.waitForSelector('.vsidian-callout-wrap')
   await page.evaluate(() => {
     const el = [...document.querySelectorAll('.cm-line')].find((e) => (e.textContent ?? '').includes('内层标题'))
@@ -255,7 +257,11 @@ try {
     '> > 内层正文',
     '外层尾部',
   ].join('\n')
-  await page.evaluate((text) => window.initCallout(text), T07_DOC)
+  await page.evaluate((text) => {
+    window.initCallout(text)
+    // 让标题不处于光标所在行；下面检查的是隐藏标记后的绘制状态。
+    window.locateCallout(text.length)
+  }, T07_DOC)
   await page.waitForSelector('.vsidian-callout-wrap')
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 
