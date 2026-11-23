@@ -143,7 +143,7 @@
 - **收编落点 = `.vsidian-main` 覆盖层**：挂载时骨架移入主编辑区末尾（`.vsidian-skeleton-host` 提供定位包含块），`top` 按活跃视图容器相对主区实测偏移——**不进视图容器**（阅读虚拟化 `setDocument` 以 `textContent = ''` 整容器清空子树，进容器会在 init 首次渲染被误清除，实施实证）。撤除时还原宿主类与布局。
 - **撤除信号**：`handleFullSync` 落地（含空文档）→ 双 rAF（`scheduleFrame` 同款退化）读就绪时刻 → `planSkeletonExit` 定时移除；周期收束规则见第三节，恰在边界就绪即撤。
 - **宽度预注入**：非 0 档 `editor.readableLineWidth` 由 provider 经 `readableLineWidthPreset` 预写 `#app` 内联双变量（消除骨架期宽度回跳）；0 档不写，`applyReadableLineWidthSetting` 的 0 档移除/非 0 覆写语义不变。
-- **测试通道门控**：`VSIDIAN_TEST_HOOKS=1` 时 provider 嵌入 `__vsidianSkeletonHold` 全局冻结撤除；webview 经 `_test.skeleton.release`（postToPanel）解除、状态经 `_test.skeleton.report` 回报、宿主 `_test.getSkeletonState` 轮询——生产装配不含 hold 全局，回报零消息。
+- **测试通道门控**：通用测试钩子不冻结骨架。骨架屏专项测试在打开文档前调用 `_test.holdNextSkeleton(uri)`，宿主仅为该 URI 下一次装配写入 `__vsidianSkeletonHold`。webview 经 `_test.skeleton.release`（postToPanel）解除冻结；只在预约的面板回报 `_test.skeleton.report`，宿主经 `_test.getSkeletonState` 读取。
 
 ### 契约登记
 

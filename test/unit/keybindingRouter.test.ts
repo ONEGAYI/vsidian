@@ -21,6 +21,39 @@ describe('编辑器按键路由', () => {
     expect(router.handle(key('b'), 'live', true)).toBe(false)
   })
 
+  it('按场景命中；浮层优先，正文回退，场景切换不继承两段键首段', () => {
+    const hit = vi.fn()
+    const router = new KeybindingRouter({
+      pdfPageNext: ['alt+down'], pdfPagePrev: ['ctrl+k ctrl+b'],
+      bold: ['ctrl+k ctrl+b'],
+    }, hit)
+    const pdf = { context: 'pdfHover' } as const
+    const down = () => new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, cancelable: true })
+    expect(router.handle(down(), 'live', true)).toBe(true)
+    expect(router.handle(down(), 'live', true, true, pdf)).toBe(true)
+    expect(router.handle(down(), 'reading', false, false, pdf)).toBe(true)
+    expect(router.handle(key('g'), 'live', true, true, pdf)).toBe(true)
+    expect(router.handle(key('g'), 'live', false, false, pdf)).toBe(false)
+    expect(router.handle(key('k'), 'live', true, true, pdf)).toBe(true)
+    expect(router.handle(key('b'), 'live', true)).toBe(false)
+    expect(router.handle(key('k'), 'live', true, true, pdf)).toBe(true)
+    expect(router.handle(key('b'), 'live', true, true, pdf)).toBe(true)
+    expect(hit.mock.calls.flat()).toEqual(['moveLineDown', 'pdfPageNext', 'pdfPageNext', 'gotoLine', 'pdfPagePrev'])
+  })
+
+  it('原生粘贴只在粘贴操作实际命中时放行，而不是截住浮层绑定', () => {
+    const hit = vi.fn()
+    const router = new KeybindingRouter({ pdfPageNext: ['ctrl+v'] }, hit)
+    const paste = key('v')
+    expect(router.handle(paste, 'live', true, true, { nativePaste: true })).toBe(true)
+    expect(paste.defaultPrevented).toBe(false)
+    expect(hit).not.toHaveBeenCalled()
+    const scoped = key('v')
+    expect(router.handle(scoped, 'live', true, true, { context: 'pdfHover', nativePaste: true })).toBe(true)
+    expect(scoped.defaultPrevented).toBe(true)
+    expect(hit).toHaveBeenCalledWith('pdfPageNext')
+  })
+
   it('两段键首段等待，Escape 与模式变化取消', () => {
     const hit = vi.fn()
     const router = new KeybindingRouter({ bold: ['ctrl+k ctrl+b'] }, hit)

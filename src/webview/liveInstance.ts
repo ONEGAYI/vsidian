@@ -80,6 +80,7 @@ import { liveLineNumbers } from './liveLineNumbers'
 import { hasTypedAutoclosePending, inBlockCodeContext, symbolAutocomplete, typedAutocloseScheduler } from './symbolAutocomplete'
 import { symbolSelectionWrap, typedWrapScheduler } from './symbolWrap'
 import { multicursorExtensions } from './multicursor'
+import { registryLineTakeover } from './lineCommands'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { fenceEscape } from './fenceEscape'
@@ -2928,6 +2929,14 @@ export class LiveEditorInstance {
       // （键位所有权归操作注册表）。组内无 keymap/filter 顺序语义（facet/
       // 绘制层/吞键 keymap 与其他扩展不竞争事务），关闭时整组退出装配
       this.multicursorCompartment.of(this.multicursorOn ? multicursorExtensions : []),
+      // VSCode 编辑器操作族（按行滚动/插入空行/移动当前行）的键位接管：
+      // 吞掉 defaultKeymap 内建的 Mod-Enter（insertBlankLine）、
+      // Alt-ArrowUp/Down（moveLineUp/Down）与 mac 的 Ctrl-ArrowUp/Down
+      // （cursorPageUp/Down）——三者与注册表默认同键，键位所有权归注册表，
+      // 用户清空/改绑后内建绑定不得复活。须先于 extraExtensions 末位的
+      // defaultKeymap（keymap 正序尝试）；不随设置门控（注册表恒持有这些
+      // 键），详见 lineCommands 模块头
+      registryLineTakeover,
       // 拖放落点光标（2026-10 修复）：拖动选中文本悬停时在落点画出插入
       // 指示（CM6 dropCursor 扩展；落位本身由 @codemirror/view 核心 drop
       // 处理，此处只补可视化）。绘制层 eventObservers、无 keymap/filter

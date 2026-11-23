@@ -557,6 +557,8 @@ export function createTextEditorProvider(
    *  onDidReceiveMessage 同一函数；refEdit.* 在 provider 层拦截，会话入口
    *  注入无法触达——injectWebviewReceived 经此以完全一致的处理入口注入） */
   const panelMessageHandlers = new Map<string, (message: unknown) => void>()
+  // #292 仅骨架专项用例登记；每个 URI 的下一次装配消费一次。
+  const pendingSkeletonHolds = new Set<string>()
   // #316 测试缝（VSIDIAN_TEST_HOOKS 门控注册，见 _test.armRefEditBindSuspend）：
   // bind handler 在 openTextDocument 恢复后、register 前的可武装屏障——把
   // 面板 dispose 精确排进「releasePanel 已消费 / register 未发生」的竞态窗口
@@ -4442,8 +4444,7 @@ export function createTextEditorProvider(
           // #292 非 0 档可读行宽预写 #app 内联变量（消除骨架期宽度回跳）；
           // 后续 applyReadableLineWidthSetting 的 0 档移除/非 0 覆写语义不变
           readableLineWidthPx: readableLineWidthPreset(settingsSnapshot?.[READABLE_LINE_WIDTH_KEY]),
-          // #292 集成测试冻结骨架撤除（C-11 同款宿主侧门控：生产不嵌入）
-          holdSkeleton: process.env.VSIDIAN_TEST_HOOKS === '1',
+          holdSkeleton: pendingSkeletonHolds.delete(document.uri.toString()),
         },
       )
     },
@@ -5571,6 +5572,9 @@ export function createTextEditorProvider(
         imageGeneration: entry.session.getImageGeneration(),
       }
     }),
+    vscode.commands.registerCommand('onegayi.vsidian._test.holdNextSkeleton', (uriStr: string) => {
+      pendingSkeletonHolds.add(uriStr)
+    }),
     vscode.commands.registerCommand('onegayi.vsidian._test.getSkeletonState', (uriStr: string, panelIndex = 0) => {
       // #292 骨架状态查询：读最近一次 webview 回报（hold 装配下 adopt/
       // release 都会回报；调用方按需重试）
@@ -6530,8 +6534,7 @@ function buildWebviewHtml(
   extensionUri: vscode.Uri,
   locale: LocaleCode,
   // #292 装配参数：readableLineWidthPx = 非 0 档可读行宽预写 #app 内联变量
-  // （消除骨架期宽度回跳）；holdSkeleton 供集成测试冻结骨架撤除（宿主侧
-  // 门控，调用侧仅在 VSIDIAN_TEST_HOOKS=1 传真值）
+  // （消除骨架期宽度回跳）；holdSkeleton 只为显式预约的测试面板冻结撤除
   initial: { readableLineWidthPx?: number | null; holdSkeleton?: boolean } = {},
 ): string {
   const nonce = randomUUID()

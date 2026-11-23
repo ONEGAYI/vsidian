@@ -43,6 +43,12 @@ Object.assign(window, {
     })
     controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
   },
+  previewFocusedLink() {
+    controller.handleHostMessage({ kind: 'ui.command', op: 'hoverPreviewLink' })
+  },
+  setHoverPdfBindings(overrides: Record<string, string[]>) {
+    controller.handleHostMessage({ kind: 'keybindings.changed', overrides })
+  },
   /** 装配 PDF 装配资源替身（虚拟 URL 由套件路由 fulfill） */
   applyPdfAssets(assets: {
     mainJs: string; workerJs: string; cMapUrl: string

@@ -69,6 +69,7 @@ const VIEW_TYPE = 'onegayi.vsidian.editor'
 const EXT_ID = 'onegayi.vsidian'
 const CMD = {
   sessionState: 'onegayi.vsidian._test.getSessionState',
+  holdNextSkeleton: 'onegayi.vsidian._test.holdNextSkeleton',
   // #292 骨架屏状态回报查询（hold 装配下 adopt/release 均出站回报）
   skeletonState: 'onegayi.vsidian._test.getSkeletonState',
   injectMessage: 'onegayi.vsidian._test.injectWebviewMessage',
@@ -16723,14 +16724,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
   }],
 
   ['骨架屏：hold 装配下收编在场、release 后撤除（#292）', async () => {
-    // hold 门控（VSIDIAN_TEST_HOOKS=1 装配）下骨架在 init 后保持在场：
-    // 回报在 webview 挂载收编时即出站，轮询最近一份断言；release 走
-    // postToPanel 与生产消息同一入口。呈现几何与宽度断言在浏览器套件
-    // skeletonProbe（绘制层），此处钉宿主可见的生命周期与回报通道。
+    const target = wsUri('mode.md').toString()
+    await vscode.commands.executeCommand(CMD.holdNextSkeleton, target)
+    // 冻结按 URI 生效；旁边先打开的面板仍走正常生命周期。
+    await openWithEditor('mode-anchor.md')
+    await waitSessionReady('mode-anchor.md')
+    assert(await vscode.commands.executeCommand(CMD.skeletonState, wsUri('mode-anchor.md').toString()) === null,
+      '只为 mode.md 预约冻结时，另一文档不应回报骨架冻结状态')
+
     await openWithEditor('mode.md')
     const held = await poll('骨架在场回报', async () => {
       const report = await vscode.commands.executeCommand(
-        CMD.skeletonState, wsUri('mode.md')) as
+        CMD.skeletonState, target) as
         | { present?: boolean; container?: string | null; shownAt?: number | null }
         | undefined | null
       return report && report.present === true ? report : undefined
@@ -16740,15 +16745,24 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 收编回报早于 ready；postToPanel 只向已就绪的真实面板投递。
     await waitSessionReady('mode.md')
     await vscode.commands.executeCommand(
-      CMD.postToPanel, wsUri('mode.md'), { kind: '_test.skeleton.release' })
+      CMD.postToPanel, target, { kind: '_test.skeleton.release' })
     const released = await poll('骨架撤除回报', async () => {
       const report = await vscode.commands.executeCommand(
-        CMD.skeletonState, wsUri('mode.md')) as
+        CMD.skeletonState, target) as
         | { present?: boolean; container?: string | null }
         | undefined | null
       return report && report.present === false ? report : undefined
     })
     assert(released.container === null, '撤除后收编落点应清空')
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+    await poll('预约冻结的面板已关闭', async () => {
+      const state = await vscode.commands.executeCommand<SessionState>(CMD.sessionState, target)
+      return state?.panels.length === 0 ? true : undefined
+    })
+    await openWithEditor('mode.md')
+    await waitSessionReady('mode.md')
+    assert(await vscode.commands.executeCommand(CMD.skeletonState, target) === null,
+      '同一文档重新打开时，先前的单次冻结不得复活')
     await vscode.commands.executeCommand('workbench.action.closeAllEditors')
   }],
 

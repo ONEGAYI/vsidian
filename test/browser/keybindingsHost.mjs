@@ -94,6 +94,18 @@ try {
     socket.close()
   }
   assert(found, 'CDP 未找到 Vsidian webview 的 .cm-content')
+  // 通用测试钩子在场，骨架仍须按正常生命周期撤下，不能遮住已经就绪的正文。
+  const skeletonDeadline = Date.now() + 4000
+  let skeletonPresent
+  do {
+    const { result } = await call('Runtime.evaluate', {
+      contextId, expression: "Boolean(document.getElementById('vsidian-skeleton'))", returnByValue: true,
+    })
+    skeletonPresent = result.value
+    if (skeletonPresent === false) break
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  } while (Date.now() < skeletonDeadline)
+  assert.equal(skeletonPresent, false, '未显式冻结时，骨架屏应在正文就绪后自动撤除')
   let requestId = 0
   async function command(action, details = {}) {
     const id = ++requestId
@@ -129,6 +141,36 @@ try {
     if (shift) await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 2 })
     await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17 })
   }
+  // 已有 PDF 翻页键与编辑器同键共用；没有 PDF 浮层时，宿主 TextDocument 应收到移动行。
+  assert.equal((await command('set', { operationId: 'pdfPagePrev', bindings: ['alt+up'] })).ok, true)
+  assert.equal((await command('set', { operationId: 'pdfPageNext', bindings: ['alt+down'] })).ok, true)
+  assert.equal(await command('replaceText', { text: 'first\r\nsecond\r\nthird' }), true)
+  await waitText('first\r\nsecond\r\nthird')
+  await call('Runtime.evaluate', { contextId,
+    expression: "document.querySelector('.cm-content').focus()" })
+  await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Home', code: 'Home',
+    windowsVirtualKeyCode: 36, modifiers: 2 })
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Home', code: 'Home',
+    windowsVirtualKeyCode: 36, modifiers: 2 })
+  for (const [arrow, vk, expected] of [
+    ['ArrowDown', 40, 'second\r\nfirst\r\nthird'],
+    ['ArrowUp', 38, 'first\r\nsecond\r\nthird'],
+  ]) {
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Alt', code: 'AltLeft',
+      windowsVirtualKeyCode: 18, modifiers: 1 })
+    for (const type of ['rawKeyDown', 'keyUp']) {
+      await call('Input.dispatchKeyEvent', { type, key: arrow, code: arrow,
+        windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: 1 })
+    }
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Alt', code: 'AltLeft',
+      windowsVirtualKeyCode: 18 })
+    await waitText(expected)
+  }
+  console.log('[键盘宿主] 保留同键 PDF 翻页绑定，Alt+方向键在正文可上下移动行')
+  assert.equal((await command('resetAll')).ok, true)
+  assert.equal(await command('replaceText', { text: 'word' }), true)
+  await waitText('word')
+
   await press('b')
   await waitText('**word**')
   assert.equal(await command('mode', { text: 'reading' }), true)

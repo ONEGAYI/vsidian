@@ -10,8 +10,7 @@ export const SKELETON_ELEMENT_ID = 'vsidian-skeleton'
 /** 骨架呈现时刻打点的全局名：宿主内联脚本在 main.js 之前写 performance.now() */
 export const SKELETON_SHOWN_AT_GLOBAL = '__vsidianSkeletonShownAt'
 
-/** 集成测试冻结撤除的全局名：VSIDIAN_TEST_HOOKS=1 时由宿主 HTML 嵌入
- *  （webview 被动读取；生产构建不含该赋值，见 provider 装配门控） */
+/** 集成测试冻结撤除的全局名：宿主只为显式预约的测试面板写入。 */
 export const SKELETON_HOLD_GLOBAL = '__vsidianSkeletonHold'
 
 /** 扫光启动延时（ms）：骨架先以静态灰块呈现，延时走完才开始扫光——瞬间

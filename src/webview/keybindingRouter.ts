@@ -1,4 +1,4 @@
-import { normalizeChord, resolveKeybinding, type KeybindingOverrides } from '../shared/keybindings'
+import { normalizeChord, resolveKeybinding, type KeybindingOverrides, type BindingScope } from '../shared/keybindings'
 
 /** KeyboardEvent → 平台无关的键位文字；修饰键自身及组合输入不参与路由。 */
 export function keyStep(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey' | 'isComposing'>): string | null {
@@ -25,7 +25,7 @@ export function keyStep(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' 
 }
 
 export class KeybindingRouter {
-  private prefix: string | null = null
+  private prefix: { step: string; scope: BindingScope; context?: BindingScope } | null = null
   private timer: ReturnType<typeof setTimeout> | undefined
 
   constructor(private overrides: KeybindingOverrides, private readonly execute: (id: string) => void) {}
@@ -37,29 +37,43 @@ export class KeybindingRouter {
     this.timer = undefined
   }
 
-  handle(event: KeyboardEvent, mode: 'live' | 'reading', inScope: boolean, allowWrites = true): boolean {
-    if (!inScope) { this.cancel(); return false }
+  handle(event: KeyboardEvent, mode: 'live' | 'reading', inEditor: boolean, allowWrites = true,
+    { context, nativePaste = false }: { context?: Exclude<BindingScope, 'editor'>; nativePaste?: boolean } = {},
+  ): boolean {
+    if (this.prefix && (this.prefix.context !== context || (!inEditor && this.prefix.scope === 'editor'))) {
+      this.cancel()
+    }
+    if (!inEditor && !context) return false
     if (event.key === 'Escape' && this.prefix) { this.cancel(); event.preventDefault(); event.stopPropagation(); return true }
     const step = keyStep(event)
     if (!step) return false
-    let result = resolveKeybinding(this.overrides, mode, this.prefix ? `${this.prefix} ${step}` : step, allowWrites)
-    if (this.prefix && result.kind === 'none') {
+
+    const candidates: [BindingScope, string][] = []
+    if (this.prefix) {
+      // 首段选定的场景拥有该弦。第二段未完成时，才按单键重新路由。
+      candidates.push([this.prefix.scope, `${this.prefix.step} ${step}`])
       this.cancel()
-      result = resolveKeybinding(this.overrides, mode, step, allowWrites)
     }
-    if (result.kind === 'none') return false
-    event.preventDefault()
-    // VS Code 1.86 的 webview 预加载脚本在 window 冒泡阶段将 keydown 转发
-    // 至工作台；preventDefault 不阻止转发，document 捕获层需截断传播。
-    event.stopPropagation()
-    if (result.kind === 'prefix') {
-      this.prefix = step
-      if (this.timer) clearTimeout(this.timer)
-      this.timer = setTimeout(() => this.cancel(), 1200)
-    } else {
-      this.cancel()
-      this.execute(result.id)
+    if (context) candidates.push([context, step])
+    if (inEditor) candidates.push(['editor', step])
+    for (const [scope, chord] of candidates) {
+      const result = resolveKeybinding(this.overrides, mode, chord, allowWrites, scope)
+      if (result.kind === 'none') continue
+      // 截断 VS Code webview 预加载脚本在 window 冒泡阶段向工作台转发。
+      event.stopPropagation()
+      // 普通粘贴要保留原生 paste 事件（文件和多格式剪贴板）；仅对实际命中
+      // 的单键普通粘贴放行，不覆盖浮层命令或两段键。
+      if (nativePaste && result.kind === 'command' && result.id === 'paste' &&
+          (chord === 'ctrl+v' || chord === 'meta+v')) return true
+      event.preventDefault()
+      if (result.kind === 'prefix') {
+        this.prefix = { step, scope, context }
+        this.timer = setTimeout(() => this.cancel(), 1200)
+      } else {
+        this.execute(result.id)
+      }
+      return true
     }
-    return true
+    return false
   }
 }
