@@ -2952,6 +2952,8 @@ export interface ReadingFoldPaintProbe {
 }
 
 export interface PaintProbe {
+  /** Live 文末：真实行盒、文字命中与下方留白（按需视口探针）。 */
+  liveEnd?: { lineTopPx: number; endGapPx: number; textPainted: boolean; blankBelow: boolean }
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
   toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
   /** T05（#544）悬停引用浮窗绘制观测（无浮窗时缺省）：elementFromPoint
@@ -4064,6 +4066,10 @@ function isPaintProbe(v: unknown): v is PaintProbe {
   return (
     isObject(v) &&
     typeof v.textVisible === 'boolean' &&
+    (v.liveEnd === undefined || (isObject(v.liveEnd) &&
+      typeof v.liveEnd.lineTopPx === 'number' && Number.isFinite(v.liveEnd.lineTopPx) &&
+      typeof v.liveEnd.endGapPx === 'number' && Number.isFinite(v.liveEnd.endGapPx) &&
+      typeof v.liveEnd.textPainted === 'boolean' && typeof v.liveEnd.blankBelow === 'boolean')) &&
     (v.headingFold === undefined || (isObject(v.headingFold) &&
       typeof v.headingFold.foldCount === 'number' &&
       typeof v.headingFold.ellipsisVisible === 'boolean' &&

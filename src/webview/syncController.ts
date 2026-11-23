@@ -11946,8 +11946,31 @@ export class WebviewSyncController {
         }
       })
     const rendererSvgCounts = graphicSvgCountByOwner(rendererScope)
+    let liveEnd: PaintProbe['liveEnd']
+    if (this.viewportProbeEnabled && this.viewMode === 'live' && view.viewport.to === view.state.doc.length) {
+      const lastLine = contentEl.lastElementChild
+      if (lastLine?.classList.contains('cm-line')) {
+        const scroller = view.scrollDOM
+        const viewport = scroller.getBoundingClientRect()
+        const range = document.createRange()
+        range.selectNodeContents(lastLine)
+        const glyphs = range.getClientRects()[0]
+        if (glyphs && glyphs.width > 0 && glyphs.height > 0) {
+          const x = glyphs.left + Math.min(2, glyphs.width / 2)
+          const text = document.elementFromPoint(x, (glyphs.top + glyphs.bottom) / 2)
+          const blank = document.elementFromPoint(x, viewport.bottom - 8)
+          liveEnd = {
+            lineTopPx: lastLine.getBoundingClientRect().top - viewport.top,
+            endGapPx: scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop,
+            textPainted: lastLine.contains(text),
+            blankBelow: blank !== null && scroller.contains(blank) && !blank.closest('.cm-line'),
+          }
+        }
+      }
+    }
     return {
       textVisible,
+      liveEnd,
       scrollerDisplay: view.scrollDOM ? getComputedStyle(view.scrollDOM).display : null,
       gutterUserSelect: guttersEl ? getComputedStyle(guttersEl).userSelect : null,
       visibleLineNumbers: paintedLineNumbers(view),
