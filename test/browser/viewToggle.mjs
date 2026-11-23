@@ -235,6 +235,82 @@ try {
     assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.vsidian-view-reading').scrollTop)) - readingTop) <= 2,
       'reading 重建后视口应稳定在离开时位置')
 
+    // 滚轮抵达 Live 正文的滚动末端时，末行仍可读，下方留白不算正文。
+    const liveScroller = page.locator('.vsidian-view-live .cm-scroller')
+    for (const [scenario, height, tail, scrollBack] of [
+      ['普通行', 640, '这是文档的最后一行。', 0],
+      ['Callout', 480, '> [!note] 文末提示\n> 这是文档的最后一行。', 0],
+      ['表格', 480, '| 项目 | 值 |\n| --- | --- |\n| 这是文档的最后一行。 | 完成 |', 0],
+      ['标题', 480, '# 这是文档的最后一行。', 120],
+      ['折行', 560, '这是文档的最后一行。'.repeat(18), 0],
+      ['末尾空行', 560, '> [!note] 文末提示\n> 这是文档的最后一行。\n', 0],
+    ]) {
+      await page.evaluate((text) => window.resetViewportDoc(text), longDoc + tail)
+      await liveScroller.locator('.cm-line').first().waitFor()
+      const lastLine = scenario === '末尾空行'
+        ? liveScroller.locator('.cm-content > .cm-line:last-child')
+        : liveScroller.locator('.cm-line').filter({ hasText: '这是文档的最后一行。' })
+      await page.setViewportSize({ width: 900, height })
+      const box = await liveScroller.boundingBox()
+      await page.mouse.move(box.x + 60, box.y + 100)
+      await page.mouse.wheel(0, 100_000)
+      await lastLine.waitFor()
+      await page.waitForFunction(() => {
+        const scroller = document.querySelector('.vsidian-view-live .cm-scroller')
+        return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 1
+      })
+      const paintAtEnd = await lastLine.evaluate((line) => {
+        const scroller = line.closest('.cm-scroller')
+        const viewport = scroller.getBoundingClientRect()
+        const rect = line.getBoundingClientRect()
+        const text = document.createRange()
+        text.selectNodeContents(line)
+        const glyphs = text.getClientRects()[0] ?? rect
+        const painted = document.elementFromPoint(glyphs.left + 2, (glyphs.top + glyphs.bottom) / 2)
+        const blank = document.elementFromPoint(glyphs.left + 2, viewport.bottom - 10)
+        return {
+          top: rect.top - viewport.top,
+          textVisible: glyphs.top >= viewport.top && glyphs.bottom < viewport.bottom && line.contains(painted),
+          blankBelow: scroller.contains(blank) && !blank.closest('.cm-line'),
+        }
+      })
+      assert.ok(Math.abs(paintAtEnd.top) <= 5 && paintAtEnd.textVisible && paintAtEnd.blankBelow,
+        `Live 滚动到底时末行应显示在视口首行，下方是空白（${scenario}）：${JSON.stringify(paintAtEnd)}`)
+      let savedTop = paintAtEnd.top
+      if (scrollBack > 0) {
+        await page.mouse.wheel(0, -scrollBack)
+        await page.waitForFunction((gap) => {
+          const scroller = document.querySelector('.vsidian-view-live .cm-scroller')
+          return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop >= gap - 1
+        }, scrollBack)
+        savedTop = await lastLine.evaluate((line) =>
+          line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top)
+      }
+      await page.evaluate((text) => window.reloadViewportDoc(text), longDoc + tail)
+      await lastLine.waitFor()
+      await page.evaluate(async () => {
+        // 重挂期间表格、折行等布局会再测量；等待该轮绘制，而非假定两帧内固定。
+        for (let i = 0; i < 4; i++) await new Promise((resolve) => requestAnimationFrame(resolve))
+      })
+      const restoredTop = await lastLine.evaluate((line) =>
+        line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top)
+      assert.ok(Math.abs(restoredTop - savedTop) <= 2,
+        `隐藏并重建 Live 后应保留末行的可见位置（${scenario}：${savedTop} → ${restoredTop}）`)
+      if (scenario === '表格') {
+        // 重挂后再到底，不能被尚未校准的行号列高度拉出多余行程。
+        await page.mouse.wheel(0, 100_000)
+        await page.waitForFunction(() => {
+          const scroller = document.querySelector('.vsidian-view-live .cm-scroller')
+          return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 1
+        })
+        const top = await lastLine.evaluate((line) =>
+          line.getBoundingClientRect().top - line.closest('.cm-scroller').getBoundingClientRect().top)
+        assert.ok(Math.abs(top - savedTop) <= 2, `文末表格重挂后再次触底应对齐（${savedTop} → ${top}）`)
+      }
+    }
+    assert.ok(!(await page.evaluate(() => window.readHostMessages())).some(({ kind }) => kind === 'edit.request'),
+      '滚过末行和调整窗口大小不应写回源文')
+
     assert.deepEqual(errors, [], `页面不应有脚本错误: ${errors.join('; ')}`)
     await page.close()
   }

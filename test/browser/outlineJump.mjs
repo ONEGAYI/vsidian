@@ -148,10 +148,11 @@ try {
   assert.equal(topReading.locatedIndex, 0, `reading 滚到顶后高亮应为首条（实际 ${topReading.locatedIndex}）`)
   // 切回 live：即时重算（锚点恢复 + scrollIntoView 后按视口首行块重算）
   await page.evaluate(() => window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'live' }))
-  await page.waitForTimeout(100)
+  await page.evaluate(() => new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const backLive = await page.evaluate(() => window.readOutline())
-  assert(backLive.locatedIndex !== null && backLive.locatedIndex >= 0,
-    `切回 live 后应即时重算出 located（实际 ${backLive.locatedIndex}）`)
+  assert.equal(backLive.locatedIndex, 0,
+    '切回 Live 完成首帧布局后应立即高亮首条，无须等待滚动去抖')
   passed++
   console.log('[大纲回归][PASS] reading 滚动联动 + 模式切换即时重算')
 

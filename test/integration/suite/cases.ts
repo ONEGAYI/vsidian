@@ -822,6 +822,7 @@ interface ViewState {
   /** 绘制层探针（P0 回归）：正文可见性 / CM6 注入样式存活 / 行号禁选 / 明暗声明与光标实值 */
   paint?: {
     textVisible: boolean
+    liveEnd?: { lineTopPx: number; endGapPx: number; textPainted: boolean; blankBelow: boolean }
     scrollerDisplay: string | null
     gutterUserSelect: string | null
     visibleLineNumbers?: string[]
@@ -1497,6 +1498,7 @@ async function waitViewState(
         liveMermaidCount: s['liveMermaidCount'],
         readingMermaidCount: s['readingMermaidCount'],
         mermaid: paint?.['mermaid'],
+        liveEnd: paint?.['liveEnd'],
         graphic: paint?.['graphic'],
         html: paint?.['html'],
         docStyle: paint?.['docStyle'],
@@ -20178,5 +20180,38 @@ export const cases: Array<[string, () => Promise<void>]> = [
       ])
       tlsServer.close()
     }
+  }],
+
+  ['Live 文末留白：末行绘制与真实标签页重建', async () => {
+    const file = 'viewport-live-end.md'
+    const target = wsUri(file)
+    const lines = [...Array.from({ length: 160 }, (_, i) => `第 ${i + 1} 行正文。`), '末行绘制标记']
+    const text = lines.join('\n')
+    await writeFile(nodePath.join(wsDir!, file), text, 'utf8')
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    await waitViewState(file, (v) => v.viewMode === 'live' && v.text === text)
+    const isPaintedAtEnd = (v: ViewState) => {
+      const end = v.paint?.liveEnd
+      return end !== undefined && Math.abs(end.endGapPx) <= 1 &&
+        Math.abs(end.lineTopPx) <= 5 && end.textPainted && end.blankBelow
+    }
+    await vscode.commands.executeCommand(CMD.postToPanel, target.toString(),
+      { kind: 'viewport.test.position', scrollNearLine: lines.length, scrollBiasPx: 100_000 })
+    const before = await waitViewState(file, isPaintedAtEnd)
+
+    await openWithEditor('mode-anchor.md')
+    await waitSessionReady('mode-anchor.md')
+    await openWithEditor(file)
+    await waitSessionReady(file)
+    // 探针开关是控制器实例态。出现未启用的新响应，证明不是复用隐藏前的页面。
+    await waitViewState(file, (v) => v.text === text && v.liveScrollTopPx === undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, target.toString(), { kind: 'viewport.test.position' })
+    const after = await waitViewState(file, isPaintedAtEnd)
+    assert(Math.abs(after.paint!.liveEnd!.lineTopPx - before.paint!.liveEnd!.lineTopPx) <= 2,
+      '真实标签页重建后末行绘制位置保持不变')
+    const doc = await vscode.workspace.openTextDocument(target)
+    assert(!doc.isDirty && doc.getText() === text && await readDisk(file) === text,
+      '滚动与重建不得使宿主文档变脏或写回源文')
   }],
 ]

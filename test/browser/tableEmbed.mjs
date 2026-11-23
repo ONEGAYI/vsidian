@@ -366,14 +366,20 @@ try {
 
   // ---- 场景 G：区域复制序列化父文档引用源文 ----
   // 数据行第 1 列（嵌入格）→ 第 2 列（普通格）的 1×2 区域
+  await page2.locator('.vsidian-table-grid-row').filter({ hasText: '前文' }).scrollIntoViewIfNeeded({ timeout: 4000 })
   const mixBoxes = await page2.evaluate(() => {
     const row = [...document.querySelectorAll('.vsidian-table-grid-row')]
       .find((r) => (r.textContent ?? '').includes('前文'))
     const c1 = row?.querySelectorAll(':scope > .vsidian-table-grid-cell')[0]
     const c2 = row?.querySelectorAll(':scope > .vsidian-table-grid-cell')[1]
-    return { a: c1?.getBoundingClientRect() ?? null, b: c2?.getBoundingClientRect() ?? null }
+    const a = c1?.getBoundingClientRect()
+    const b = c2?.getBoundingClientRect()
+    if (!a || !b) return null
+    return { a, b,
+      aHit: document.elementFromPoint(a.x + 12, a.y + 8)?.closest('.vsidian-table-grid-cell') === c1,
+      bHit: document.elementFromPoint(b.x + 16, b.y + 12)?.closest('.vsidian-table-grid-cell') === c2 }
   })
-  assert.ok(mixBoxes.a && mixBoxes.b && mixBoxes.b.y < 600, '数据行格在视口内')
+  assert.ok(mixBoxes?.aHit && mixBoxes?.bHit, 'G 拖选起终点命中数据行的普通格和嵌入格')
   await page2.evaluate(() => document.addEventListener('copy', (event) => {
     window.__copiedTable = event.clipboardData?.getData('text/plain')
   }))

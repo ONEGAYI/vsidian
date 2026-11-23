@@ -185,15 +185,22 @@ try {
   // ---- 场景 E：滚动动态展开（only-expand）+ 高亮滚进面板可视区 ----
   // 档 0 下滚动正文进入「乙一」控制域：乙的路径展开（乙、乙一可见），
   // 其他章（甲、丙）保持折叠；高亮落在乙一自身并滚进面板可视区
-  await page.locator('.cm-editor').first().click({ position: { x: 200, y: 300 } })
-  for (let i = 0; i < 22; i++) await page.mouse.wheel(0, 500)
-  await page.waitForTimeout(400)
+  const bodyBox = await page.locator('.vsidian-view-live .cm-scroller').boundingBox()
+  const delta = await page.evaluate(() => {
+    const view = window.controller.getView()
+    const offset = view.state.doc.toString().indexOf('## 乙一\n')
+    return view.lineBlockAt(offset).top + view.documentPadding.top - view.scrollDOM.scrollTop + 2
+  })
+  // 直接滚入乙一控制域；不能依赖旧的文末滚动上限把过量滚轮截在乙章。
+  await page.mouse.move(bodyBox.x + 200, bodyBox.y + 300)
+  await page.mouse.wheel(0, Math.round(delta))
+  await page.waitForFunction(() => window.readOutline().locatedText === '乙一')
   state = await page.evaluate(() => window.readOutline())
   // 乙（4）应展开、乙一（5）可见；丙（8）仍折叠（丙一 9 隐藏）
   assert.equal(state.hidden[9], true, '未浏览区域（丙一）保持折叠（only-expand 不打扰）')
   const visibleDeep = [5, 6, 7].some((i) => !state.hidden[i])
   assert(visibleDeep, `滚动进入「乙」区域后其子级应有可见者（实际 ${JSON.stringify(state.hidden)}）`)
-  assert.equal(state.locatedText !== null && state.locatedText.startsWith('乙'), true,
+  assert.equal(state.locatedText, '乙一',
     `滚动后高亮应在乙控制域（实际 ${state.locatedText}）`)
   assert.equal(state.locatedVisibleInPanel, true,
     `高亮行应滚进大纲面板可视区（实际 ${JSON.stringify(state.locatedVisibleInPanel)}）`)

@@ -13,27 +13,26 @@ let saved: unknown
 // T07（#675）组合验证：出站消息捕获（复制内容断言——codeblock.copy
 // 经宿主桥出站，fixture 桥 no-op 但留观测量）
 const posted: Array<{ kind: string; text?: string }> = []
-const controller = new WebviewSyncController({
-  postMessage(msg) { posted.push(msg as { kind: string; text?: string }) },
-  getState<T>() { return saved as T | undefined },
-  setState(state) { saved = state },
-})
-controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
-// init 版本自增：宿主协议同版本 init 会去重，二次装载（长文档/重置）必须
-// 递增（calloutPaint 的 version 2/3 手工递增同源语义）
-let initVersion = 0
+let controller: WebviewSyncController | undefined
 Object.assign(window, {
-  controller,
   initCallout(text: string) {
-    initVersion += 1
-    controller.handleHostMessage({ kind: 'init', sessionId: 'callout', docUri: 'file:///callout.md', version: initVersion, text })
-    controller.handleHostMessage({ kind: 'view.mode.set', mode: 'live' })
+    // 每个夹具是独立文档，不能把上一夹具的光标和可滚动视口恢复到新正文。
+    controller?.dispose()
+    saved = undefined
+    controller = new WebviewSyncController({
+      postMessage(msg) { posted.push(msg as { kind: string; text?: string }) },
+      getState<T>() { return saved as T | undefined },
+      setState(state) { saved = state },
+    })
+    controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+    Object.assign(window, { controller })
+    controller.handleHostMessage({ kind: 'init', sessionId: 'callout', docUri: 'file:///callout.md', version: 1, text })
   },
   setCalloutMode(mode: 'live' | 'reading') {
-    controller.handleHostMessage({ kind: 'view.mode.set', mode })
+    controller!.handleHostMessage({ kind: 'view.mode.set', mode })
   },
   locateCallout(offset: number) {
-    controller.handleHostMessage({ kind: 'view.locate', offset })
+    controller!.handleHostMessage({ kind: 'view.locate', offset })
   },
   /** T07：出站消息快照（复制断言用；取后不清，调用方按序取尾） */
   postedCallout() { return posted.slice() },
