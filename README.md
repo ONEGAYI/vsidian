@@ -84,9 +84,9 @@
 
 其他 VSCode 扩展可以声明为 Vsidian 附加组件，安装后由 Vsidian 自动发现。附加组件能够贡献设置页、输入行为、代码块渲染、粘贴转换规则、主题、命令、右键菜单项、工具栏按钮与面板；组件出错时，它的贡献会被自动撤下，不影响其他组件和内置功能。
 
-安装 [Vsidian Agent Bridge](https://github.com/ONEGAYI/vsidian-agent-bridge) 后，Vsidian 1.8.0 起可从反重力（Antigravity）等来源的富文本剪贴板还原行内公式。
+安装 [Vsidian Agent Bridge](https://github.com/ONEGAYI/vsidian-agent-bridge) 后，在 Vsidian 里保留格式粘贴反重力（Antigravity）等来源的内容，可以还原行内公式（Vsidian 1.8.0 起）和块公式（Vsidian 1.9.0 与 Bridge 0.3.0 起）。
 
-开发文档见 [附加组件开发指南](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md)。当前稳定 API 为 1.5.0，兼容承诺自 1.1.0 起生效。
+开发文档见 [附加组件开发指南](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md)。当前稳定 API 为 1.6.0，兼容承诺自 1.1.0 起生效。
 
 ## 更多功能
 

@@ -1318,4 +1318,12 @@ export const ADDON_API_RELEASES: readonly AddonApiReleaseRecord[] = [
       '新增能力（随 Vsidian 1.8.0 发布）：声明式粘贴模板的可选 inlineMath 文本槽从非块级 MathML 注解提取 TeX 并还原行内公式（#694）。已有规则与无规则时的粘贴行为不变；无新增实验入口。',
     experimental: [],
   },
+  {
+    version: '1.6.0',
+    status: 'released',
+    releasedAt: '2026-11-23',
+    summary:
+      '新增能力（随 Vsidian 1.9.0 发布）：声明式粘贴模板的可选 blockMath 文本槽从块级 MathML 注解提取 TeX，保留公式内部换行并还原独立公式块（#707）。组件可分批登记以保留旧宿主支持的规则；无新增实验入口。',
+    experimental: [],
+  },
 ]
