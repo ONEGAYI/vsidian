@@ -863,6 +863,8 @@ interface ViewState {
       regionBackgroundColor?: string | null
       regionTopBorderWidth?: string | null
       regionLeftBorderWidth?: string | null
+      readingColumnWidths?: number[]
+      readingScrollbarAtBottom?: boolean
     }
     /** #59 公式绘制：当前激活视图内首个公式的实际可见性与计数 */
     math?: {
@@ -1024,6 +1026,7 @@ interface ViewState {
       tokenCount?: number
       /** #389 真实 token 文字绘制样本（有界；颜色与命中可见性独立断言） */
       tokenPaint?: Array<{ text: string; classes: string; color: string; visible: boolean }>
+      readingScrollbarAtBottom?: boolean
       /** 全部头部语言标签序列（DOM 顺序；渲染型围栏的 Mermaid 标签断言） */
       labels?: string[]
     }
@@ -4570,11 +4573,44 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // fixture 数据行含 `x|y`：若错误地按管道切列，行内代码 token 会丢失。
     assert(reading.readingSyntax!.inlineCodeCount === 1,
       `阅读表格应保留行内代码，实际 ${reading.readingSyntax!.inlineCodeCount}`)
-    // 只读语义：表格为语义标签渲染，无输入控件（任务勾选外的交互均不提供）
+    // 保留真实表格与既有 CSS 入口。矩形选区只改变绘制，不修改内容。
     assert(
       reading.cssProbe?.readingTableDecorationColor === 'rgb(22, 23, 24)',
       `阅读表格应被测试片段命中 rgb(22, 23, 24)，实际 ${reading.cssProbe?.readingTableDecorationColor}`,
     )
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.readingDrag' })
+    const selected = await waitViewState('table.md', (v) => v.paint?.table?.regionCellCount === 4)
+    const paint = selected.paint!.table!
+    assert(paint.regionTopBorderWidth === '2px' && paint.regionLeftBorderWidth === '2px',
+      `阅读态格区须画出 2px 外框：${JSON.stringify(paint)}`)
+    assert(paint.regionBackgroundColor?.endsWith('/ 0.14)'),
+      `阅读态格区应使用 14% 主题色淡底：${paint.regionBackgroundColor}`)
+    assert(selected.text === reading.text, '阅读态选择不得写回内容')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'settings.snapshot', values: { 'editor.readableLineWidth': 420 } })
+    const fitted = await waitViewState('table.md', (v) => {
+      const widths = v.paint?.table?.readingColumnWidths
+      return widths?.length === 3 && Math.abs(widths.reduce((sum, width) => sum + width, 0) - 420) < 3
+    })
+    const widths = fitted.paint!.table!.readingColumnWidths!
+    assert(Math.max(...widths) - Math.min(...widths) > 8,
+      `420px 阅读正文中的列宽应按内容分配而非等分：${widths}`)
+    try {
+      const saved = await vscode.commands.executeCommand<{ ok: boolean }>(CMD.setSettings, {
+        'editor.readingTableLayout': 'single-line', 'editor.readableLineWidth': 100,
+      })
+      assert(saved.ok, '保持单行应可通过正式设置链路保存')
+      const snapshot = await vscode.commands.executeCommand<Record<string, unknown>>(CMD.getSettings)
+      assert(snapshot['editor.readingTableLayout'] === 'single-line', '设置须能从存储回读')
+      await waitViewState('table.md', (v) => v.settings?.['editor.readingTableLayout'] === 'single-line' &&
+        v.paint?.table?.readingScrollbarAtBottom === true)
+    } finally {
+      await vscode.commands.executeCommand(CMD.setSettings, {
+        'editor.readingTableLayout': 'wrap', 'editor.readableLineWidth': 0,
+      })
+    }
+    await waitViewState('table.md', (v) => v.settings?.['editor.readingTableLayout'] === 'wrap' &&
+      v.paint?.table?.readingScrollbarAtBottom === false)
     // 切回 live：同一文本两视图共用（文本不变）
     const backText = reading.text
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
@@ -8668,6 +8704,17 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     await waitViewState('code-card.md', (v) =>
       v.paint?.code?.foldedCount === 0 && v.paint.code.cardLineCount === 7, 0, 60000)
+    // 按可读宽度压窄主文档；点击正式折行钮后，验证底栏真实绘制且命中。
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'settings.snapshot', values: { 'editor.readableLineWidth': 100 },
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'codecard.test.wrap', index: 0 })
+    await waitViewState('code-card.md', (v) => v.paint?.code?.readingScrollbarAtBottom === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'codecard.test.wrap', index: 0 })
+    await waitViewState('code-card.md', (v) => v.paint?.code?.readingScrollbarAtBottom === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'settings.snapshot', values: { 'editor.readableLineWidth': 0 },
+    })
     assert(await readDisk('code-card.md') === diskBefore, '阅读卡片交互不得改写源文')
   }],
 

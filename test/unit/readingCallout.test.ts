@@ -238,13 +238,15 @@ describe('阅读 callout：T03 全类型/别名/富标题/嵌套组合', () => {
   })
 
   it('callout 内表格：GFM 表格原管线渲染（网格不放宽降级规则）', () => {
-    const html = renderBlock(['> [!success] 表格', '> | a | b |', '> | - | - |', '> | 1 | 2 |'].join('\n'))
-    expect(html).toContain('data-callout="success"')
-    expect(html).toMatch(/<table>/)
-    expect(html).toContain('<th>a</th>')
+    const el = document.createElement('div')
+    el.innerHTML = renderBlock(['> [!success] 表格', '> | a | b |', '> | - | - |', '> | 1 | 2 |'].join('\n'))
+    const table = el.querySelector('.callout[data-callout="success"] > .callout-content > table')
+    expect(table).not.toBeNull()
+    expect(Array.from(table!.querySelectorAll('thead th'), cell => cell.textContent)).toEqual(['a', 'b'])
+    expect(Array.from(table!.querySelectorAll('tbody td'), cell => cell.textContent)).toEqual(['1', '2'])
     // 表格前缀残缺仍降级（既有契约不因 callout 放宽）
-    const broken = renderBlock(['> [!success] 残表', '> | a | b |', '> 缺分隔行'].join('\n'))
-    expect(broken).not.toMatch(/<table>/)
+    el.innerHTML = renderBlock(['> [!success] 残表', '> | a | b |', '> 缺分隔行'].join('\n'))
+    expect(el.querySelector('table')).toBeNull()
   })
 
   it('callout 内代码块：围栏卡片管线照常（代码内伪标记字面）', () => {

@@ -546,6 +546,11 @@ export const READING_BREAKS_KEY = 'editor.readingBreaks'
 /** 默认 false：严格软换行维持既有呈现（对齐 VSCode markdown.preview.breaks 默认） */
 export const READING_BREAKS_DEFAULT = false
 
+export const READING_TABLE_LAYOUT_KEY = 'editor.readingTableLayout'
+export const READING_TABLE_LAYOUT_MODES = ['wrap', 'single-line'] as const
+export type ReadingTableLayoutMode = typeof READING_TABLE_LAYOUT_MODES[number]
+export const READING_TABLE_LAYOUT_DEFAULT: ReadingTableLayoutMode = 'wrap'
+
 /**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
  * 实际设置项「显示行号」（设置页自此渲染真实开关），#79 加入「代码块卡片」，
@@ -1098,6 +1103,18 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: READING_BREAKS_DEFAULT,
     titleKey: 'setting.readingBreaks.title',
     descriptionKey: 'setting.readingBreaks.description',
+  },
+  {
+    key: READING_TABLE_LAYOUT_KEY,
+    type: 'string',
+    default: READING_TABLE_LAYOUT_DEFAULT,
+    enum: READING_TABLE_LAYOUT_MODES,
+    titleKey: 'setting.readingTableLayout.title',
+    descriptionKey: 'setting.readingTableLayout.description',
+    optionLabelKeys: {
+      wrap: 'setting.readingTableLayout.wrap',
+      'single-line': 'setting.readingTableLayout.singleLine',
+    },
   },
 ]
 

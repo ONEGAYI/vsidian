@@ -297,6 +297,10 @@ T05（#544）组件引用请求复用悬停弹窗模式：位置由有效触发�
 
 **图片相框与图上按钮组**：已加载图片以 8px 圆角、细边线和贴边小阴影区分图面与页面；悬停时右上角由一个 8px 圆角阴影底座承载操作（按钮 40×32px、图标 20px，按钮之间不分底色，悬停单个按钮才着色）。图面空间不足时，紧凑底座贴到图外（按钮 24×24px、图标 15px），避开拖动热区。Live 右下角使用圆弯折角手柄，图面不绘制光带。图形代码块与块级 HTML 仍沿用原按钮形态。见 [image-popup.md](image-popup.md)、[image-resize.md](image-resize.md)；绘制层由 `imagePopup`、`imageResize` 浏览器套件覆盖。
 
+**表格矩形选区**：普通矩形在 Live 与阅读共用 `--vscode-focusBorder` 的 14% 整格淡底、2px 外描边与 6px 外角。选区内部沿用表格自身格线。阅读模式在格子的伪元素上描边，不改变原生表格的折叠边框与布局。绘制由 `blockquoteTablePaint` 和宿主的 `paint.table` 验证。
+
+**阅读视口横向滚动条**：可见的单行表格或关闭折行的代码卡发生横向溢出时，共用一条原生滚动条。滚动条高 12px，滑块使用 VS Code 滚动条主题色，横向与当前滚动区对齐，纵向贴阅读视口底部，不占正文流高度。`readingWidthProbe` 验证定位、主题色、拖动与目标切换；宿主的 `paint.table` 和 `paint.code` 验证可见位置。
+
 **表格边沿与活动格光标（2026-10-23）**：当前 EditorView 内绝对定位，边沿宽 2px、色取 `--vscode-focusBorder`，中央光标高 1em、宽 2px、色取 `--vscode-editorCursor-foreground`（回落正文前景），以正文背景色隔开边沿。格内独立输入面绘制同宽光标，原生光标让位；格区在场时光标全部隐藏。均无圆角、无全局 z-index，不新增主题档位。`tableInput` 浏览器测试检查实绘色与中央位置，`tableCaret` 检查格内真实绘制位置，CSS 契约钉住主题变量与让位范围。
 
 格内 textarea 获得焦点时，文字选区沿用 `--vscode-editor-selectionBackground` 活动色；焦点离开该编辑器后沿用 `--vscode-editor-inactiveSelectionBackground`。`quoteBarPaint` 以实际像素分别验证活动与失焦两态，不以 `.cm-focused` 是否在场代替焦点语义。

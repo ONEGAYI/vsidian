@@ -301,6 +301,30 @@ function lineNumberOfOffset(env: ReadingRenderEnv, offset: number): number {
   return 0
 }
 
+/** 记录删除点在处理后文本里的位置。查到删除点时右偏，定位仍在场的字符。 */
+function readingOmissions() {
+  const points: Array<{ offset: number; removed: number }> = []
+  let removed = 0
+  return {
+    add(from: number, to: number) {
+      if (from === to) return
+      const offset = from - removed
+      removed += to - from
+      points.push({ offset, removed })
+    },
+    sourceAt(offset: number): number {
+      let lo = 0
+      let hi = points.length
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1
+        if (points[mid]!.offset <= offset) lo = mid + 1
+        else hi = mid
+      }
+      return offset + (points[lo - 1]?.removed ?? 0)
+    },
+  }
+}
+
 /** body 切分：baseLine 为 body 首行的 0 基行号（token.map 加该基值） */
 function splitBody(
   text: string,
@@ -318,10 +342,19 @@ function splitBody(
   if (body.trim() === '') {
     return blocks
   }
-  // #139 阅读隐藏：body 切片后、markdown-it 解析前剥离注释（等长空格
-  // 替换保锚点坐标系；代码上下文与残缺保留原样，见 htmlComment.ts）。
-  // frontmatter 已先行整块提取，天然不剥
-  const stripped = stripBlockIdMarks(stripHtmlComments(body))
+  // 剥离注释和块 ID 保留行号，但会缩短行内偏移；表格格界需要回投到原文。
+  const comments = readingOmissions()
+  const withoutComments = stripHtmlComments(body, (from, to) => {
+    for (let start = from; start < to;) {
+      const nextLine = body.indexOf('\n', start)
+      const end = nextLine >= 0 && nextLine < to ? nextLine : to
+      comments.add(start, end)
+      start = end + 1
+    }
+  })
+  const ids = readingOmissions()
+  const stripped = stripBlockIdMarks(withoutComments, ids.add)
+  env.tableSourceOffset = offset => bodyStart + comments.sourceAt(ids.sourceAt(offset))
   const { parseText, marker } = protectCodePipes(stripped)
   const tokens = md.parse(parseText, env as unknown as Env)
   if (marker) {

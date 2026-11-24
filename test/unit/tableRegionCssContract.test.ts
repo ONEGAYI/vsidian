@@ -9,7 +9,7 @@ const css = readFileSync(path.resolve(process.cwd(), 'src/webview/main.css'), 'u
 const blocks = css.match(/[^{}]+\{[^{}]*\}/g) ?? []
 
 function rule(selector: string, declaration?: RegExp): string {
-  const found = blocks.filter((block) => block.split('{')[0]!.split(',')
+  const found = blocks.filter((block) => block.split('{')[0]!.split(/,(?![^()]*\))/)
     .some((part) => part.trim() === selector) &&
     (declaration === undefined || declaration.test(block.split('{')[1]!)))
   expect(found, `CSS 规则 ${selector} 应唯一存在`).toHaveLength(1)
@@ -17,6 +17,7 @@ function rule(selector: string, declaration?: RegExp): string {
 }
 
 const cell = '#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell'
+const reading = '#app .vsidian-view-reading'
 const controls = '#app .cm-editor .vsidian-table-controls'
 
 describe('矩形格区绘制契约（#72–#74）', () => {
@@ -25,18 +26,23 @@ describe('矩形格区绘制契约（#72–#74）', () => {
     expect(fill).toMatch(/background:\s*color-mix\(in srgb,\s*var\(--vscode-focusBorder,\s*#[\da-f]+\)\s+14%,\s*transparent\)/i)
     expect(fill, '格区填色不应覆盖内部网格边框').not.toMatch(/\bborder(?:-(?:top|bottom|left|right))?\s*:/)
     expect(rule(`${cell}`)).toMatch(/border:\s*1px solid var\(--vscode-panel-border/)
+    expect(rule(`${reading} table[data-vsidian-table-from] :is(th, td).vsidian-table-region-cell`)).toBe(fill)
   })
 
   it('只在矩形外围绘制四条主题色边与四个圆角', () => {
     for (const edge of ['top', 'bottom', 'left', 'right']) {
-      expect(rule(`${cell}.vsidian-table-region-${edge}`))
-        .toMatch(new RegExp(`border-${edge}:\\s*2px solid var\\(--vscode-focusBorder`))
+      const selector = `.vsidian-table-region-${edge}`
+      const border = rule(`${cell}${selector}`)
+      expect(border).toMatch(new RegExp(`border-${edge}:\\s*2px solid var\\(--vscode-focusBorder`))
+      expect(rule(`${reading} ${selector}::after`)).toBe(border)
     }
     for (const [vertical, horizontal] of [
       ['top', 'left'], ['top', 'right'], ['bottom', 'left'], ['bottom', 'right'],
     ]) {
-      expect(rule(`${cell}.vsidian-table-region-${vertical}.vsidian-table-region-${horizontal}`))
-        .toMatch(new RegExp(`border-${vertical}-${horizontal}-radius:\\s*6px`))
+      const selector = `.vsidian-table-region-${vertical}.vsidian-table-region-${horizontal}`
+      const radius = rule(`${cell}${selector}`)
+      expect(radius).toMatch(new RegExp(`border-${vertical}-${horizontal}-radius:\\s*6px`))
+      expect(rule(`${reading} ${selector}::after`)).toBe(radius)
     }
   })
 })

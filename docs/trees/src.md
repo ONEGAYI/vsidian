@@ -332,9 +332,12 @@ vsidian/
         ├── readingCodeCard.ts            # 阅读代码块卡片增强
         ├── readingFind.ts                # 阅读查找源坐标与字符高亮
         ├── readingFindSource.ts          # 阅读查找只读源码浮层
+        ├── readingHorizontalScroll.ts    # 阅读视口横向滚动条
         ├── readingMarkdown.ts            # markdown-it 安全渲染层
         ├── readingProbe.ts               # 阅读视图性能探针
         ├── readingStyleSnapshot.ts       # 阅读样式快照纯逻辑
+        ├── readingTable.ts               # 阅读表格列宽与模式
+        ├── readingTableSelection.ts      # 阅读表格矩形拖选与复制
         ├── readingView.ts                # 阅读视图 DOM 构建与锚点定位
         ├── readingViewport.ts            # 阅读视口挂载窗口纯函数
         ├── readingVirtualView.ts         # 阅读视图虚拟化装配层

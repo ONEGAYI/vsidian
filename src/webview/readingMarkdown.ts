@@ -40,7 +40,67 @@ export interface ReadingRenderEnv {
   lineEnds: number[]
   /** 渲染相对 body 的 token 时：token.map 行号加上该基值（0 基全文行号） */
   baseLine?: number
+  /** 核心解析输入中的字符位置 → 预处理前的全文位置，供表格格界记录。 */
+  tableSourceOffset?: (offset: number) => number
   references?: Record<string, unknown>
+}
+
+export const READING_TABLE_CELL_SOURCE = 'data-vsidian-table-cell-source'
+
+/** 读取 stock table 已接受的行。和它的 escapedSplit 同口径：紧邻反斜杠
+ * 的 | 不切格；注释、块 id 和代码管道已由实际解析输入处理。 */
+function tableCellSources(line: string, start: number, sourceAt: (offset: number) => number): string[] {
+  const trimmed = line.trimEnd()
+  const first = trimmed.length - trimmed.trimStart().length
+  const sources: string[] = []
+  let from = sourceAt(start)
+  let lastPipe = -1
+  for (let pos = first; pos < trimmed.length; pos++) {
+    if (trimmed[pos] !== '|' || trimmed[pos - 1] === '\\') continue
+    const pipe = sourceAt(start + pos)
+    if (pos !== first) sources.push(`${from}:${pipe}`)
+    from = pipe + 1
+    lastPipe = pos
+  }
+  if (lastPipe !== trimmed.length - 1) {
+    sources.push(`${from}:${sourceAt(start + line.length - 1) + 1}`)
+  }
+  return sources
+}
+
+/** 表格词法规则正处在容器缩进已展开的栈内，此时记录行首和格界。只装配
+ * 到本渲染器实例，不替换 stock table 规则，也不更改现有 token 的内容。 */
+function installReadingTableSources(md: InstanceType<typeof MarkdownIt>): void {
+  md.block.State = class extends md.block.State {
+    private row: Token | undefined
+    private column = 0
+    private sources: string[] | undefined
+
+    override push(type: string, tag: string, nesting: -1 | 0 | 1): Token {
+      const token = super.push(type, tag, nesting)
+      if (type === 'tr_open') {
+        this.row = token
+        this.column = 0
+        this.sources = undefined
+      } else if (type === 'inline') {
+        // 到 inline 时，tr.map 与单元格的 text-align 属性均已由 stock rule 写入。
+        const cell = this.tokens.at(-2)
+        if (cell?.type === 'th_open' || cell?.type === 'td_open') {
+          const sourceAt = (this.env as unknown as ReadingRenderEnv).tableSourceOffset
+          if (sourceAt) {
+            if (!this.sources) {
+              const line = this.row!.map![0]
+              const start = this.bMarks[line]! + this.tShift[line]!
+              this.sources = tableCellSources(this.src.slice(start, this.eMarks[line]!), start, sourceAt)
+            }
+            const range = this.sources[this.column++]
+            if (range !== undefined) cell.attrSet(READING_TABLE_CELL_SOURCE, range)
+          }
+        }
+      }
+      return token
+    }
+  }
 }
 
 /** 任务标记行：缩进 + 列表标记 + 空白 + [xX ] + 空白。
@@ -775,6 +835,16 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
   // 行内降级回退为转义源码 span）；无包装容器类——原位渲染保持用户
   // DOM 形态（Q4=B：CSS 按实际 DOM 匹配，不引入额外包装干扰选择器语义）
   md.renderer.rules['vsidian_inline_html'] = (tokens, idx) => paintInlineHtml(tokens[idx]!).html
+  installReadingTableSources(md)
+  md.renderer.rules['table_open'] = (tokens, idx, options, env, self) => {
+    const token = tokens[idx]!
+    const bounds = env as ReadingRenderEnv | undefined
+    if (token.map && bounds?.lineStarts) {
+      const base = bounds.baseLine ?? 0
+      token.attrSet('data-vsidian-table-from', String(bounds.lineStarts[base + token.map[0]]))
+    }
+    return self.renderToken(tokens, idx, options)
+  }
   md.renderer.rules['list_item_open'] = (tokens, idx, _options, env) => {
     const map = (tokens[idx] as Token).map
     const bounds = env as unknown as ReadingRenderEnv | undefined
