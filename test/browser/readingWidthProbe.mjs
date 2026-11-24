@@ -17,7 +17,7 @@ await build({ entryPoints: [path.join(root, 'test/browser/readingWidthProbeFixtu
   bundle: true, outfile: output, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
 
-const browser = await chromium.launch({ headless: true,
+const browser = await chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'],
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 const failures = []
 const check = (name, ok, detail) => {
@@ -268,6 +268,356 @@ try {
     `块宽=${reading.blockW.toFixed(1)}`)
   await snippet.evaluate((el) => { el.textContent = '' })
   await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
+
+  // 宽代码标识符不应把表格撑出阅读列；缩窗后短列仍小于内容重的列。
+  {
+    const tablePage = await browser.newPage({ viewport: { width: 960, height: 720 } })
+    const tableErrors = []
+    tablePage.on('pageerror', error => tableErrors.push(error.message))
+    await tablePage.setContent('<div id="app"></div>')
+    await tablePage.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await tablePage.addScriptTag({ path: output })
+    const source = [
+      '| # | 阶段 | 操作 | 输入 | 输出 |',
+      '| --- | --- | --- | --- | --- |',
+      '| 1 | 采样 | 波形 / `record_signal_across_time_window` | 观测结果 + 波形 | `waveform_capture_with_high_resolution` |',
+      '| 2 | 分析 | 运行 / `estimate_recovery_characteristics` | 观测结果 | `recovery_characteristics_for_each_sample` |',
+      '| 3 | 结果核对 | 统计 / `validate_voltage_drop_threshold` | 实测数据 | `validated_threshold_and_confidence_bounds` |',
+    ].join('\n')
+    await tablePage.evaluate(source => {
+      window.initReadingWidth(source)
+      window.setRwMode('reading')
+    }, source)
+    const table = tablePage.locator('.vsidian-reading-table > table')
+    const measure = () => table.evaluate(table => {
+      const cells = [...table.rows[1].cells]
+      const last = cells.at(-1).getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(cells.at(-1).querySelector('code'))
+      const textRects = [...range.getClientRects()]
+      const block = table.parentElement.getBoundingClientRect()
+      return {
+        overflow: Math.max(last.right - block.right, table.scrollWidth - table.clientWidth,
+          table.parentElement.scrollWidth - table.parentElement.clientWidth),
+        widths: cells.map(cell => cell.getBoundingClientRect().width),
+        wrappedInside: textRects.length > 1 && textRects.every(rect => rect.right <= last.right + 1),
+      }
+    })
+    const settle = () => tablePage.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await settle()
+    const wide = await measure()
+    await tablePage.setViewportSize({ width: 500, height: 720 })
+    await settle()
+    const narrow = await measure()
+    check('阅读表格窄窗不横向溢出，长行内代码在格内折行',
+      narrow.overflow < 2 && narrow.wrappedInside,
+      JSON.stringify(narrow))
+    check('阅读表格随窗口重新分配列宽，长内容列比序号列宽',
+      narrow.widths[4] < wide.widths[4] - 20 && narrow.widths[4] > narrow.widths[0] + 12,
+      JSON.stringify({ before: wide.widths, after: narrow.widths }))
+    await table.screenshot({ path: artifactPath(root, 'reading-table-narrow.png') })
+    await tablePage.setViewportSize({ width: 960, height: 720 })
+    await settle()
+    const restored = await measure()
+    check('窗口恢复后，阅读表格列宽随之恢复',
+      restored.widths.every((width, index) => Math.abs(width - wide.widths[index]) < 2),
+      JSON.stringify(restored.widths))
+    check('阅读表格重排无脚本错误', tableErrors.length === 0, JSON.stringify(tableErrors))
+    await tablePage.close()
+  }
+
+  // 保持单行：读到长表中段，不滚到表底也能操作真实的水平滚动条。
+  {
+    const tall = await browser.newPage({ viewport: { width: 500, height: 520 } })
+    await tall.setContent('<div id="app"></div>')
+    await tall.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await tall.addScriptTag({ path: output })
+    const source = [
+      '| 序号 | 第一个长字段 | 第二个长字段 |', '| --- | --- | --- |',
+      ...Array.from({ length: 52 }, (_, n) =>
+        `| ${n + 1} | ` + '`temperature_recovery_across_multiple_sensor_channels` | `sampling_status_at_the_end_of_the_observation_window` |'),
+      ...Array.from({ length: 24 }, (_, n) => `\n表后正文 ${n + 1}`),
+    ].join('\n')
+    await tall.evaluate(source => {
+      window.initReadingWidth(source)
+      window.setRwMode('reading')
+      window.setRwSettings({ 'editor.readingTableLayout': 'single-line' })
+    }, source)
+    const reading = tall.locator('.vsidian-view-reading').first()
+    const table = reading.locator('table').first()
+    const bar = tall.locator('.vsidian-reading-scrollbar')
+    const present = await tall.evaluate(async () => {
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+      const view = document.querySelector('.vsidian-view-reading')
+      const table = view.querySelector('table')
+      const bar = document.querySelector('.vsidian-reading-scrollbar')
+      const bottom = view.getBoundingClientRect().bottom
+      return {
+        nowrap: getComputedStyle(table.rows[1].cells[1]).whiteSpace === 'nowrap',
+        overflow: table.scrollWidth - table.clientWidth,
+        taller: table.getBoundingClientRect().bottom > bottom + 100,
+        sticky: !!bar && !bar.hidden && Math.abs(bar.getBoundingClientRect().bottom - bottom) < 2,
+      }
+    })
+    check('保持单行时，长表格的横向滚动条固定在阅读视口底部',
+      present.nowrap && present.overflow > 50 && present.taller && present.sticky, JSON.stringify(present))
+    if (present.sticky) {
+      await reading.evaluate(el => { el.scrollTop = 400 })
+      await tall.evaluate(() => new Promise(requestAnimationFrame))
+      const rect = await bar.boundingBox()
+      const viewRect = await reading.boundingBox()
+      check('表格纵滚到中段，滚动条仍在视口下端',
+        Math.abs(rect.y + rect.height - viewRect.y - viewRect.height) < 2, JSON.stringify(rect))
+      await tall.mouse.move(rect.x + 20, rect.y + rect.height / 2)
+      await tall.mouse.down()
+      await tall.mouse.move(rect.x + 140, rect.y + rect.height / 2, { steps: 6 })
+      await tall.mouse.up()
+      const positions = await tall.evaluate(() => new Promise(resolve => requestAnimationFrame(() => resolve([
+        document.querySelector('.vsidian-reading-scrollbar').scrollLeft,
+        document.querySelector('.vsidian-view-reading table').scrollLeft,
+      ]))))
+      check('拖动底部滚动条会移动表格正文', positions[0] > 50 && positions[0] === positions[1],
+        JSON.stringify(positions))
+      await tall.screenshot({ path: artifactPath(root, 'reading-table-sticky-scroll.png') })
+      await table.evaluate(el => { el.scrollLeft = 64 })
+      await tall.waitForFunction(() => document.querySelector('.vsidian-reading-scrollbar').scrollLeft === 64)
+      await reading.evaluate(el => { el.scrollTop = el.scrollHeight })
+      await bar.waitFor({ state: 'hidden' })
+      await reading.evaluate(el => { el.scrollTop = 0 })
+      await bar.waitFor()
+      await tall.evaluate(() => window.setRwSettings({ 'editor.readingTableLayout': 'wrap' }))
+      await bar.waitFor({ state: 'hidden' })
+      const after = await table.evaluate(el => el.scrollWidth - el.clientWidth)
+      check('切回折行时表格重新适宽并隐藏滚动条', after < 2, `溢出=${after}`)
+    }
+    await tall.close()
+  }
+
+  // 两张超宽表同屏：先点击 B，再送达 A 刚排队的 scroll，底栏仍属于 B。
+  {
+    const page = await browser.newPage({ viewport: { width: 500, height: 520 } })
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: output })
+    const source = [65, 94].map(length => `| 编号 | 值 |\n| --- | --- |\n| 1 | ${'x'.repeat(length)} |`).join('\n\n间隔\n\n')
+    await page.evaluate(text => {
+      window.initReadingWidth(text)
+      window.setRwMode('reading')
+      window.setRwSettings({ 'editor.readingTableLayout': 'single-line' })
+    }, source)
+    const bar = page.locator('.vsidian-reading-scrollbar')
+    await bar.waitFor()
+    const actual = await page.evaluate(async () => {
+      const [a, b] = document.querySelectorAll('.vsidian-view-reading table')
+      a.scrollLeft = 20
+      b.rows[0].cells[0].dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, pointerType: 'mouse' }))
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+      const bar = document.querySelector('.vsidian-reading-scrollbar')
+      return { a: a.scrollWidth, b: b.scrollWidth, target: bar.scrollWidth, left: bar.scrollLeft }
+    })
+    check('旧表迟到的滚动事件不抢回底栏',
+      actual.a !== actual.b && actual.target === actual.b && actual.left === 0, JSON.stringify(actual))
+
+    // 保留片段给表格设置的右到左排版；浏览器在 RTL 下使用负的 scrollLeft。
+    await page.evaluate(() => {
+      const uri = URL.createObjectURL(new Blob(['#app .vsidian-reading-table table { direction: rtl; }'], { type: 'text/css' }))
+      window.controller.handleHostMessage({ kind: 'snippets.snapshot', version: 1, snippets: [{ name: 'rtl.css', uri }] })
+    })
+    await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.vsidian-reading-table table')[1]).direction === 'rtl')
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const box = await bar.boundingBox()
+    await page.mouse.move(box.x + box.width - 20, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width - 120, box.y + box.height / 2, { steps: 6 })
+    await page.mouse.up()
+    const rtl = await page.evaluate(async () => {
+      await new Promise(requestAnimationFrame)
+      const bar = document.querySelector('.vsidian-reading-scrollbar')
+      const table = document.querySelectorAll('.vsidian-reading-table table')[1]
+      return { bar: bar.scrollLeft, table: table.scrollLeft, direction: getComputedStyle(bar).direction }
+    })
+    check('从右向左的表格能随底栏向左拖动',
+      rtl.direction === 'rtl' && rtl.bar < -50 && rtl.table === rtl.bar, JSON.stringify(rtl))
+    await page.close()
+  }
+
+  // 片段只改表内宽度，不改外框：不点击、不中断纵向阅读也更新底栏。
+  {
+    const page = await browser.newPage({ viewport: { width: 500, height: 520 } })
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: output })
+    await page.evaluate(() => {
+      window.initReadingWidth('| A | B |\n| --- | --- |\n| short | cell |')
+      window.setRwMode('reading')
+      window.setRwSettings({ 'editor.readingTableLayout': 'single-line' })
+    })
+    const state = () => page.evaluate(async () => {
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+      const table = document.querySelector('.vsidian-view-reading table')
+      const bar = document.querySelector('.vsidian-reading-scrollbar')
+      return { outer: [table.clientWidth, table.clientHeight], content: table.scrollWidth,
+        shown: !bar.hidden, barWidth: bar.scrollWidth }
+    })
+    const initial = await state()
+    await page.evaluate(() => {
+      const uri = URL.createObjectURL(new Blob(['#app .vsidian-view-reading th, #app .vsidian-view-reading td { padding-inline: 240px !important; }'], { type: 'text/css' }))
+      window.controller.handleHostMessage({ kind: 'snippets.snapshot', version: 1, snippets: [{ name: 'wide.css', uri }] })
+    })
+    await page.waitForFunction(width => document.querySelector('.vsidian-view-reading table').scrollWidth > width + 50,
+      initial.content, { timeout: 5000 })
+    const loaded = await state()
+    check('CSS 片段仅改变内在宽度时，底栏立即跟随',
+      initial.outer.every((size, index) => size === loaded.outer[index]) && !initial.shown &&
+        loaded.content > initial.content + 50 && loaded.shown && loaded.barWidth === loaded.content, JSON.stringify({ initial, loaded }))
+    await page.evaluate(() => window.controller.handleHostMessage({ kind: 'snippets.snapshot', version: 2, snippets: [] }))
+    const cleared = await state()
+    check('停用片段后，没有横向溢出就隐藏底栏',
+      !cleared.shown && cleared.content === initial.content, JSON.stringify(cleared))
+    await page.close()
+  }
+
+  // 上一个块只改变目标的位置，不会通知该表格或视口的 ResizeObserver。
+  {
+    const page = await browser.newPage({ viewport: { width: 500, height: 430 } })
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: output })
+    const source = [
+      '> [!note]- Details', ...Array.from({ length: 17 }, (_, n) => `>\n> 提示段落 ${n}`), '',
+      '| Key | Value |', '| --- | --- |', `| A | ${'wide_value'.repeat(25)} |`,
+      ...Array.from({ length: 35 }, (_, n) => `\n表后正文 ${n}`),
+    ].join('\n')
+    await page.evaluate(text => {
+      window.initReadingWidth(text)
+      window.setRwMode('reading')
+      window.setRwSettings({ 'editor.readingTableLayout': 'single-line' })
+    }, source)
+    await page.locator('.vsidian-reading-scrollbar').waitFor()
+    const view = page.locator('.vsidian-view-reading').first()
+    const toggle = view.locator('.callout-fold')
+    const state = () => view.evaluate(async (view) => {
+      // 等待折叠重排、相交观察与底栏合帧都落地。
+      for (let frame = 0; frame < 3; frame++) await new Promise(requestAnimationFrame)
+      const table = view.querySelector('table')
+      const bar = document.querySelector('.vsidian-reading-scrollbar')
+      return { top: table.getBoundingClientRect().top, bottom: view.getBoundingClientRect().bottom,
+        scroll: view.scrollTop, outer: [table.clientWidth, table.clientHeight], shown: !bar.hidden }
+    })
+    const before = await state()
+    await toggle.click()
+    const expanded = await state()
+    check('展开表格上方提示框，无滚动也会隐藏离屏目标的底栏',
+      before.shown && !expanded.shown && expanded.top >= expanded.bottom &&
+        before.scroll === expanded.scroll && before.outer.every((size, index) => size === expanded.outer[index]),
+      JSON.stringify({ before, expanded }))
+    await toggle.click()
+    const restored = await state()
+    check('收起上方提示框后，底栏随表格重新入屏出现',
+      restored.shown && restored.top < restored.bottom && restored.scroll === before.scroll, JSON.stringify(restored))
+    await page.close()
+  }
+
+  // 分片长围栏：不必找到代码块尾端；用同一条底栏操作当前可见的代码区。
+  {
+    const page = await browser.newPage({ viewport: { width: 500, height: 520 } })
+    const codeErrors = []
+    page.on('pageerror', error => codeErrors.push(error.message))
+    await page.setContent('<div id="app" style="--vscode-scrollbarSlider-background: rgb(61, 102, 151)"></div>')
+    await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: output })
+    const source = [
+      '| Key | Value |', '| --- | --- |', `| 1 | ${'T'.repeat(90)} |`, '',
+      '```js',
+      ...Array.from({ length: 100 }, (_, n) => `const sample_${n} = "${'abcdefghijklmnopqrstuvwxyz'.repeat(n < 60 ? 4 : 7)}";`),
+      '```',
+      ...Array.from({ length: 20 }, (_, n) => `\n代码后正文 ${n + 1}`),
+    ].join('\n')
+    await page.evaluate(text => {
+      window.initReadingWidth(text)
+      window.setRwMode('reading')
+    }, source)
+    const view = page.locator('.vsidian-view-reading').first()
+    // 首片含起始围栏行；第二片从第 60 个代码行开始，按源码锚区分虚拟挂载的片。
+    const starts = [source.indexOf('```js'), source.indexOf('const sample_59 ')]
+    const [card, nextCard] = starts.map(start => view.locator(`.vsidian-reading-code-card[data-vsidian-src-start="${start}"]`))
+    const firstPre = card.locator('pre')
+    const bar = page.locator('.vsidian-reading-scrollbar')
+    const wrap = card.locator('button.vsidian-code-card-wrap')
+    await firstPre.waitFor()
+    check('代码块默认折行时不显示横向底栏', !(await bar.isVisible()), '默认阅读模式')
+    await card.locator('.vsidian-code-card-header').hover()
+    await wrap.click()
+    await page.evaluate(() => window.setRwSettings({ 'editor.readingTableLayout': 'single-line' }))
+    await firstPre.locator('.vsidian-reading-code-line').first().click()
+    const current = () => page.evaluate(async (starts) => {
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+      const view = document.querySelector('.vsidian-view-reading')
+      const bar = document.querySelector('.vsidian-reading-scrollbar')
+      const [first, next] = starts.map(start => view.querySelector(`.vsidian-reading-code-card[data-vsidian-src-start="${start}"] > pre`))
+      const box = bar.getBoundingClientRect()
+      const viewport = view.getBoundingClientRect()
+      return {
+        top: viewport.top, y: viewport.bottom,
+        barY: box.bottom,
+        tableW: view.querySelector('table')?.scrollWidth ?? 0,
+        barW: bar.scrollWidth,
+        firstW: first?.scrollWidth ?? 0, nextW: next?.scrollWidth ?? 0,
+        firstY: first?.getBoundingClientRect().bottom ?? 0,
+        visible: box.height > 0 && document.elementFromPoint(box.left + 10, box.bottom - 6) === bar,
+        thumb: getComputedStyle(bar, '::-webkit-scrollbar-thumb').backgroundColor,
+        nativeInset: first ? first.offsetHeight - first.clientHeight : null,
+      }
+    }, starts)
+    const clickedCode = await current()
+    check('代码与单行表格同时可见时，点击代码可切换底栏目标',
+      clickedCode.visible && clickedCode.barW === clickedCode.firstW && clickedCode.firstW !== clickedCode.tableW,
+      JSON.stringify(clickedCode))
+    await view.locator('th').first().click()
+    const clickedTable = await current()
+    check('同一底栏可以切回可见的表格',
+      clickedTable.visible && clickedTable.barW === clickedTable.tableW, JSON.stringify(clickedTable))
+
+    await view.evaluate(el => { el.scrollTop = 420 })
+    const middle = await current()
+    check('长代码块中段可见主题滑块，且不再另画块内原生横条',
+      middle.visible && Math.abs(middle.barY - middle.y) < 2 && middle.firstY > middle.y + 100 &&
+        middle.barW === middle.firstW && middle.nativeInset === 0 && middle.thumb === 'rgb(61, 102, 151)',
+      JSON.stringify(middle))
+    if (middle.visible) {
+      const box = await bar.boundingBox()
+      await page.mouse.move(box.x + 20, box.y + box.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(box.x + 130, box.y + box.height / 2, { steps: 6 })
+      await page.mouse.up()
+      const positions = await page.evaluate(() => [
+        document.querySelector('.vsidian-reading-scrollbar').scrollLeft,
+        document.querySelector('.vsidian-reading-code-card > pre').scrollLeft,
+      ])
+      check('拖动视口底栏移动长代码正文', positions[0] > 50 && positions[0] === positions[1], JSON.stringify(positions))
+    }
+    await view.evaluate((el, distance) => { el.scrollTop += distance }, middle.firstY - middle.top + 20)
+    await nextCard.waitFor()
+    const next = await current()
+    check('滚到下一分片时，底栏跟随可见的代码区',
+      next.visible && next.firstY <= next.top && next.barW === next.nextW, JSON.stringify(next))
+    await view.evaluate(el => { el.scrollTop = el.scrollHeight })
+    const passed = await current()
+    check('最后一片离开视口后隐藏底栏', !passed.visible && passed.barW === 0, JSON.stringify(passed))
+    await view.evaluate(el => { el.scrollTop = 0 })
+    await card.locator('.vsidian-code-card-header').hover()
+    await wrap.click()
+    await page.evaluate(() => window.setRwSettings({ 'editor.readingTableLayout': 'wrap' }))
+    const restored = await current()
+    check('恢复代码和表格折行后隐藏底栏', !restored.visible && restored.barW === 0, JSON.stringify(restored))
+    check('代码与表格切换无脚本错误', codeErrors.length === 0, JSON.stringify(codeErrors))
+    await page.close()
+  }
 
   check('页面无脚本错误', errors.length === 0, JSON.stringify(errors))
   if (failures.length > 0) {

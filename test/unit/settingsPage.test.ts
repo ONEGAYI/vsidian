@@ -588,6 +588,7 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
         zhCn['setting.readableLineWidth.title'],
         zhCn['setting.searchRevealHint.title'],
         zhCn['setting.readingBreaks.title'],
+        zhCn['setting.readingTableLayout.title'],
       ])
     // #237 多光标（editor.multicursor 域落编辑组）
     expect(groupItemTitles(parent, zhCn['settings.groupEditing']))

@@ -308,6 +308,7 @@ export type HostToWebview =
   /** 测试钩子（#82）：按序号点击卡片头部折叠 chevron（驱动与用户点击相同
    *  的处理器链路：effect → codeCardFoldField 视图态切换） */
   | { kind: 'codecard.test.fold'; index: number }
+  | { kind: 'codecard.test.wrap'; index: number }
   /** 图片解析结果（#10）：reqId 对应 image.request。ok 时 src 为可直接作
    *  img.src 的地址——工作区文件经 asWebviewUri 的 webview 资源 URI
    *  （本地与远程工作区同通道；#201 起拼 ?v=<代次> 缓存击穿参数）；失败
@@ -404,6 +405,8 @@ export type HostToWebview =
   /** 测试钩子（#42）：在真实 webview 网格单元格派发鼠标点击及当前位置输入。 */
   | { kind: 'table.test.cellClick'; rowIndex: number; columnIndex: number; point?: 'edge' | 'middle' | 'right-edge' }
   | { kind: 'table.test.crossSelect'; anchor: number; head: number }
+  /** 测试钩子：在阅读正文的首张表格拖选左上 2×2 格区。 */
+  | { kind: 'table.test.readingDrag' }
   | { kind: 'table.test.type'; text: string }
   | { kind: 'table.test.domType'; text: string }
   /** 测试钩子（#148）：直调撤销/重做转发入口 requestHistory（keymap 绑定
@@ -3061,6 +3064,8 @@ export interface PaintProbe {
     regionBackgroundColor?: string | null
     regionTopBorderWidth?: string | null
     regionLeftBorderWidth?: string | null
+    readingColumnWidths?: number[]
+    readingScrollbarAtBottom?: boolean
   }
   /** #59 公式绘制：当前激活视图内首个公式的实际可见性与计数。
    *  jsdom 无布局（rect 恒 0），visible 恒 false，只作真宿主集成断言依据；
@@ -3351,6 +3356,8 @@ export interface PaintProbe {
     tokenCount?: number
     /** #389 bounded paint observation on the existing passive view-state snapshot. */
     tokenPaint?: Array<{ text: string; classes: string; color: string; visible: boolean }>
+    /** 阅读视口底栏画在底边且当前操作代码块。 */
+    readingScrollbarAtBottom?: boolean
     /** 全部头部语言标签序列（DOM 顺序；渲染型围栏接入后断言 Mermaid 标签在场） */
     labels?: string[]
   }
@@ -4147,7 +4154,10 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.table.regionCellCount === undefined || isNonNegativeInt(v.table.regionCellCount)) &&
       (v.table.regionBackgroundColor === undefined || isNullOrString(v.table.regionBackgroundColor)) &&
       (v.table.regionTopBorderWidth === undefined || isNullOrString(v.table.regionTopBorderWidth)) &&
-      (v.table.regionLeftBorderWidth === undefined || isNullOrString(v.table.regionLeftBorderWidth))
+      (v.table.regionLeftBorderWidth === undefined || isNullOrString(v.table.regionLeftBorderWidth)) &&
+      (v.table.readingColumnWidths === undefined || (Array.isArray(v.table.readingColumnWidths) &&
+        v.table.readingColumnWidths.every(isNonNegativeNumber))) &&
+      (v.table.readingScrollbarAtBottom === undefined || typeof v.table.readingScrollbarAtBottom === 'boolean')
     )) &&
     (v.math === undefined || (
       isObject(v.math) &&
@@ -4221,6 +4231,7 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.code.copyCount === undefined || isNonNegativeInt(v.code.copyCount)) &&
       (v.code.foldedCount === undefined || isNonNegativeInt(v.code.foldedCount)) &&
       (v.code.tokenCount === undefined || isNonNegativeInt(v.code.tokenCount)) &&
+      (v.code.readingScrollbarAtBottom === undefined || typeof v.code.readingScrollbarAtBottom === 'boolean') &&
       (v.code.tokenPaint === undefined || (
         Array.isArray(v.code.tokenPaint) && v.code.tokenPaint.length <= 64 &&
         v.code.tokenPaint.every((token) => isObject(token) &&
@@ -5723,6 +5734,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.action === undefined || v.action === 'export' || v.action === 'refresh' || v.action === 'close')
       )
     case 'codecard.test.fold':
+    case 'codecard.test.wrap':
       return isNonNegativeInt(v.index)
     case 'image.result':
       if (!isPositiveInt(v.reqId)) {
@@ -5821,6 +5833,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.point === undefined || v.point === 'edge' || v.point === 'middle' || v.point === 'right-edge')
     case 'table.test.crossSelect':
       return isNonNegativeInt(v.anchor) && isNonNegativeInt(v.head)
+    case 'table.test.readingDrag':
+      return true
     case 'table.test.type':
     case 'table.test.domType':
       return isString(v.text)

@@ -10,6 +10,26 @@ export interface TableRegion {
   columnTo: number
 }
 
+export const TABLE_REGION_CLASSES = {
+  tableRegionCell: 'vsidian-table-region-cell',
+  tableRegionTop: 'vsidian-table-region-top',
+  tableRegionBottom: 'vsidian-table-region-bottom',
+  tableRegionLeft: 'vsidian-table-region-left',
+  tableRegionRight: 'vsidian-table-region-right',
+} as const
+
+/** 两种视图共用蒙版与外轮廓的格级标记。 */
+export function tableRegionCellClasses(region: TableRegion, row: number, column: number): string[] {
+  if (row < region.rowFrom || row > region.rowTo ||
+      column < region.columnFrom || column > region.columnTo) return []
+  const cls: string[] = [TABLE_REGION_CLASSES.tableRegionCell]
+  if (row === region.rowFrom) cls.push(TABLE_REGION_CLASSES.tableRegionTop)
+  if (row === region.rowTo) cls.push(TABLE_REGION_CLASSES.tableRegionBottom)
+  if (column === region.columnFrom) cls.push(TABLE_REGION_CLASSES.tableRegionLeft)
+  if (column === region.columnTo) cls.push(TABLE_REGION_CLASSES.tableRegionRight)
+  return cls
+}
+
 function tableParts(doc: string, rows: TableRowInfo[]) {
   if (rows[0]?.kind !== 'header' || rows[1]?.kind !== 'delimiter') return null
   // 行解析：前缀感知切分（#296 审查轮：内建 blank + 首格 clamp——无边界行
@@ -38,7 +58,7 @@ function validRegion(region: TableRegion, rows: TableRowInfo[], columns: number)
     region.rowTo < rows.length - 1 && region.columnFrom >= 0 && region.columnTo < columns
 }
 
-function escapeCopiedPipes(text: string): string {
+function encodeCopiedCell(text: string): string {
   let result = ''
   let slashes = 0
   for (const char of text) {
@@ -51,7 +71,18 @@ function escapeCopiedPipes(text: string): string {
       slashes = char === '\\' ? slashes + 1 : 0
     }
   }
-  return result
+  // 无尾管道行的末格可以以反斜杠结尾；留空格保护新增的结构管道。
+  return slashes === 0 ? result : result + ' '
+}
+
+/** 选区第一行成为表头；格值仍取原始 Markdown，不从渲染文字反推。 */
+export function serializeTableRegionCells(rows: readonly (readonly string[])[]): string {
+  const lines: string[] = []
+  for (const [index, cells] of rows.entries()) {
+    lines.push('|' + cells.map(encodeCopiedCell).join('|') + '|')
+    if (index === 0) lines.push('|' + cells.map(() => ' --- ').join('|') + '|')
+  }
+  return lines.join('\n')
 }
 
 /** 直接使用格内源文；已合法转义的管道和内联语法不再做二次转义。 */
@@ -59,13 +90,9 @@ export function serializeTableRegion(doc: string, rows: TableRowInfo[], selected
   const parts = tableParts(doc, rows)
   const region = normalizeTableRegion(selected)
   if (!parts || !validRegion(region, rows, parts.columns)) return null
-  const lines: string[] = []
-  for (let r = region.rowFrom; r <= region.rowTo; r++) {
-    const cells = parts.cells[r]!.slice(region.columnFrom, region.columnTo + 1)
-    lines.push('|' + cells.map((cell) => escapeCopiedPipes(doc.slice(cell.from, cell.to))).join('|') + '|')
-    if (r === region.rowFrom) lines.push('|' + cells.map(() => ' --- ').join('|') + '|')
-  }
-  return lines.join('\n')
+  const cells = parts.cells.slice(region.rowFrom, region.rowTo + 1).map(row =>
+    row.slice(region.columnFrom, region.columnTo + 1).map(cell => doc.slice(cell.from, cell.to)))
+  return serializeTableRegionCells(cells)
 }
 
 /** 区域删除：整表 > 完整行 > 完整列 > 局部清格。所有改动作为一次事务派发。 */

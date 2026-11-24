@@ -53,6 +53,161 @@ const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 let passed = 0
 const failures = []
+// 阅读态跨格拖选与 Live 同为矩形，引用内列表也按真实格坐标与原文复制。
+for (const quoted of [false, true]) {
+  const page = await browser.newPage()
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addStyleTag({ content: '#app { --vscode-focusBorder: rgb(40, 98, 181); }' })
+    await page.addScriptTag({ path: bundle })
+    const rows = [
+      '| 第一列文字 | **第二列文字** | 表头未选 |', '| --- | --- | --- |',
+      '| `x|y` |  | 行尾未选 |', '| 下方未选 | 下方未选 | 下方未选 |',
+    ]
+    const source = ['前文', '', ...rows.map((row, index) => !quoted ? row : index === 0 ? `> - ${row}` : `>   ${row}`),
+      '', '后文', ...(quoted ? [] : Array.from({ length: 200 }, (_, index) => `\n滚动占位 ${index}`))].join('\n')
+    const setMode = mode => page.evaluate(mode =>
+      window.controller.handleHostMessage({ kind: 'view.mode.set', mode }), mode)
+    await page.evaluate(source => window.initTable(source), source)
+    await setMode('reading')
+    const reading = page.locator('.vsidian-view-reading').first()
+    const table = reading.locator('table').first()
+    await table.waitFor()
+    const cells = table.locator('th, td')
+    const colors = () => cells.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor))
+    const base = await colors()
+    const center = async index => {
+      const { x, y, width, height } = await cells.nth(index).boundingBox()
+      return [x + width / 2, y + height / 2]
+    }
+    const dragRegion = async () => {
+      const from = await center(4)
+      const to = await center(0)
+      await page.mouse.move(...from)
+      await page.mouse.down()
+      await page.mouse.move(...to, { steps: 8 })
+    }
+    await dragRegion()
+    const during = await colors()
+    assert.deepEqual(during.flatMap((color, index) => color === base[index] ? [] : [index]),
+      [0, 1, 3, 4], '逆向跨格拖动时，应且只应绘出 2×2 单元格背景')
+    const edge = await cells.first().evaluate(cell => {
+      const border = getComputedStyle(cell, '::after')
+      return [border.borderTopWidth, border.borderLeftColor, border.borderRightWidth, border.borderTopLeftRadius,
+        getComputedStyle(cell, '::selection').backgroundColor]
+    })
+    assert.deepEqual(edge, ['2px', 'rgb(40, 98, 181)', '0px', '6px', 'rgba(0, 0, 0, 0)'],
+      '绘制主题色圆角外框，内侧不加粗，拖动中不叠加原生选字高亮')
+    const glyph = await cells.nth(1).locator('strong').boundingBox()
+    const clip = { x: Math.floor(glyph.x + 2), y: Math.floor(glyph.y + 1), width: 1, height: 1 }
+    const draggingPixel = await page.screenshot({ clip })
+    await page.mouse.up()
+    assert.deepEqual(await colors(), during, '松手后保留矩形选区')
+    assert.ok(draggingPixel.equals(await page.screenshot({ clip })), '拖动和松手后的文字区实绘一致')
+    if (!quoted) await table.screenshot({ path: artifactPath(root, 'reading-table-region.png') })
+    await page.evaluate(() => {
+      document.addEventListener('copy', event => {
+        window.readingTableCopy = event.clipboardData.getData('text/plain')
+      }, { once: true })
+    })
+    await page.keyboard.press('ControlOrMeta+c')
+    assert.equal(await page.evaluate(() => window.readingTableCopy),
+      '| 第一列文字 | **第二列文字** |\n| --- | --- |\n| `x\\|y` |  |',
+      '复制只取矩形格区，保留空格、内联 Markdown 和管道转义')
+
+    await setMode('live')
+    await setMode('reading')
+    await reading.evaluate(el => { el.scrollTop = 0 })
+    await table.waitFor()
+    assert.deepEqual(await colors(), base, '选区不跨模式保留')
+
+    if (!quoted) {
+      // 先跨格，再拖回起点格；原生选字应接着同一次按下的位置。
+      const [start, end] = await cells.first().evaluate(cell => [1, 4].map(offset => {
+        const range = document.createRange()
+        range.setStart(cell.firstChild, offset)
+        range.collapse(true)
+        const rect = range.getBoundingClientRect()
+        return [rect.left, rect.top + rect.height / 2]
+      }))
+      const otherCell = await center(4)
+      await page.mouse.move(...start)
+      await page.mouse.down()
+      await page.mouse.move(...otherCell, { steps: 4 })
+      await page.mouse.move(...end, { steps: 4 })
+      assert.deepEqual(await colors(), base, '拖回起点格撤去矩形')
+      assert.equal(await page.evaluate(() => getSelection().toString()), '一列文', '格内仍保留原生选字')
+      await page.mouse.move(...otherCell, { steps: 4 })
+      const paragraph = reading.getByText('后文', { exact: true })
+      const after = await paragraph.boundingBox()
+      await page.mouse.move(after.x + 10, after.y + after.height / 2, { steps: 4 })
+      await page.mouse.up()
+      assert.deepEqual(await colors(), base, '拖出表格时交回普通文本选择')
+      assert.match(await page.evaluate(() => getSelection().toString()), /下方未选/)
+
+      await paragraph.click()
+      await dragRegion()
+      await page.mouse.up()
+      assert.deepEqual(await colors(), during, '滚动前存在矩形选区')
+      await reading.evaluate(el => { el.scrollTop = el.scrollHeight })
+      await table.waitFor({ state: 'detached' })
+      await reading.evaluate(el => { el.scrollTop = 0 })
+      await table.waitFor()
+      assert.deepEqual(await colors(), base, '离屏回收再挂载时不复活旧选区')
+    }
+
+    assert.equal(await page.evaluate(() => window.readEditor().text), source, '选取与复制均不改写源文')
+    passed++
+    console.log(`[引用表格绘制][PASS] 阅读态矩形选区（${quoted ? '引用内列表' : '顶层'}）`)
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] 阅读态矩形选区: ${error.message}`)
+  } finally { await page.close() }
+}
+// 阅读态复制必须取浏览器里实际选中的格，不能用另一套表格语法反推列号。
+for (const [name, source, row, from, to, expected, link] of [
+  ['含竖线注释', '前<!-- 多行\n注释 -->文\n\n| A | B | C |\n| --- | :---: | --- |\n| x | <!-- note | hidden --> **shown** | end |',
+    1, 1, 2, '| <!-- note \\| hidden --> **shown** | end |\n| --- | --- |'],
+  ['列表中的引用表头', '- > | a | b | c |\n  > | --- | --- | --- |\n  > | data | k | tail |',
+    0, 1, 2, '| b | c |\n| --- | --- |'],
+  ['紧贴管道的两个反斜杠', '| A | B | C |\n| --- | --- | --- |\n| first \\\\| pipe | shown | end |',
+    1, 0, 2, '| first \\| pipe | shown | end |\n| --- | --- | --- |'],
+  ['从链接文字起拖', '| A | B | C |\n| --- | --- | --- |\n| [clickable link](https://example.com/foo) | shown | end |',
+    1, 0, 1, '| [clickable link](https://example.com/foo) | shown |\n| --- | --- |', true],
+]) {
+  const page = await browser.newPage(link ? { viewport: { width: 700, height: 520 } } : {})
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: bundle })
+    await page.evaluate(text => {
+      window.initTable(text)
+      window.controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+      document.addEventListener('copy', event => {
+        window.readingTableCopy = event.clipboardData.getData('text/plain')
+      })
+    }, source)
+    const rowEl = page.locator('.vsidian-view-reading table tr').nth(row)
+    const cells = rowEl.locator('th, td')
+    const start = await (link ? cells.nth(from).locator('a') : cells.nth(from)).boundingBox()
+    const end = await cells.nth(to).boundingBox()
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 10 })
+    await page.mouse.up()
+    const tinted = await cells.evaluateAll(nodes => nodes.filter(cell =>
+      cell.classList.contains('vsidian-table-region-cell') && getComputedStyle(cell).backgroundColor !== 'rgba(0, 0, 0, 0)').length)
+    assert.equal(tinted, to - from + 1, `${name}：拖选的格应实际绘制背景`)
+    await page.keyboard.press('ControlOrMeta+c')
+    assert.equal(await page.evaluate(() => window.readingTableCopy), expected, `${name}：复制应只包含所选格原文`)
+    passed++
+    console.log(`[引用表格绘制][PASS] 阅读选区：${name}`)
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] 阅读选区 ${name}：${error.message}`)
+  } finally { await page.close() }
+}
 // ---- #296 二轮真机反馈：拖选蒙版与边界导航（真实键盘/鼠标） ----
 {
   const page = await browser.newPage()

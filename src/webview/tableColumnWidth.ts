@@ -197,7 +197,7 @@ export function collectColumnSamples(
 }
 
 /** 单格最宽视觉段：裸 <br> 分段（tableCellBreaks 判定），段按可见文字口径计宽 */
-function measureWidestSegment(content: string, measure: CellWidthMeasurer): number {
+export function measureWidestSegment(content: string, measure = defaultCellWidthMeasurer): number {
   if (!content) {
     return 0
   }

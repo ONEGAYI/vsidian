@@ -63,7 +63,7 @@ import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { hitRevealContextOf, hitRevealField, hitRevealTouchesLine, type HitRevealContext } from './hitReveal'
 import { collectColumnSamples, tableGridTemplate, type TableReadabilityInput } from './tableColumnWidth'
 import { sameTableRegion, tableRegionField } from './tableRegionField'
-import type { TableRegion } from './tableRegion'
+import { TABLE_REGION_CLASSES, tableRegionCellClasses, type TableRegion } from './tableRegion'
 import { tableMetricsExtension, tableMetricsFacet } from './tableMetrics'
 import { tableHeightScheduler } from './tableHeightScheduler'
 import {
@@ -210,11 +210,7 @@ export const LIVE_CLASS_NAMES = {
   escapeReveal: 'vsidian-escape-reveal',
   /** 矩形格区蒙版（#73）：并入网格格装饰的 class 托管——外部贴类会与
    *  列把手高亮、CM6 mark 重写互抹（2026-09-28 拖选断裂实测） */
-  tableRegionCell: 'vsidian-table-region-cell',
-  tableRegionTop: 'vsidian-table-region-top',
-  tableRegionBottom: 'vsidian-table-region-bottom',
-  tableRegionLeft: 'vsidian-table-region-left',
-  tableRegionRight: 'vsidian-table-region-right',
+  ...TABLE_REGION_CLASSES,
   tableRowSelected: 'vsidian-table-row-selected',
   tableColumnSelected: 'vsidian-table-column-selected',
   tableColumnFirst: 'vsidian-table-column-first',
@@ -575,12 +571,8 @@ function tableGridCellDeco(align: TableAlign | null, regionCls = ''): ReturnType
 /** 矩形格区在该格上的蒙版类（#73）：区域端点行/列另加边框类（与既有
  *  CSS 联合类选择器同名，仅施加者由外部贴类改为装饰托管）。 */
 function tableRegionClassesFor(region: TableRegion, index: number, col: number, rowCount: number): string {
-  if (index < region.rowFrom || index > region.rowTo || col < region.columnFrom || col > region.columnTo) return ''
-  const cls: string[] = [LIVE_CLASS_NAMES.tableRegionCell]
-  if (index === region.rowFrom) cls.push(LIVE_CLASS_NAMES.tableRegionTop)
-  if (index === region.rowTo) cls.push(LIVE_CLASS_NAMES.tableRegionBottom)
-  if (col === region.columnFrom) cls.push(LIVE_CLASS_NAMES.tableRegionLeft)
-  if (col === region.columnTo) cls.push(LIVE_CLASS_NAMES.tableRegionRight)
+  const cls = tableRegionCellClasses(region, index, col)
+  if (cls.length === 0) return ''
   if (region.rowFrom === 0 && region.rowTo === rowCount - 1 && region.columnFrom === region.columnTo) {
     cls.push(LIVE_CLASS_NAMES.tableColumnSelected)
     if (index === 0) cls.push(LIVE_CLASS_NAMES.tableColumnFirst)

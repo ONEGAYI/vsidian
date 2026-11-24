@@ -80,7 +80,7 @@ export interface VirtualReadingViewOptions {
   bufferPx?: number
   /** #10 图片生命周期钩子：块挂载后预备其内图片（发起装载）；块卸载/容器
    *  重建前释放其内图片槽位（src 清空、条目回收） */
-  onBlockMounted?: (el: HTMLElement) => void
+  onBlockMounted?: (el: HTMLElement, text: string) => void
   onBlockUnmounted?: (el: HTMLElement) => void
   /** #419 阅读态折叠交互回调：翻转 Live 折叠键（toggleHeadingFoldAt 同
    *  链路——阅读与 Live 共享同一折叠状态集）；缺省无折叠交互（引用
@@ -437,7 +437,7 @@ export class VirtualReadingView {
         // P2 补齐——此前仅虚拟化路径 mountBlock 消费，无布局回退漏挂）
         this.decorateCalloutFoldControls(el, block)
         this.container.appendChild(el)
-        this.hooks.onBlockMounted?.(el)
+        this.hooks.onBlockMounted?.(el, this.text)
       }
       this.applyHighlightToDom()
       this.highlightMatches(this.findMatches, this.findIndex)
@@ -1069,7 +1069,7 @@ export class VirtualReadingView {
     this.maxMountedBlocks = Math.max(this.maxMountedBlocks, this.elements.size)
     this.observer?.observe(el)
     // #10：挂载即预备图片（进入挂载窗口 = 进入装载时机）
-    this.hooks.onBlockMounted?.(el)
+    this.hooks.onBlockMounted?.(el, this.text)
     this.paintFindBlock(el)
   }
 

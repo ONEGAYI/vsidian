@@ -16,6 +16,26 @@ function rule(selector: string, declaration?: RegExp): string {
 }
 
 describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
+  it('阅读表格按 colgroup 布局，长内容在格内折行', () => {
+    const table = '#app .vsidian-view-reading table.vsidian-reading-table-planned'
+    expect(rule(table)).toMatch(/table-layout:\s*fixed/)
+    expect(cssRuleExact(css, `:where(${table})`)).toMatch(/width:\s*min\(100%,\s*880px\)/)
+    expect(cssRuleExact(css, '#app .vsidian-view-reading .vsidian-reading-table-planned > :is(thead, tbody) > tr > :is(th, td)'))
+      .toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('阅读单行表格与不折行代码卡隐藏自身滚动条，共用不占正文高度的底栏', () => {
+    expect(rule('table.vsidian-reading-table-single-line')).toMatch(/scrollbar-width:\s*none/)
+    expect(rule('table.vsidian-reading-table-single-line::-webkit-scrollbar')).toMatch(/display:\s*none/)
+    const code = '.vsidian-view-reading.vsidian-reading-nowrap > .vsidian-reading-block.vsidian-reading-code-card > pre'
+    expect(rule(code)).toMatch(/scrollbar-width:\s*none/)
+    expect(rule(`${code}::-webkit-scrollbar`)).toMatch(/display:\s*none/)
+    const bar = rule('.vsidian-main > .vsidian-reading-scrollbar')
+    expect(bar).toMatch(/overflow-x:\s*scroll/)
+    expect(bar).toMatch(/margin-top:\s*-12px/)
+    expect(rule('.vsidian-reading-scrollbar::-webkit-scrollbar-thumb')).toMatch(/var\(--vscode-scrollbarSlider-background/)
+  })
+
   it('网格行按列宽计划绘制（内容比例分配），等分仅为缺省回退', () => {
     const row = rule('.vsidian-table-grid-row')
     expect(row).toMatch(/display:\s*grid/)

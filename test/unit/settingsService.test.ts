@@ -117,6 +117,7 @@ describe('快照读取', () => {
       // #423 阅读宽松换行（默认关 = CommonMark 严格软换行维持现状，对齐
       // VSCode markdown.preview.breaks 默认）
       'editor.readingBreaks': false,
+      'editor.readingTableLayout': 'wrap',
     })
   })
 

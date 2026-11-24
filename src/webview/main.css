@@ -3835,25 +3835,50 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 /* 矩形格区：只强调外轮廓，内部沿用表格网格线。 */
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-cell {
+/* 阅读表格保留折叠边框；相邻格的伪元素跨过半条格线，连接外框而不改布局。 */
+#app .vsidian-view-reading :is(th, td).vsidian-table-region-cell {
+  position: relative;
+}
+#app .vsidian-view-reading :is(th, td).vsidian-table-region-cell::after {
+  content: '';
+  position: absolute;
+  inset: -0.5px;
+  pointer-events: none;
+}
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-cell,
+#app .vsidian-view-reading table[data-vsidian-table-from] :is(th, td).vsidian-table-region-cell {
   background: color-mix(in srgb, var(--vscode-focusBorder, #7ab0d0) 14%, transparent);
 }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-top {
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-top,
+#app .vsidian-view-reading .vsidian-table-region-top::after {
   border-top: 2px solid var(--vscode-focusBorder, #7ab0d0);
 }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom {
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom,
+#app .vsidian-view-reading .vsidian-table-region-bottom::after {
   border-bottom: 2px solid var(--vscode-focusBorder, #7ab0d0);
 }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-left {
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-left,
+#app .vsidian-view-reading .vsidian-table-region-left::after {
   border-left: 2px solid var(--vscode-focusBorder, #7ab0d0);
 }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-right {
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-right,
+#app .vsidian-view-reading .vsidian-table-region-right::after {
   border-right: 2px solid var(--vscode-focusBorder, #7ab0d0);
 }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-top.vsidian-table-region-left { border-top-left-radius: 6px; }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-top.vsidian-table-region-right { border-top-right-radius: 6px; }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom.vsidian-table-region-left { border-bottom-left-radius: 6px; }
-#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom.vsidian-table-region-right { border-bottom-right-radius: 6px; }
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-top.vsidian-table-region-left,
+#app .vsidian-view-reading .vsidian-table-region-top.vsidian-table-region-left::after { border-top-left-radius: 6px; }
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-top.vsidian-table-region-right,
+#app .vsidian-view-reading .vsidian-table-region-top.vsidian-table-region-right::after { border-top-right-radius: 6px; }
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom.vsidian-table-region-left,
+#app .vsidian-view-reading .vsidian-table-region-bottom.vsidian-table-region-left::after { border-bottom-left-radius: 6px; }
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom.vsidian-table-region-right,
+#app .vsidian-view-reading .vsidian-table-region-bottom.vsidian-table-region-right::after { border-bottom-right-radius: 6px; }
+
+/* 拖选中保留浏览器的选字锚，隐藏原生高亮；回到首格或表外即可续选文字。 */
+#app .vsidian-view-reading table:has(> :is(thead, tbody) > tr > .vsidian-table-region-cell) ::selection {
+  background-color: transparent;
+  color: currentColor;
+}
 
 /* #252 格区在场时锚点格的光标让位：跨格接管的折叠单光标（防 pointerup
    原生线性选区结算的既定形态）与零宽锚点格的 ::after 假光标会和格区蒙版
@@ -4375,6 +4400,80 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   display: block;
   overflow-x: auto;
   margin: 0.4em 0;
+}
+
+/* 规划后的 Markdown 表格仍使用原生 table 布局；列宽由 colgroup 分配，
+   长文本在格内折行。旧表格块承担确实不可折行的内容的横向滚动。 */
+#app .vsidian-view-reading table.vsidian-reading-table-planned {
+  display: table;
+  table-layout: fixed;
+}
+
+:where(#app .vsidian-view-reading table.vsidian-reading-table-planned) {
+  width: min(100%, 880px);
+}
+
+#app .vsidian-view-reading .vsidian-reading-table:has(> table.vsidian-reading-table-planned) {
+  overflow-x: auto;
+}
+
+#app .vsidian-view-reading .vsidian-reading-table-planned > :is(thead, tbody) > tr > :is(th, td) {
+  overflow-wrap: anywhere;
+}
+
+/* 单行仍由表格横滚；原滚动条交给视口底部的同步滚动条，避免重复绘制。 */
+#app .vsidian-view-reading table.vsidian-reading-table-single-line {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#app .vsidian-view-reading table.vsidian-reading-table-single-line::-webkit-scrollbar {
+  display: none;
+}
+
+#app .vsidian-view-reading .vsidian-reading-table-single-line > :is(thead, tbody) > tr > :is(th, td) {
+  white-space: nowrap;
+}
+
+#app .vsidian-view-reading .vsidian-reading-table-single-line .vsidian-embed-card {
+  white-space: normal;
+}
+
+/* 与阅读滚动容器并列，负上边距抵消本身高度：固定在视口底部，不改变纵向滚动范围。 */
+#app .vsidian-main > .vsidian-reading-scrollbar {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 12px;
+  align-self: flex-start;
+  margin-top: -12px;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  background-color: var(--vscode-editor-background, Canvas);
+}
+
+#app .vsidian-body:not(.vsidian-mode-reading) .vsidian-reading-scrollbar {
+  display: none;
+}
+
+#app .vsidian-reading-scrollbar > div { height: 1px; }
+#app .vsidian-reading-scrollbar::-webkit-scrollbar { height: 12px; }
+#app .vsidian-reading-scrollbar::-webkit-scrollbar-track {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+#app .vsidian-reading-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background, color-mix(in srgb, currentColor 35%, transparent));
+}
+#app .vsidian-reading-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, color-mix(in srgb, currentColor 48%, transparent));
+}
+#app .vsidian-reading-scrollbar::-webkit-scrollbar-thumb:active {
+  background: var(--vscode-scrollbarSlider-activeBackground, color-mix(in srgb, currentColor 58%, transparent));
+}
+#app .vsidian-reading-scrollbar:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
 }
 
 #app .vsidian-view-reading .vsidian-reading-table th,
@@ -5459,11 +5558,19 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 
 /* ---- #191 阅读关闭折行：容器级状态类（挂在阅读容器上，仅关闭时添加；
    内部交互态类，不入公开样式契约）——pre 横向滚动、头部横带不受滚动影响
-   （在 pre 外）。大围栏 60 行分片各有独立 pre，滚动条按片出现（不做跨片
-   聚合）。卡内行号 2026-10 起阅读侧不再发射，无 sticky 行号列与悬挂缩进。---- */
+   （在 pre 外）。大围栏 60 行分片各有独立 pre；主文档用同一条视口底栏
+   操作当前分片。卡内行号 2026-10 起阅读侧不再发射。---- */
 #app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card > pre {
   white-space: pre;
   overflow-x: auto;
+}
+
+#app .vsidian-view-reading.vsidian-reading-nowrap > .vsidian-reading-block.vsidian-reading-code-card > pre {
+  scrollbar-width: none;
+}
+
+#app .vsidian-view-reading.vsidian-reading-nowrap > .vsidian-reading-block.vsidian-reading-code-card > pre::-webkit-scrollbar {
+  display: none;
 }
 
 /* 收起态：代码体隐藏，仅留头部横带（视图态，不持久化） */

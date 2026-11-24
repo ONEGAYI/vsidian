@@ -215,6 +215,7 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 
 ### 已知边界
 
-- 溢出裁切防护靠 `safe center`；超宽不可断内容（超宽表格单元格）在限宽档由各行内滚动（表格 `overflow-x: auto`）承接。
+- Live 居中用 `safe center` 防止溢出裁左。主文档阅读侧 Markdown 表格默认[按可用宽度重新分列](live-table-column-width.md#阅读模式接入)并折行；选择保持单行时，超宽表格用阅读视口底部的横向滚动条查看。
+- 主文档阅读侧的[代码块卡片](code-block-card.md#折行与续行对齐191)关闭折行后，超宽代码区与单行表格共用同一条底栏；仍按正文列宽裁切。
 - frontmatter 卡片行级 grid 不限宽硬约束（AGENTS.md 落档）与列限宽正交：整列一起钳制，卡片与行同列，无错位。
 - 浮层锚点跟随：RO 只感知尺寸变化，纯位置移动（打字改行号位数、横向滚动移动列右缘）不触发——前者由 live 编辑事务的锚点补同步兜底，后者浮层保持文档位不随横滚移动（面板 absolute 于 #app，行为与 Obsidian 一致），下一次尺寸事件/编辑刷新。

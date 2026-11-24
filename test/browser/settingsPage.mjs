@@ -106,6 +106,15 @@ try {
     // #163 二轮还原：分类收敛为编辑器页内小节——codeblock.* 控件在
     // 「编辑器」分组页的「代码块」小节内，先进组再取控件
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
+    const tableLayout = page.getByRole('combobox', { name: zhCn['setting.readingTableLayout.title'], exact: true })
+    assert.equal(await tableLayout.inputValue(), 'wrap', '新安装默认折行')
+    assert.deepEqual(await tableLayout.locator('option').allInnerTexts(),
+      [zhCn['setting.readingTableLayout.wrap'], zhCn['setting.readingTableLayout.singleLine']])
+    await tableLayout.selectOption('single-line')
+    await page.waitForFunction(() => window.savedSettings['editor.readingTableLayout'] === 'single-line')
+    await page.getByRole('button', { name: zhCn['settings.generalSection'], exact: true }).click()
+    await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
+    assert.equal(await tableLayout.inputValue(), 'single-line', '重新进入设置页分组时回显保存档位')
     // #263/#265/#264/#332 组标题图标：三枚内联字形（显示/编辑/代码块；#332
     // 图片与引用视图两小节迁出编辑器页）+ 打字机/分词两枚生图资产，五组均
     // 占 16px（委托组经组对象 icon 槽走同一 h3 路径）。

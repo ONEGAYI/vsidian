@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import MarkdownIt from 'markdown-it'
-import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion, type TableRegion } from '../../src/webview/tableRegion'
+import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion, serializeTableRegionCells, type TableRegion } from '../../src/webview/tableRegion'
 import { parseTableDelimiter as parseTableDelimiterForTest } from '../../src/shared/tableCells'
 import type { TableRowInfo } from '../../src/webview/tableStructure'
 
@@ -32,6 +32,15 @@ describe('矩形单元格区域', () => {
     expect(html).toContain('<table>')
     expect(html).toContain('a|b')
     expect(html).toContain('乙|丙')
+  })
+
+  it('复制无尾管道格值时，末尾反斜杠不吞掉新加的表格边界', () => {
+    const html = new MarkdownIt().render(serializeTableRegionCells([
+      ['left', 'ending\\'], ['right', 'ending\\\\'],
+    ]))
+    expect(html).toContain('<th>ending\\</th>')
+    expect(html).toContain('<td>ending\\</td>')
+    expect(html).not.toContain('ending|')
   })
 
   it('局部矩形只清被选格，保留其余格和表格结构', () => {

@@ -96,7 +96,7 @@ import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
 import { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch, LiveEditorInstance, type LiveEditorInstanceDeps } from './liveInstance'
 
 export { externalSync, builtinEditOrigin, symbolRawInput, addonEditEpoch }
-import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
+import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_CARD_CLASS, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,
   type BacklinkItemPayload,
@@ -139,6 +139,8 @@ import {
   HOVER_EXTERNAL_ENABLED_KEY,
   READING_BREAKS_DEFAULT,
   READING_BREAKS_KEY,
+  READING_TABLE_LAYOUT_DEFAULT,
+  READING_TABLE_LAYOUT_KEY,
   WORD_SEGMENT_ENGINE_DEFAULT,
   WORD_SEGMENT_ENGINE_KEY,
   type SettingsPayload,
@@ -282,6 +284,9 @@ import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
+import { ReadingTableLayout, READING_TABLE_SELECTOR } from './readingTable'
+import { ReadingHorizontalScroll } from './readingHorizontalScroll'
+import { ReadingTableSelection } from './readingTableSelection'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
 import {
   BACKLINK_CLASS_NAMES,
@@ -778,6 +783,9 @@ export class WebviewSyncController {
   private anchorFlashSince = 0
   /** 阅读视图虚拟化控制器（#7：接管阅读容器的按需挂载/回收/锚点定位） */
   private readingView: VirtualReadingView | undefined
+  private readingTableSelection: ReadingTableSelection | undefined
+  private readingTableLayout: ReadingTableLayout | undefined
+  private readingHorizontalScroll: ReadingHorizontalScroll | undefined
   /** #222 嵌入卡片管理器（Reading 正文嵌入：块挂载升级/回收，与 readingView
    *  同生命周期；live 侧嵌入属 #223，不在此装配） */
   private embedCards: EmbedCardManager | undefined
@@ -1467,6 +1475,12 @@ export class WebviewSyncController {
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
+    const tableSelection = new ReadingTableSelection(this.readingContainer, () => this.view!.state.doc.toString())
+    this.readingTableSelection = tableSelection
+    const horizontalScroll = new ReadingHorizontalScroll(this.readingContainer)
+    this.readingHorizontalScroll = horizontalScroll
+    const tableLayout = new ReadingTableLayout(horizontalScroll)
+    this.readingTableLayout = tableLayout
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #567（T02）主文档身份标记（T01 探针 b2 隔离基座）：html 块渲染根
       // 挂 data-vsidian-doc-scope="doc"（嵌入实例的目标身份键随 T04 装载
@@ -1489,7 +1503,8 @@ export class WebviewSyncController {
       },
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
-      onBlockMounted: (el) => {
+      onBlockMounted: (el, text) => {
+        tableLayout.mountWithin(el, text)
         // #657/T06：callout 图标解析（块挂载时机——阅读容器计算值已就绪；
         // 视口回收重挂天然重解析）
         mountCalloutIcons(el)
@@ -1514,6 +1529,9 @@ export class WebviewSyncController {
         this.embedCards?.mountBlock(el)
       },
       onBlockUnmounted: (el) => {
+        tableSelection.releaseWithin(el)
+        tableLayout.releaseWithin(el)
+        horizontalScroll.untrack(el)
         this.images?.detachWithin(el)
         disposeHtmlResourcesOf(el) // #570：块级资源订阅退订（迟到结果不回写）
         this.embedCards?.unmountBlock(el)
@@ -1644,6 +1662,7 @@ export class WebviewSyncController {
     this.mainEl.appendChild(this.banner)
     this.mainEl.appendChild(this.liveWrapper)
     this.mainEl.appendChild(this.readingContainer)
+    this.mainEl.appendChild(horizontalScroll.scrollbar)
     // #360 T11 附加组件面板 dock（平台容器，常驻 DOM 供探针命中；空态
     // CSS 零占位）：主编辑区尾部（正文之下）——组件面板只进这个 dock，
     // 面板 chrome（标题栏/关闭按钮）与 dock 样式归平台，面板内容根内部
@@ -2318,6 +2337,12 @@ export class WebviewSyncController {
     this.liveWrapper = undefined
     this.readingView?.dispose()
     this.readingView = undefined
+    this.readingTableSelection?.dispose()
+    this.readingTableSelection = undefined
+    this.readingTableLayout?.dispose()
+    this.readingTableLayout = undefined
+    this.readingHorizontalScroll?.dispose()
+    this.readingHorizontalScroll = undefined
     this.readingContainer?.remove()
     this.readingContainer = undefined
     this.sidebarToggleBtn = undefined
@@ -2733,6 +2758,8 @@ export class WebviewSyncController {
         // P2-04：嵌入内部 Live 实例的设置热重配（Live 扩展组随实例）
         this.embedCards?.applySettings(message.values)
         this.applyReadableLineWidthSetting()
+        this.readingTableLayout?.setMode(message.values[READING_TABLE_LAYOUT_KEY] === 'single-line'
+          ? 'single-line' : READING_TABLE_LAYOUT_DEFAULT)
         this.applyEmbedMaxHeightSetting()
         this.embedCards?.setMaxDepth(this.embedMaxDepth())
         this.applyWordSegmentEngineSetting()
@@ -2799,6 +2826,7 @@ export class WebviewSyncController {
           }
         })
         // 摘链（停用/删除）无装载回报——apply 返回后统一调度一轮
+        this.readingHorizontalScroll?.refresh()
         scheduleCalloutIconRefresh()
         this.calloutMenuPreview?.refresh()
         break
@@ -3812,6 +3840,19 @@ export class WebviewSyncController {
         }
         break
       }
+      case 'table.test.readingDrag': {
+        if (this.viewMode !== 'reading') break
+        const table = this.readingContainer?.querySelector<HTMLTableElement>(READING_TABLE_SELECTOR)
+        const from = table?.rows[0]?.cells[0]
+        const to = table?.rows[1]?.cells[1]
+        if (from && to) {
+          const pointer = { bubbles: true, pointerType: 'mouse' }
+          from.dispatchEvent(new PointerEvent('pointerdown', { ...pointer, buttons: 1 }))
+          to.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, buttons: 1 }))
+          to.dispatchEvent(new PointerEvent('pointerup', pointer))
+        }
+        break
+      }
       case 'table.test.type': {
         if (this.view && this.viewMode === 'live') {
           const range = this.view.state.selection.main
@@ -4017,12 +4058,13 @@ export class WebviewSyncController {
         buttons?.[message.index]?.click()
         break
       }
-      case 'codecard.test.fold': {
-        // 测试钩子（#82）：按序号点击卡片头部折叠 chevron（驱动与用户点击
-        // 相同的处理器链路：effect → codeCardFoldField 视图态切换）
+      case 'codecard.test.fold':
+      case 'codecard.test.wrap': {
+        // 测试钩子：驱动同一个卡片按钮，观察折叠/折行后的绘制。
         const scope = this.viewMode === 'reading' ? this.readingContainer : this.view?.contentDOM
+        const cls = message.kind === 'codecard.test.fold' ? CODE_CARD_CLASS_NAMES.fold : CODE_CARD_CLASS_NAMES.wrap
         const buttons = scope?.querySelectorAll<HTMLButtonElement>(
-          `.${CODE_CARD_CLASS_NAMES.fold}`,
+          `.${cls}`,
         )
         buttons?.[message.index]?.click()
         break
@@ -4591,6 +4633,7 @@ export class WebviewSyncController {
       }
     }
     const readingHadFocus = document.activeElement === this.readingContainer
+    this.readingTableSelection?.clear()
     // #571（T06）切离 Reading：隐藏阅读容器内的媒体暂停（块 DOM 常驻
     // display:none 不自动停——与切离 Live 对称；只停不释放，切回不重置）
     if (this.readingContainer) {
@@ -10584,12 +10627,13 @@ export class WebviewSyncController {
    * CSS 片段装载成功后的测量唤醒（#128）：外部样式表落地可能改变行高/
    * 字号，live 侧 CM6 视口需要被重新测量（样式变化不产生 CM6 事务，视口
    * 不会自行重排）。立即一次 + 下一帧一次（字体类变更的排版常在帧间才
-   * 稳定）。阅读侧无需在此处理：ResizeObserver → measureAndStabilize
-   * 管线按块实测回填并做滚动锚定（#7/#59/#60 反复验证的机制）。
+   * 稳定）。阅读块高度由既有 ResizeObserver 实测；内容的 scrollWidth
+   * 可能独立于块盒变化，需另唤醒横向底栏。
    */
   private scheduleSnippetMeasure(): void {
     this.view?.requestMeasure()
     requestAnimationFrame(() => this.view?.requestMeasure())
+    this.readingHorizontalScroll?.refresh()
   }
 
   /**
@@ -10982,6 +11026,11 @@ export class WebviewSyncController {
         this.decorateMountedReadingCodeCards()
       },
     })
+    if (!this.readingCodeWrapOn && block.classList.contains(READING_CODE_CARD_CLASS)) {
+      this.readingHorizontalScroll?.track(block, block.querySelector<HTMLPreElement>(':scope > pre')!)
+    } else {
+      this.readingHorizontalScroll?.untrack(block)
+    }
     if (this.readingContainer?.contains(block)) this.readingView?.refreshFindHighlights(block)
   }
 
@@ -11147,9 +11196,14 @@ export class WebviewSyncController {
     const selectedColumnCell = view.contentDOM.querySelector<HTMLElement>(
       '.vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-column-selected',
     )
-    const regionCells = view.contentDOM.querySelectorAll<HTMLElement>(
-      '.vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-cell',
-    )
+    const readingRegion = this.viewMode === 'reading'
+    const readingTable = readingRegion
+      ? this.readingContainer!.querySelector<HTMLTableElement>(READING_TABLE_SELECTOR) : null
+    const regionCells = readingRegion
+      ? this.readingContainer!.querySelectorAll<HTMLElement>(`${READING_TABLE_SELECTOR} :is(th, td).vsidian-table-region-cell`)
+      : view.contentDOM.querySelectorAll<HTMLElement>(
+        '.vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-cell',
+      )
     const regionCell = regionCells[0] ?? null
     const columnFirst = view.contentDOM.querySelector<HTMLElement>(
       '.vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-column-first',
@@ -11259,6 +11313,13 @@ export class WebviewSyncController {
     const columnFirstStyle = columnFirst ? getComputedStyle(columnFirst) : null
     const columnLastStyle = columnLast ? getComputedStyle(columnLast) : null
     const regionStyle = regionCell ? getComputedStyle(regionCell) : null
+    const regionBorderStyle = readingRegion && regionCell ? getComputedStyle(regionCell, '::after') : regionStyle
+    const readingScroll = readingRegion ? this.readingHorizontalScroll : undefined
+    const readingScrollbar = readingScroll?.scrollbar
+    const readingScrollbarRect = readingScrollbar?.getBoundingClientRect()
+    const readingScrollbarAtBottom = !!readingScrollbarRect && hitPaintedElement(readingScrollbar) &&
+      getComputedStyle(readingScrollbar!).overflowX === 'scroll' &&
+      Math.abs(readingScrollbarRect.bottom - this.readingContainer!.getBoundingClientRect().bottom) < 2
     // #55 标题行左缘绘制观测：视口内标题行（.vsidian-heading-inview）的
     // computed box-shadow / border-left-width distinct 集合——标题行不得
     // 绘制左缘竖线（真宿主应分别为 'none' / '0px'）；无挂载标题行为 null
@@ -11965,6 +12026,9 @@ export class WebviewSyncController {
           : 0,
         // #83 视口内 tok-* token 元素数
         tokenCount,
+        ...(readingRegion && {
+          readingScrollbarAtBottom: readingScrollbarAtBottom && readingScroll?.activeTarget?.localName === 'pre',
+        }),
         tokenPaint,
         // 全部头部语言标签序列（DOM 顺序；断言渲染型围栏的 Mermaid 标签）
         labels: cardHeaders
@@ -12061,8 +12125,13 @@ export class WebviewSyncController {
         columnBackgroundColor: columnStyle?.backgroundColor ?? null,
         regionCellCount: regionCells.length,
         regionBackgroundColor: regionStyle?.backgroundColor ?? null,
-        regionTopBorderWidth: regionStyle?.borderTopWidth ?? null,
-        regionLeftBorderWidth: regionStyle?.borderLeftWidth ?? null,
+        regionTopBorderWidth: regionBorderStyle?.borderTopWidth ?? null,
+        regionLeftBorderWidth: regionBorderStyle?.borderLeftWidth ?? null,
+        ...(readingTable && { readingColumnWidths: Array.from(readingTable.rows[0]!.cells,
+          cell => cell.getBoundingClientRect().width) }),
+        ...(readingRegion && {
+          readingScrollbarAtBottom: readingScrollbarAtBottom && readingScroll?.activeTarget?.localName === 'table',
+        }),
       },
       math,
       mermaid,
