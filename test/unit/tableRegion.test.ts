@@ -98,6 +98,11 @@ describe('格对格粘贴（2026-09-28 决策：剥包装、扩表容纳、永�
     expect(matrix).toEqual([[' 3 ', ' 甲 '], [' 5 ', ' 乙\\|丙 ']])
   })
 
+  it('阅读模式的复制结果可粘贴到 Live 格区，代码内管道不被切成新列', () => {
+    const cells = [' `a|b` ', ' ``a\\|b`` ', ' 普通\\|文字 ']
+    expect(parseTableRegionClipboard(serializeTableRegionCells([cells], 'reading'))).toEqual([cells])
+  })
+
   it('parseTableRegionClipboard：缺分隔行 / 列不齐 / 空文本一律不判为表格', () => {
     expect(parseTableRegionClipboard('| a | b |')).toBeNull()
     expect(parseTableRegionClipboard('| a | b |\n| --- |\n| c | d |')).toBeNull()

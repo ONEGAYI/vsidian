@@ -62,8 +62,8 @@ for (const quoted of [false, true]) {
     await page.addStyleTag({ content: '#app { --vscode-focusBorder: rgb(40, 98, 181); }' })
     await page.addScriptTag({ path: bundle })
     const rows = [
-      '| 第一列文字 | **第二列文字** | 表头未选 |', '| --- | --- | --- |',
-      '| `x|y` |  | 行尾未选 |', '| 下方未选 | 下方未选 | 下方未选 |',
+      '| 第一列文字 | **第二列文字** a\\|b | 表头未选 |', '| --- | --- | --- |',
+      '| `x|y` + ``m\\|n`` + `p\\\\|q` |  | 行尾未选 |', '| 下方未选 | 下方未选 | 下方未选 |',
     ]
     const source = ['前文', '', ...rows.map((row, index) => !quoted ? row : index === 0 ? `> - ${row}` : `>   ${row}`),
       '', '后文', ...(quoted ? [] : Array.from({ length: 200 }, (_, index) => `\n滚动占位 ${index}`))].join('\n')
@@ -112,8 +112,13 @@ for (const quoted of [false, true]) {
       }, { once: true })
     })
     await page.keyboard.press('ControlOrMeta+c')
-    assert.equal(await page.evaluate(() => window.readingTableCopy),
-      '| 第一列文字 | **第二列文字** |\n| --- | --- |\n| `x\\|y` |  |',
+    const copied = await page.evaluate(() => window.readingTableCopy)
+    assert.deepEqual(await page.evaluate(text => window.readCopiedTable(text), copied), {
+      rows: [['第一列文字', '第二列文字 a|b'], ['x|y + m\\|n + p\\\\|q', '']],
+      code: ['x|y', 'm\\|n', 'p\\\\|q'],
+    }, '阅读剪贴板经生产解析回读，行内代码的竖线与原有反斜杠不变，普通转义仍在同一格')
+    assert.equal(copied,
+      '| 第一列文字 | **第二列文字** a\\|b |\n| --- | --- |\n| `x|y` + ``m\\|n`` + `p\\\\|q` |  |',
       '复制只取矩形格区，保留空格、内联 Markdown 和管道转义')
 
     await setMode('live')

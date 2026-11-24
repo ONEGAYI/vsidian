@@ -1,4 +1,4 @@
-import { escapeCellText, parseTableDelimiter, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
+import { escapeCellText, parseTableDelimiter, scanCodeSpans, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
 import { prefixLenOf, type PlannedTableEdit, type TableRowInfo } from './tableStructure'
 
 /** 表头和数据行使用连续索引；分隔行不计入矩形。端点始终规范化为升序。 */
@@ -58,28 +58,33 @@ function validRegion(region: TableRegion, rows: TableRowInfo[], columns: number)
     region.rowTo < rows.length - 1 && region.columnFrom >= 0 && region.columnTo < columns
 }
 
-function encodeCopiedCell(text: string): string {
+function encodeCopiedCell(text: string, reading: boolean): string {
+  const code = reading && text.includes('|') && text.includes('`') ? scanCodeSpans(text) : undefined
   let result = ''
   let slashes = 0
-  for (const char of text) {
-    if (char === '|') {
-      if (slashes % 2 === 0) result += '\\'
-      result += char
-      slashes = 0
-    } else {
-      result += char
-      slashes = char === '\\' ? slashes + 1 : 0
+  for (let at = 0; at < text.length; at++) {
+    const char = text[at]!
+    if (char === '|' && !code?.[at] && slashes % 2 === 0) {
+      // 阅读解析在普通管道前吞掉紧邻反斜杠。偶数连写少留一个，
+      // 可保留显示文字，也避免粘贴到 Live 时被拆格。
+      result = reading && slashes > 0 ? result.slice(0, -1) : result + '\\'
     }
+    result += char
+    slashes = char === '\\' ? slashes + 1 : 0
   }
   // 无尾管道行的末格可以以反斜杠结尾；留空格保护新增的结构管道。
   return slashes === 0 ? result : result + ' '
 }
 
-/** 选区第一行成为表头；格值仍取原始 Markdown，不从渲染文字反推。 */
-export function serializeTableRegionCells(rows: readonly (readonly string[])[]): string {
+/** 选区第一行成为表头，格值取源码。Live 沿用通用 GFM 转义；Vsidian
+ * 阅读解析会先遮蔽代码内的管道，所以阅读复制必须原样保留代码字面量。 */
+export function serializeTableRegionCells(
+  rows: readonly (readonly string[])[],
+  format: 'gfm' | 'reading' = 'gfm',
+): string {
   const lines: string[] = []
   for (const [index, cells] of rows.entries()) {
-    lines.push('|' + cells.map(encodeCopiedCell).join('|') + '|')
+    lines.push('|' + cells.map(cell => encodeCopiedCell(cell, format === 'reading')).join('|') + '|')
     if (index === 0) lines.push('|' + cells.map(() => ' --- ').join('|') + '|')
   }
   return lines.join('\n')

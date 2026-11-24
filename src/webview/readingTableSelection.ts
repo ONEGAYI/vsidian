@@ -1,5 +1,4 @@
 import { readReadingTableCells, READING_TABLE_SELECTOR } from './readingTable'
-import { scanCodeSpans } from '../shared/tableCells'
 import {
   normalizeTableRegion, serializeTableRegionCells, TABLE_REGION_CLASSES, tableRegionCellClasses, type TableRegion,
 } from './tableRegion'
@@ -126,16 +125,8 @@ export class ReadingTableSelection {
     if (!this.selected || !event.clipboardData) return
     const { table, region } = this.selected
     const rows = readReadingTableCells(table, this.sourceText())
-      .slice(region.rowFrom, region.rowTo + 1).map(row =>
-        row.slice(region.columnFrom, region.columnTo + 1).map(cell => {
-          if (!cell.includes('\\\\|')) return cell
-          const code = scanCodeSpans(cell)
-          // 阅读解析器在非代码中的竖线前吞一个反斜杠。偶数连写少留一个
-          // 才能在两种视图中仍是同一格，且不多出可见的反斜杠。
-          return cell.replace(/\\+\|/g, (match, at: number) =>
-            match.length % 2 === 1 && !code[at + match.length - 1] ? match.slice(1) : match)
-        }))
-    event.clipboardData.setData('text/plain', serializeTableRegionCells(rows))
+      .slice(region.rowFrom, region.rowTo + 1).map(row => row.slice(region.columnFrom, region.columnTo + 1))
+    event.clipboardData.setData('text/plain', serializeTableRegionCells(rows, 'reading'))
     event.preventDefault()
   }
 }

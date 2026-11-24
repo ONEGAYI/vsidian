@@ -3,6 +3,7 @@
 // 断言全绿但布局断裂」的盲区复发。
 import 'katex/dist/katex.min.css'
 import { WebviewSyncController } from '../../src/webview/syncController'
+import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
@@ -27,6 +28,14 @@ Object.assign(window, { initTable(text: string) {
     from: view.state.selection.main.from, to: view.state.selection.main.to,
     line: view.state.doc.lineAt(head).number,
     ranges: view.state.selection.ranges.length }
+}, readCopiedTable(text: string) {
+  const fixture = document.createElement('template')
+  fixture.innerHTML = splitReadingBlocks(text).map(block => block.html).join('')
+  return {
+    rows: Array.from(fixture.content.querySelectorAll('table tr'), row =>
+      Array.from(row.querySelectorAll('th, td'), cell => cell.textContent)),
+    code: Array.from(fixture.content.querySelectorAll('table code'), code => code.textContent),
+  }
 }, probePrefixMarks() {
   const view = controller.getView()
   if (!view) return -1
