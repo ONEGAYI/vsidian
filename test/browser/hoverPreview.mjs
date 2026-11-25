@@ -30,7 +30,7 @@ const PARENT_DOC = [
   '',
   '局部锚点：[[目标笔记#章节一]]、[[目标笔记#^multi-blk]] 与 [[目标笔记#没有的锚点]]。',
   '',
-  '普通链接 [全文链接](目标笔记.md) 与 [章节链接](目标笔记.md#章节一)。',
+  '普通链接 [全文链接](./目标笔记.md) 与 [章节链接](目标笔记.md#章节一)。',
   '',
   '外部链接 [外站](https://example.com) 与 [协议相对](//example.com/x) 不预览。',
   '',
@@ -325,7 +325,7 @@ try {
   passed++
   console.log('[悬停预览][PASS] 块引用双链：全文可达 + 首开定位')
 
-  // ---- 场景 J：普通链接全文——linkHref 载荷与 DOM href 保真 ----
+  // ---- 场景 J：普通链接全文——标题显示中文，linkHref 与 DOM href 保真 ----
   const fullLink = page.locator('a').filter({ hasText: '全文链接' })
   await fullLink.scrollIntoViewIfNeeded()
   await fullLink.hover()
@@ -339,9 +339,12 @@ try {
   popup = await page.evaluate(() => window.readHoverPopup())
   assert.ok(popup.open && popup.text.includes('目标笔记全文标题'), '普通链接全文预览在场')
   assert.ok(popup.text.includes('章节二段落'), '全文含尾部章节')
+  const popupTitle = page.locator('.vsidian-hover-popup-title')
+  assert.ok(await popupTitle.isVisible(), '普通链接的浮层标题应可见')
+  assert.equal(await popupTitle.innerText(), './目标笔记.md', '浮层标题直接显示中文路径')
   await page.keyboard.press('Escape')
   passed++
-  console.log('[悬停预览][PASS] 普通链接全文：linkHref 载荷保真 + 全文渲染')
+  console.log('[悬停预览][PASS] 普通链接全文：中文标题可见 + linkHref 载荷保真 + 全文渲染')
 
   // ---- 场景 K：普通链接章节锚点——fragment 同样全文可达 + 定位（P2-03）----
   const sectionLink = page.locator('a').filter({ hasText: '章节链接' })
