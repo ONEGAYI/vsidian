@@ -12011,7 +12011,10 @@ export class WebviewSyncController {
       if (rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.top >= window.innerHeight ||
         rect.right <= 0 || rect.left >= window.innerWidth) continue
       const color = getComputedStyle(token).color
-      let visible = hitPaintedElement(token) && color !== '' && color !== 'transparent' &&
+      // 折行 token 的整体中心可能落在两行之间；实际命中按各片段判断。
+      const hit = Array.from(token.getClientRects()).some(part => part.width > 0 && part.height > 0 &&
+        token.contains(document.elementFromPoint(part.left + part.width / 2, part.top + part.height / 2)))
+      let visible = hit && color !== '' && color !== 'transparent' &&
         !/rgba\([^)]*,\s*0(?:\.0+)?\s*\)/.test(color)
       for (let ancestor: HTMLElement | null = token; visible && ancestor; ancestor = ancestor.parentElement) {
         const style = getComputedStyle(ancestor)

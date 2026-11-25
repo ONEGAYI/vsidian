@@ -736,6 +736,33 @@ try {
       '#389 超大围栏高亮降级不得删改源码')
   }
 
+  // #389：窄窗中同一 token 折成两行，整体包围盒中心落在行间空隙。
+  // 实际文字仍着色；宿主收到的 view.state.paint 也必须报它可见。
+  const recipe = 'make recipe paint'
+  const recipeSource = ['Makefile', '', '```mk', 'all:', '\t@echo "make recipe paint"', '```'].join('\n')
+  await page.setViewportSize({ width: 302, height: 640 })
+  await page.evaluate(({ text, offset }) => {
+    window.initCode(text)
+    window.setCodeMode('live')
+    window.locateCode(offset)
+  }, { text: recipeSource, offset: recipeSource.indexOf(recipe) })
+  await assertTokenPaint('#app .vsidian-view-live', 'tok-string', recipe, paintColors.dark.string, '#389 折行 Makefile')
+  const wrappedRecipe = await page.evaluate(marker => {
+    const token = [...document.querySelectorAll('.cm-content .tok-string')].find(el => el.textContent.includes(marker))
+    const box = token.getBoundingClientRect()
+    return {
+      lines: token.getClientRects().length,
+      centerHit: token.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)),
+      sample: window.reportCodePaint()?.find(sample => sample.text.includes(marker)),
+    }
+  }, recipe)
+  assert.equal(wrappedRecipe.lines, 2, '#389 夹具必须恰好折成两段')
+  assert.equal(wrappedRecipe.centerHit, false, '#389 夹具的整体中心必须落空')
+  assert.deepEqual(wrappedRecipe.sample,
+    { text: `"${recipe}"`, classes: 'tok-string', color: paintColors.dark.string, visible: true },
+    '#389 真正绘制的折行 token 不得报不可见')
+  await page.setViewportSize({ width: 760, height: 640 })
+
   // Markdown hover/embed 的共用 RefContentInstance 装配：朴素 code 路径也
   // 必须读取整块上下文。这里不伪造 token DOM，也不复制阅读增强逻辑。
   const refSource = ['```toml', 'message = """paint_open',

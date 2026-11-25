@@ -4,12 +4,17 @@ import { WebviewSyncController } from '../../src/webview/syncController'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { RefContentInstance, type RefContentMount } from '../../src/webview/refContentInstance'
 import { createReadingContainer } from '../../src/webview/readingView'
+import type { WebviewToHost } from '../../src/shared/protocol'
 import '../../src/webview/main.css'
 
 bootLocaleFromDocument()
 let saved: unknown
+let viewState: Extract<WebviewToHost, { kind: 'view.state' }> | undefined
 const controller = new WebviewSyncController({
-  postMessage() {},
+  postMessage(message) {
+    const reply = message as WebviewToHost
+    if (reply.kind === 'view.state') viewState = reply
+  },
   getState<T>() { return saved as T | undefined },
   setState(state) { saved = state },
 })
@@ -91,6 +96,10 @@ Object.assign(window, {
     controller.handleHostMessage({ kind: 'init', sessionId: 'code-card', docUri: 'file:///code-card.md', version: 1, text })
   },
   codePaint,
+  reportCodePaint() {
+    controller.handleHostMessage({ kind: 'view.state.request' })
+    return viewState?.paint?.code?.tokenPaint
+  },
   mountCodeReference,
   setCodeReferenceHighlight(enabled: boolean) {
     referenceHighlight = enabled
