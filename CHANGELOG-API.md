@@ -8,7 +8,14 @@
 
 ## Unreleased - 开发中
 
-新增可选的 `sdk.refViews.registerMarkdownPreview`。为特定 Markdown 文件格式提供全文嵌入预览，适用于 Live 和阅读态；原文、锚点和默认编辑器保持不变。
+## 1.7.0 - 2026-11-26
+
+随 Vsidian 1.10.0 发行。既有引用接口保持兼容，无新增实验入口。
+
+### 新增
+
+- 可选的 `sdk.refViews.registerMarkdownPreview`（[#714](https://github.com/ONEGAYI/vsidian/pull/714)）为特定 Markdown 文件格式提供只读的全文嵌入预览，适用于实时预览和阅读模式。标题、块与行号定位、悬停预览和原文件的默认编辑器不变。
+- 宿主切换目标、卸载预览或停用组件时，会终止旧挂载并撤下容器。组件可以先检测接口是否存在，在旧宿主中保留其他功能。
 
 ## 1.6.0 - 2026-11-23
 

@@ -86,7 +86,9 @@
 
 安装 [Vsidian Agent Bridge](https://github.com/ONEGAYI/vsidian-agent-bridge) 后，在 Vsidian 里保留格式粘贴反重力（Antigravity）等来源的内容，可以还原行内公式（Vsidian 1.8.0 起）和块公式（Vsidian 1.9.0 与 Bridge 0.3.0 起）。
 
-开发文档见 [附加组件开发指南](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md)。当前稳定 API 为 1.6.0，兼容承诺自 1.1.0 起生效。
+安装 [Vsidian Excalidraw](https://github.com/ONEGAYI/vsidian-excalidraw) 后，可以在 VS Code 和 Obsidian 中接着编辑同一份图档。搭配 Vsidian 1.10.0 或更新版本，笔记里的 `![[图档]]` 还能直接显示只读画板。
+
+开发文档见 [附加组件开发指南](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md)。当前稳定 API 为 1.7.0，兼容承诺自 1.1.0 起生效。
 
 ## 更多功能
 

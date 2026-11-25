@@ -55,7 +55,7 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
   it('台账诚实性：已发行版本必有日期，未发行与实验入口恒为候选无日期（再次发行时显式更新本断言并人工落账）', () => {
     // 1.1.0（2026-10-16）为首个随本体发行的版本；1.2.0（2026-10-18）
     // 为首个兼容性修订发行；1.3.0（2026-10-20）为首个新增能力发行；
-    // 1.4.0 为兼容性修订；1.5.0 新增行内公式粘贴槽，1.6.0 新增块公式粘贴槽。
+    // 1.4.0 为兼容性修订；1.5.0 / 1.6.0 新增公式粘贴槽，1.7.0 新增全文嵌入预览。
     // 1.0.0 与全部实验入口维持候选状态，不登记发行日期。
     const byVersion = new Map(ADDON_API_RELEASES.map((r) => [r.version, r]))
     expect(byVersion.get('1.0.0')?.status).toBe('candidate')
@@ -72,6 +72,9 @@ describe('addonApiCatalog 清单自洽与台账诚实性', () => {
     expect(byVersion.get('1.5.0')?.releasedAt).toBe('2026-11-22')
     expect(byVersion.get('1.6.0')?.status).toBe('released')
     expect(byVersion.get('1.6.0')?.releasedAt).toBe('2026-11-23')
+    expect(byVersion.get('1.7.0')).toMatchObject({
+      status: 'released', releasedAt: '2026-11-26', experimental: [],
+    })
     for (const record of ADDON_API_RELEASES) {
       if (record.status === 'released') {
         expect(record.releasedAt, `已发行版本 ${record.version} 须携带日期`).toMatch(/^\d{4}-\d{2}-\d{2}$/)

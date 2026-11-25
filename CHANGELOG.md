@@ -15,10 +15,21 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 ## Unreleased - 开发中
 
+## 1.10.0 - 2026-11-26
+
+Vsidian 1.10.0 搭配 Excalidraw 附加组件，可在笔记里直接预览 Obsidian 图档。附加组件公开 API 升至 1.7.0，见 [API 变更记录](https://github.com/ONEGAYI/vsidian/blob/v1.10.0/CHANGELOG-API.md)。
+
+### 新增
+
+**在笔记里预览 Excalidraw 图档**（[#714](https://github.com/ONEGAYI/vsidian/pull/714)）
+
+- 安装 [Vsidian Excalidraw](https://github.com/ONEGAYI/vsidian-excalidraw) 后，独占一行的 `![[图档]]` 在实时预览和阅读模式显示只读画板。点击预览可打开原画板，无需导出图片。
+- 普通笔记嵌入和定位到标题、块或行号的引用仍按原方式显示。
+
 ### 修复
 
-- 补上「设置 → 文件与链接 → PDF 导出」组标题的图标。
-- 阅读模式下，本地链接的悬停浮窗标题直接显示中文路径，不再显示 `%E5%…` 一类的编码。
+- 补上「设置 → 文件与链接 → PDF 导出」组标题的图标（[#711](https://github.com/ONEGAYI/vsidian/pull/711)）。
+- 阅读模式下，本地链接的悬停浮窗标题直接显示中文路径，不再显示 `%E5%…` 一类的编码（[#712](https://github.com/ONEGAYI/vsidian/pull/712)）。
 
 ## 1.9.1 - 2026-11-25
 
