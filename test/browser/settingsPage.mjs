@@ -370,22 +370,33 @@ try {
     await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
     assert.equal(await page.evaluate(() => window.savedSettings['link.insertPathType']), 'relative',
       '切回默认档，持久化值随保存链路更新')
-    const linkGlyphPaint = await linkGroup.locator('.vsidian-settings-group-title svg').evaluate((svg) => {
-      const h3 = svg.parentElement
-      const headingBox = h3.getBoundingClientRect()
-      const iconBox = svg.getBoundingClientRect()
-      const range = document.createRange()
-      range.selectNodeContents([...h3.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()))
-      return { stroke: getComputedStyle(svg).stroke, fg: getComputedStyle(svg).color,
-        iconWidth: iconBox.width, iconHeight: iconBox.height,
-        iconLeft: iconBox.left - headingBox.left,
-        textLeft: range.getBoundingClientRect().left - headingBox.left }
-    })
-    assert.equal(linkGlyphPaint.stroke, linkGlyphPaint.fg, `链环字形描边应随主题前景色（currentColor，${theme} 主题绘制层）`)
-    assert.equal(linkGlyphPaint.iconWidth, 16, '图标 16px 槽位')
-    assert.equal(linkGlyphPaint.iconHeight, 16)
-    assert.equal(linkGlyphPaint.iconLeft, 20, '图标贴左缘 20px')
-    assert.equal(linkGlyphPaint.textLeft, 44, '标题文字起点 44px（20 padding + 16 图标 + 8 gap）')
+    for (const key of ['settings.groupLink', 'settings.groupPdfExport']) {
+      const heading = page.getByRole('heading', { level: 3, name: zhCn[key], exact: true })
+      const glyph = heading.locator('svg')
+      assert.ok(await glyph.isVisible(), `${zhCn[key]}组在${theme}主题下应显示图标`)
+      const glyphPaint = await glyph.evaluate((svg) => {
+        const h3 = svg.parentElement
+        const headingBox = h3.getBoundingClientRect()
+        const iconBox = svg.getBoundingClientRect()
+        const range = document.createRange()
+        range.selectNodeContents([...h3.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()))
+        const { stroke, fill } = getComputedStyle(svg.querySelector('path'))
+        const { marginLeft, marginRight, borderBottomWidth } = getComputedStyle(h3)
+        return { stroke, fill, marginLeft, marginRight, borderBottomWidth,
+          iconWidth: iconBox.width, iconHeight: iconBox.height,
+          iconLeft: iconBox.left - headingBox.left,
+          textLeft: range.getBoundingClientRect().left - headingBox.left }
+      })
+      assert.deepEqual(glyphPaint, {
+        stroke: expectedFg, fill: 'none', marginLeft: '-20px', marginRight: '-20px', borderBottomWidth: '1px',
+        iconWidth: 16, iconHeight: 16, iconLeft: 20, textLeft: 44,
+      }, `${zhCn[key]}组图标应使用主题色和标准组标题布局`)
+      if (key === 'settings.groupPdfExport') {
+        const pdfInk = await countInk(await glyph.screenshot())
+        assert.ok(pdfInk > 5, `PDF 导出图标在${theme}主题下应真实绘制（命中${pdfInk}像素）`)
+        await heading.screenshot({ path: path.join(artifacts, `settings-${theme}-pdf-export.png`) })
+      }
+    }
     await search.focus()
     // 等待此前页面交互（页签滚动、切页复位）的在途 scroll handler 落地，
     // 避免其延迟上报污染清零后的全长断言
