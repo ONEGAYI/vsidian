@@ -30,7 +30,7 @@ const PARENT_DOC = [
   '',
   '局部锚点：[[目标笔记#章节一]]、[[目标笔记#^multi-blk]] 与 [[目标笔记#没有的锚点]]。',
   '',
-  '普通链接 [全文链接](./目标笔记.md) 与 [章节链接](目标笔记.md#章节一)。',
+  '普通链接 [全文链接](./目标笔记.md)、[章节链接](目标笔记.md#章节一) 与 [百分号文件名](./report%FF.md#章节一)。',
   '',
   '外部链接 [外站](https://example.com) 与 [协议相对](//example.com/x) 不预览。',
   '',
@@ -364,6 +364,14 @@ try {
   await page.keyboard.press('Escape')
   passed++
   console.log('[悬停预览][PASS] 普通链接章节锚点：fragment 全文可达 + 首开定位')
+
+  const literalLink = page.getByRole('link', { name: '百分号文件名' })
+  await literalLink.hover()
+  await popupTitle.waitFor()
+  assert.equal(await popupTitle.innerText(), './report%FF.md#章节一', '文件名保留字面 %FF，锚点仍显示中文')
+  await page.keyboard.press('Escape')
+  passed++
+  console.log('[悬停预览][PASS] 百分号文件名：标题保留字面 %FF + 锚点显示中文')
 
   // ---- 场景 L：外部链接预滤——不开浮层、零请求 ----
   const requestsBefore = (await page.evaluate(() =>

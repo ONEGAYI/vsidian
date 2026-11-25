@@ -388,21 +388,20 @@ describe('标题条与跳转入口（嵌入卡片同款 header）', () => {
     expect(popupEl()).toBeNull()
   })
 
-  it('阅读模式的普通链接标题显示中文，跳转沿用 href 原文', () => {
+  it.each([
+    { href: './%E7%AC%94%E8%AE%B0%23a.md#%E7%AB%A0%E8%8A%82', title: './笔记%23a.md#章节' },
+    { href: './report%FF.md#%E7%AB%A0%E8%8A%82', title: './report%FF.md#章节' },
+  ])('阅读模式的普通链接标题为 $title，预览和跳转沿用 href 原文', ({ href, title }) => {
     vi.useFakeTimers()
     const h = makeHarness()
     h.anchor.classList.remove('vsidian-wikilink')
-    const href = './%E7%AC%94%E8%AE%B0%23a.md#%E7%AB%A0%E8%8A%82'
     h.anchor.setAttribute('href', href)
     hoverPreviewAnchorEnter(h.anchor)
     vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
-    expect(popupEl()!.querySelector('.vsidian-hover-popup-title')!.textContent).toBe('./笔记%23a.md#章节')
+    expect(popupEl()!.querySelector('.vsidian-hover-popup-title')!.textContent).toBe(title)
+    expect(requestOf(h).linkHref).toBe(href)
     popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')!.click()
-    const msg = h.sent.find((m) => m.kind === 'link.activate')
-    expect(msg, '应发 link.activate').toBeDefined()
-    if (msg && msg.kind === 'link.activate') {
-      expect(msg.href).toBe(href)
-    }
+    expect(h.sent).toContainEqual(expect.objectContaining({ kind: 'link.activate', href }))
   })
 
   it('面板形态（openAction 闭包）：跳转走调用方通道，回调后同样关闭', () => {

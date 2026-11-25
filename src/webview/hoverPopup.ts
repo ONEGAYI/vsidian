@@ -97,7 +97,6 @@ import {
 } from './embedCard'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import { EditorView } from '@codemirror/view'
-import MarkdownIt from 'markdown-it'
 import {
   refErrorText,
   releaseRefSourceLease,
@@ -256,13 +255,26 @@ export function hoverPopupSpecOfAnchor(
   const block = anchor.closest<HTMLElement>('[data-vsidian-src-start]')
   const sourceStart = Number(block?.dataset['vsidianSrcStart'] ?? 0)
   const sourceEnd = Number(block?.dataset['vsidianSrcEnd'] ?? sourceStart)
-  return {
+  const spec: HoverPopupTargetSpec = {
     target,
     ...(wikilink ? {} : { linkHref: target }),
-    ...(localLink ? { displayTarget: MarkdownIt.prototype.normalizeLinkText(target) } : {}),
     sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
     sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
   }
+  if (localLink) {
+    // 路径、查询与锚点分别解码。保留编码的分隔符及宿主按字面解析的路径（如 %FF）。
+    spec.displayTarget = target.replace(/^[^?#]+|\?[^#]*|#.*/gs, (part) => {
+      try {
+        return decodeURI(part)
+      } catch (error) {
+        if (error instanceof URIError) {
+          return part
+        }
+        throw error
+      }
+    })
+  }
+  return spec
 }
 
 /**
