@@ -37,6 +37,7 @@ import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion
 import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
 import { RefContentInstance, isRefLoadedMarkdown, isRefLoadedPdf, refLoadedContentOfResult, type RefContentMount, type RefLoadedAny, type RefLoadedContent, type RefLoadedTextContent, type RefLoadedPdfContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
 import { PdfHoverView, pdfErrorText, type PdfRenderProbe } from './pdfRender'
+import type { AddonMarkdownPreviewProvider, AddonMarkdownPreviewTarget } from '../shared/addonRefViews'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -267,6 +268,7 @@ export interface HoverPopupRootSession {
 
 /** 出站上下文（syncController mount 注入；dispose 清空） */
 export interface EmbedCardContext {
+  markdownPreview?(target: AddonMarkdownPreviewTarget): MarkdownPreviewRegistration | undefined
   /** 会话身份（init 前为 undefined——此时只升级壳不发请求） */
   session(): { sessionId: string | undefined; docUri: string | undefined }
   /** 出站通道（hover.request / image.request / *.activate 只读消息） */
@@ -323,6 +325,11 @@ export interface EmbedCardContext {
  *  pdf 载荷的嵌入卡缓存（身份 + 资源 URI + 初始定位页——重挂直接侧挂
  *  PDF 视图，零新请求） */
 type EmbedLoaded = RefLoadedContent | RefLoadedTextContent | RefLoadedPdfContent
+
+interface MarkdownPreviewRegistration {
+  provider: AddonMarkdownPreviewProvider
+  reportFault(error: unknown): void
+}
 
 /** #341：装载形态判别（text 只读边界与探针分派；参数收宽到联合——
  *  image/markdown 成员恒 false，refLoadedContentOfResult 出口直接喂入） */
@@ -430,6 +437,7 @@ interface EmbedEntry {
   /** P2-04 Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
   pendingReadingRefresh: boolean
   loaded: EmbedLoaded | null
+  markdownPreview?: MarkdownPreviewRegistration
   /** P1-2（review 修复）最近已应用的目标版本（fsPath + version；成功应用
    *  时更新，**不随 loaded 清空**——changed 失效清 loaded 后仍作为回包
    *  新鲜度参照，慢响应旧内容不得覆盖已知更新版本）。TextDocument.version
@@ -482,6 +490,7 @@ interface EmbedCardHandle {
    *  与 Reading/Live 容器并列——每容器一份，同 URI 多 occurrence 经共
    *  享文档存储复用文档数据，滚动各自独立） */
   pdfView: PdfHoverView | null
+  markdownPreview?: { registration: MarkdownPreviewRegistration; target: AddonMarkdownPreviewTarget; stop(): void }
   display: 'loading' | 'content' | 'error'
   note: string
   /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配）。P2-06
@@ -930,6 +939,7 @@ export class EmbedCardManager {
     this.active.set(el, handle)
     this.heightObserver?.observe(cardEl)
     handle.content.onDispose(() => this.heightObserver?.unobserve(cardEl))
+    handle.content.onDispose(() => handle.markdownPreview?.stop())
 
     // 引用正文只读：原生右键停在本卡，不让父 Live/Reading 按 A 的坐标
     // 打开写操作菜单；保留浏览器默认选字/复制菜单。
@@ -967,6 +977,11 @@ export class EmbedCardManager {
     // 同语义，按面板文档解析）；打开不改写引用原文
     handle.content.listen(openBtn, 'click', (event) => {
       event.stopPropagation()
+      const preview = handle.markdownPreview
+      if (preview) {
+        void Promise.resolve().then(() => preview.registration.provider.open(preview.target)).catch(preview.registration.reportFault)
+        return
+      }
       const session = this.context.session()
       if (!session.sessionId || !session.docUri) {
         return
@@ -1734,7 +1749,7 @@ export class EmbedCardManager {
    *  装载恒 reading——只读文本不建编辑端口，父模式/覆盖/父切换均不改变
    *  （「父文档模式改变不使 PDF／图片／文本／网页可写」的规格口径） */
   private effectiveMode(entry: EmbedEntry): 'reading' | 'live' {
-    if (entry.content.source.readOnly || isTextLoaded(entry.loaded)) {
+    if (entry.content.source.readOnly || entry.markdownPreview || isTextLoaded(entry.loaded)) {
       return 'reading'
     }
     if (entry.modeOverride) {
@@ -1752,7 +1767,7 @@ export class EmbedCardManager {
    *  忆，父模式切换不回滚。#341：text 装载零操作（只读边界——按钮已在
    *  refreshModeChrome 隐藏，此处为调用面防御） */
   private toggleMode(entry: EmbedEntry): void {
-    if (entry.content.source.readOnly || isTextLoaded(entry.loaded)) {
+    if (entry.content.source.readOnly || entry.markdownPreview || isTextLoaded(entry.loaded)) {
       return
     }
     entry.modeOverride = this.effectiveMode(entry) === 'live' ? 'reading' : 'live'
@@ -2702,7 +2717,7 @@ export class EmbedCardManager {
    *  P2-09 范围锁（dataset['locked']——父不在状态库的锁 Reading 不被本
    *  刷新翻转） */
   private refreshModeChrome(handle: EmbedCardHandle): void {
-    if (handle.entry.content.source.readOnly || isTextLoaded(handle.entry.loaded)) {
+    if (handle.entry.content.source.readOnly || handle.entry.markdownPreview || isTextLoaded(handle.entry.loaded)) {
       handle.modeBtn.style.display = 'none'
       handle.modeBtn.tabIndex = -1
       return
@@ -4007,7 +4022,11 @@ export class EmbedCardManager {
     }
     handle.entry.loaded = loaded
     this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
-    const mounted = handle.content.render(loaded, (bytes) => {
+    const preview = this.markdownPreviewFor(handle, loaded)
+    handle.entry.markdownPreview = preview?.registration
+    handle.markdownPreview?.stop()
+    handle.markdownPreview = undefined
+    const admit = (bytes: number) => {
       const borrowers = [...this.active.values()].filter((h) => h.entry === handle.entry).length
       if (this.budget.attachContent(handle.entry.hostId, this.dataKey(handle.entry, loaded),
         bytes * Math.max(1, borrowers)) !== 'ok') return false
@@ -4016,13 +4035,32 @@ export class EmbedCardManager {
       // 新版本关系登记（同 fsPath 未保存刷新尤其需要此顺序）。
       this.watchEntry(handle.entry, sourceLeaseId)
       return true
-    })
+    }
+    const mounted = preview ? admit(loaded.text.length * 2 + 512) : handle.content.render(loaded, admit)
     if (!mounted) {
       releaseRefSourceLease(this.context, sourceLeaseId)
       handle.entry.loaded = null
+      handle.entry.markdownPreview = undefined
       this.budget.release(handle.entry.hostId)
       this.applyDisplay(handle, 'error', t('hover.errorBudget'), 'budget')
       return
+    }
+    if (preview) {
+      if (handle.entry.live) this.teardownLive(handle.entry)
+      handle.content.clear()
+      const container = document.createElement('div')
+      const abort = new AbortController()
+      handle.scrollEl.appendChild(container)
+      handle.markdownPreview = {
+        ...preview,
+        stop: () => { abort.abort(); container.remove() },
+      }
+      void Promise.resolve().then(() => {
+        if (!abort.signal.aborted) return preview.registration.provider.mount(container, preview.target, abort.signal)
+      }).catch(error => {
+        if (!abort.signal.aborted) preview.registration.reportFault(error)
+      })
+      this.applyInternalDom(handle)
     }
     if (this.effectiveMode(handle.entry) === 'live') {
       this.ensureLivePort(handle.entry)
@@ -4048,6 +4086,24 @@ export class EmbedCardManager {
     // rAF 同帧完成，统一走延迟一帧保持两路径一致
     handle.content.restoreScroll(true)
     // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
+  }
+
+  private markdownPreviewFor(handle: EmbedCardHandle, loaded: EmbedLoaded) {
+    if (handle.host === 'hover' || !isRefLoadedMarkdown(loaded) || loaded.scope !== 'full' || loaded.range.start !== 0) return
+    const { fsPath, relPath, text } = loaded
+    const target = { fsPath, relPath, text }
+    const registration = this.context.markdownPreview?.(target)
+    if (registration) return { registration, target }
+  }
+
+  refreshMarkdownPreviews(): void {
+    for (const handle of [...this.active.values()]) {
+      const loaded = handle.entry.loaded
+      if (loaded && this.active.get(handle.hostEl) === handle &&
+          this.markdownPreviewFor(handle, loaded)?.registration !== handle.markdownPreview?.registration) {
+        this.applyLoaded(handle, loaded)
+      }
+    }
   }
 
   /**
@@ -4193,6 +4249,11 @@ export class EmbedCardManager {
   ): void {
     handle.display = display
     handle.note = note
+    if (display !== 'content' && handle.markdownPreview) {
+      handle.markdownPreview.stop()
+      handle.markdownPreview = undefined
+      handle.entry.markdownPreview = undefined
+    }
     // 错误分态挂错误修饰类（主题错误色），loading/content 摘除
     handle.stateEl.classList.toggle(EMBED_CARD_CLASS_NAMES.stateError, display === 'error')
     if (display === 'content') {

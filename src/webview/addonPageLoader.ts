@@ -134,6 +134,9 @@ export interface AddonPageLoaderEnv {
   /** T05（#544）只读引用视图运行时（编辑器页由 main.ts 构造注入；省略
    *  时 SDK 不提供 refViews 面；releaseLoad 时整组件回收其浮窗与嵌入挂载） */
   addonRefViews?: Pick<AddonRefViewsRuntime, 'requestPopup' | 'releaseAddon' | 'mountEmbed'>
+  registerMarkdownPreview?: (addonId: string,
+    provider: Parameters<NonNullable<AddonSdkRefViewsFacet['registerMarkdownPreview']>>[0],
+    reportFault: (error: unknown) => void) => () => void
   /** T11（#360）附加组件界面运行时（编辑器页由 main.ts 构造注入；省略时
    *  SDK 不提供 ui 面，releaseLoad 时亦不做回收） */
   addonUi?: AddonUiRuntime
@@ -669,6 +672,16 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
                 (isLoadActive(loadRecord)
                   ? env.addonRefViews!.mountEmbed(loadRecord.addonId, loadRecord.generation, request)
                   : Promise.resolve({ ok: false as const, reason: 'released' as const })),
+              ...(env.registerMarkdownPreview ? {
+                registerMarkdownPreview: (spec: Parameters<NonNullable<AddonSdkRefViewsFacet['registerMarkdownPreview']>>[0]) => {
+                  if (!isLoadActive(loadRecord)) return { dispose: () => {} }
+                  const dispose = env.registerMarkdownPreview!(loadRecord.addonId, spec, (error) => {
+                    if (isLoadActive(loadRecord)) reportRuntimeFault(loadRecord.addonId, 'refViews.markdownPreview', String(error))
+                  })
+                  loadRecord.disposeCallbacks.push(dispose)
+                  return { dispose }
+                },
+              } : {}),
             } satisfies AddonSdkRefViewsFacet,
           }
         : {}),
@@ -1036,27 +1049,21 @@ export function installAddonPageLoader(env: AddonPageLoaderEnv): AddonPageLoader
     }
   }
 
+  const reportRuntimeFault = (addonId: string, stage: string, detail: string): boolean => {
+    const record = active.get(addonId)
+    if (!record || record.faultReported) return false
+    record.faultReported = true
+    env.send({
+      type: 'addon.faulted', addonId, generation: record.generation, page, reason: `${stage}: ${detail}`,
+    })
+    return true
+  }
+
   return {
     handleDirective,
     load,
     unload,
-    /** T12（#361）运行期故障上报：只上报宿主裁决（stage 与 detail 拼进
-     *  reason）；本页回收由宿主 faultRecord 后的 unload 指令驱动 */
-    reportRuntimeFault: (addonId: string, stage: string, detail: string): boolean => {
-      const record = active.get(addonId)
-      if (!record || record.faultReported) {
-        return false
-      }
-      record.faultReported = true
-      env.send({
-        type: 'addon.faulted',
-        addonId,
-        generation: record.generation,
-        page,
-        reason: `${stage}: ${detail}`,
-      })
-      return true
-    },
+    reportRuntimeFault,
     /** T11（#360）按组件身份构造视图句柄（界面目标路由用——与 views.get
      *  同源：代次存活注入 + opId 分配；装载不在场或实例未注册 null） */
     buildViewHandle: (addonId: string, instanceId: string) => {

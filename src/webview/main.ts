@@ -173,6 +173,8 @@ const addonLoader = installAddonPageLoader({
   addonRenderers,
   addonUi,
   addonRefViews,
+  registerMarkdownPreview: (addonId, provider, reportFault) =>
+    controller.registerAddonMarkdownPreview(addonId, provider, reportFault),
   // #457 宿主设置白名单读取面：SDK experimental.hostSettings 的数据源
   //（controller 设置快照缓存——settings.snapshot/changed 到达即更新，
   //  保存热更后组件下次 get 即新值，无需重开面板）

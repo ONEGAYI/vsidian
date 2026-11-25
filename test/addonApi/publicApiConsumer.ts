@@ -44,6 +44,7 @@ import type {
   AddonSettingsScopeSnapshot,
 } from '../../src/shared/addonSettingsContextApi'
 import type {
+  AddonMarkdownPreviewProvider,
   AddonRefAnchor,
   AddonRefEmbedHandle,
   AddonRefEmbedOutcome,
@@ -667,6 +668,8 @@ export const refEmbedConsume = (
   facet: AddonSdkRefViewsFacet,
   container: HTMLElement,
 ): Promise<AddonRefEmbedOutcome> => facet.mountEmbed({ source: 'main', target: { path: 'notes/ref.md' }, container })
+export const markdownEmbedPreviewConsume = (facet: AddonSdkRefViewsFacet, provider: AddonMarkdownPreviewProvider) =>
+  facet.registerMarkdownPreview?.(provider)
 /** 嵌入挂载自有拒绝成员钉住（HoverPreviewFailReason 透传族之外的四个自有
  *  成员在场——移除即编译失败；扩态须同步台账/文档） */
 export type RefEmbedOwnRejectionsPresent = ['invalid-request', 'view-disposed', 'duplicate-mount', 'released'] extends

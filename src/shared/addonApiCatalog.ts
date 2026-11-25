@@ -791,6 +791,25 @@ export const ADDON_API_ENTRIES: readonly AddonApiEntry[] = [
     introduced: '#545（T06）',
   },
   {
+    id: 'markdown-embed-preview',
+    group: 'page-sdk',
+    title: '全文 Markdown 嵌入预览（refViews.registerMarkdownPreview）',
+    layer: 'stable-candidate',
+    endpoints: ['editor-page'],
+    signatures: [
+      { module: 'src/shared/addonRefViews.ts', symbols: ['AddonMarkdownPreviewTarget', 'AddonMarkdownPreviewProvider'] },
+    ],
+    purpose: '组件为已经读取的特定 Markdown 格式提供只读预览，复用正文嵌入卡的文件解析、布局、预算和更新通道。',
+    semantics: {
+      modes: 'Live 和阅读态正文全文嵌入共用；不接管标题、块或行号定位、悬停浮窗和原文件的默认编辑器。匹配后嵌入内部不再建立编辑端口。',
+      coordinates: '目标包含内核已解析的宿主绝对 fsPath、展示用 relPath 及当前 Markdown 全文；普通文档继续走内置呈现。',
+      lifecycle: '每组件每页至多登记一个提供者，同一目标由第一个匹配的在场提供者呈现。每次 mount 有独立容器和 AbortSignal；目标更新、实例释放、句柄撤销或组件停用时终止旧挂载。打开目标入口委托给提供者。',
+      errors: '提供者的回调异常按所属组件运行故障上报；组件停用后未再匹配的卡片恢复内置呈现。旧宿主的此方法为 undefined。',
+    },
+    verification: ['test/unit/addonRefViewsEmbedCard.test.ts'],
+    introduced: 'Unreleased',
+  },
+  {
     id: 'theme-environment',
     group: 'page-sdk',
     title: '主题环境快照与订阅（themeEnvironment）',

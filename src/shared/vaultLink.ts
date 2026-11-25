@@ -26,7 +26,7 @@
 //   越出所属根 → escape
 // - 扩展名语义：显式扩展名（.md/.pdf/.png…）单候选精确解析；无扩展名
 //   且 implicitMd（双链与文档链接语义）时候选为 [精确路径, 精确路径.md]
-//   ——不产生 x.pdf.md
+//   ——不产生 x.pdf.md；Obsidian .excalidraw 是 .excalidraw.md 的 Markdown 简写。
 // - 分隔符与平台语义：Windows 宿主把反斜杠当分隔符并归一为 /；POSIX
 //   宿主上反斜杠是普通文件名字符（远程语义不转换）。两类语义由注入的
 //   isWindowsHost 描述，与运行进程平台无关
@@ -55,7 +55,7 @@ export interface VaultLinkPathContext {
 /** 候选规划选项 */
 export interface VaultLinkPlanOptions {
   /**
-   * 无扩展名目标是否补 `.md` 候选（精确路径优先、`.md` 其次）。
+   * 无扩展名或使用 Obsidian 的 .excalidraw 简写时是否补 `.md` 候选。
    * 双链与普通文档链接为 true（省略扩展名默认 Markdown）；图片等
    * 二进制目标为 false（显式扩展名单候选，不补）。
    * @default true
@@ -125,11 +125,9 @@ export function shortnameLookupKeyOf(
     return null
   }
   const ext = path.posix.extname(normalized)
-  const markdownIntent = ext === '.md' || (ext === '' && (options?.implicitMd ?? true))
-  if (!markdownIntent) {
-    return null
-  }
-  return ext === '' ? `${normalized}.md` : normalized
+  if (ext === '.md') return normalized
+  return (options?.implicitMd ?? true) && (ext === '' || ext.toLowerCase() === '.excalidraw')
+    ? `${normalized}.md` : null
 }
 
 /**
@@ -264,7 +262,8 @@ function candidatesOf(
   ops: ReturnType<typeof pathOps>,
   implicitMd: boolean,
 ): string[] {
-  return ops.extname(base) ? [base] : implicitMd ? [base, `${base}.md`] : [base]
+  const ext = ops.extname(base).toLowerCase()
+  return implicitMd && (ext === '' || ext === '.excalidraw') ? [base, `${base}.md`] : [base]
 }
 
 /**

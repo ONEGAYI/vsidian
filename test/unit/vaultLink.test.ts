@@ -30,6 +30,7 @@ import {
   isVaultPathInsideRoot,
   planVaultLinkPath,
   resolveVaultLinkFile,
+  shortnameLookupKeyOf,
   type VaultLinkResolveContext,
 } from '../../src/shared/vaultLink'
 
@@ -85,6 +86,15 @@ describe('planVaultLinkPath：候选规划（纯路径计算，来源目录基�
       kind: 'inside',
       candidates: ['d:\\notes\\子目录\\图 一.png'],
     })
+  })
+
+  it('Obsidian 的 .excalidraw 短名优先精确文件，再允许 .excalidraw.md；二进制链接不补全', () => {
+    expect(planVaultLinkPath('图.excalidraw', WIN)).toEqual({
+      kind: 'inside',
+      candidates: ['d:\\notes\\子目录\\图.excalidraw', 'd:\\notes\\子目录\\图.excalidraw.md'],
+    })
+    expect(shortnameLookupKeyOf('图.excalidraw', WIN)).toBe('图.excalidraw.md')
+    expect(shortnameLookupKeyOf('图.excalidraw', WIN, { implicitMd: false })).toBeNull()
   })
 
   it('无扩展名 implicitMd=false（图片通道）：单候选不补 .md', () => {

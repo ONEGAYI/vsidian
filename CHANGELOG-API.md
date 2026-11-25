@@ -8,6 +8,8 @@
 
 ## Unreleased - 开发中
 
+新增可选的 `sdk.refViews.registerMarkdownPreview`。为特定 Markdown 文件格式提供全文嵌入预览，适用于 Live 和阅读态；原文、锚点和默认编辑器保持不变。
+
 ## 1.6.0 - 2026-11-23
 
 随 Vsidian 1.9.0 发行，既有粘贴规则保持兼容。无新增实验入口。

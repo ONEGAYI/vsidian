@@ -79,6 +79,7 @@ import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage, PdfExportEntryMode } from '../shared/protocol'
 import type { TableEditOp } from '../shared/protocol'
 import type { AddonRefEmbedCardInput } from './addonRefViews'
+import type { AddonMarkdownPreviewProvider } from '../shared/addonRefViews'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
@@ -1470,6 +1471,15 @@ export class WebviewSyncController {
       // T06（#355）：embed 句柄登记/注销（内部 Live 实例创建/销毁点；
       // attachAddonViews 前装配时不注册——注册表随主正文句柄同一注入）
       addonViews: () => this.addonViews,
+      markdownPreview: (target) => {
+        for (const candidate of this.addonMarkdownPreviews.values()) {
+          try {
+            if (candidate.provider.matches(target)) return candidate
+          } catch (error) {
+            candidate.reportFault(error)
+          }
+        }
+      },
       // T07（#356）：嵌入内键入的输入行为链驱动（与主正文同一 runtime）
       driveAddonBehaviors: (input) => this.driveAddonBehaviors?.(input),
     })
@@ -2444,6 +2454,23 @@ export class WebviewSyncController {
     return this.sessionId !== '' && this.docUri !== ''
       ? { sessionId: this.sessionId, docUri: this.docUri }
       : null
+  }
+
+  private readonly addonMarkdownPreviews = new Map<string, {
+    provider: AddonMarkdownPreviewProvider
+    reportFault: (error: unknown) => void
+  }>()
+
+  registerAddonMarkdownPreview(addonId: string, provider: AddonMarkdownPreviewProvider, reportFault: (error: unknown) => void): () => void {
+    if (this.addonMarkdownPreviews.has(addonId)) throw new Error('Duplicate Markdown preview registration')
+    const registration = { provider, reportFault }
+    this.addonMarkdownPreviews.set(addonId, registration)
+    this.embedCards?.refreshMarkdownPreviews()
+    return () => {
+      if (this.addonMarkdownPreviews.get(addonId) !== registration) return
+      this.addonMarkdownPreviews.delete(addonId)
+      this.embedCards?.refreshMarkdownPreviews()
+    }
   }
 
   /**

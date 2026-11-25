@@ -376,6 +376,10 @@ const result = await sdk.views?.openDocument({
 
 结果分别报告 `opened` 与 `located`。首次行号越界不钳到末行；锚点未命中、定位未送达与文件缺失有不同失败原因。来源释放、页面重载、组件停用或换代后在途请求失效；调用方自行呈现失败，平台不重复弹通知。结构化 API 不接受普通链接尾部行号语法。签名与失败枚举见参考的 [`document-navigation`](api-reference.md#document-navigation) 条目，公开消费夹具为 `test/fixtures/addon-v02/addon/docNavEditor.ts`。
 
+### 全文 Markdown 嵌入预览
+
+文件格式组件可通过 `sdk.refViews?.registerMarkdownPreview?.(provider)` 注册全文嵌入预览。用 `matches` 识别已经解析的 Markdown，用 `mount(container, target, signal)` 挂载只读视图，用 `open(target)` 打开原文件。异步挂载完成后先检查 `signal.aborted`；切换目标或停用时旧容器会被撤下。普通笔记、标题／块引用及悬停仍走默认呈现。旧版本没有此 API，组件可按需保留其他入口。见[预览 API](api-reference.md#markdown-embed-preview)。
+
 ## 6. 调试
 
 调试复用 VSCode 工具，不另建开发者控制台：

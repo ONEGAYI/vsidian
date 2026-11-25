@@ -62,6 +62,7 @@
     - [`host-settings-experimental` 实验入口：宿主设置白名单读取（experimental.hostSettings）](#host-settings-experimental)
     - [`ref-views-popup` 只读引用浮窗请求（refViews）](#ref-views-popup)
     - [`ref-views-embed` 只读引用组件容器嵌入（refViews.mountEmbed）](#ref-views-embed)
+    - [`markdown-embed-preview` 全文 Markdown 嵌入预览（refViews.registerMarkdownPreview）](#markdown-embed-preview)
     - [`theme-environment` 主题环境快照与订阅（themeEnvironment）](#theme-environment)
     - [`channel` 页面与宿主通道](#channel)
   - [3. 输入行为](#3-输入行为)
@@ -1264,6 +1265,8 @@ export interface AddonSdkRefViewsFacet {
    *  （子根留在场显示错误分态，随容器/组件生命周期整组释放）。多处同
    *  目标各挂各的（实例/滚动/属性状态独立，读取数据共享缓存） */
   mountEmbed(request: AddonRefEmbedRequest): Promise<AddonRefEmbedOutcome>
+  /** 为匹配的全文 Markdown 嵌入登记只读替代预览。旧宿主不提供本方法。 */
+  registerMarkdownPreview?(provider: AddonMarkdownPreviewProvider): { dispose(): void }
 }
 
 export function isAddonRefTargetSpec(v: unknown): v is AddonRefTargetSpec {
@@ -1383,6 +1386,38 @@ export function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {
 ```
 
 **验证**：`test/unit/addonRefViews.test.ts`、`test/unit/addonRefViewsEmbed.test.ts`、`test/unit/addonRefViewsEmbedCard.test.ts`、`test/unit/embedCardCssContract.test.ts`、`test/unit/addonPageLoader.test.ts`、`test/browser/addonRefViewsEmbed.mjs`、`test/integration/suite/addonRefViewsCases.ts`
+
+### `markdown-embed-preview` 全文 Markdown 嵌入预览（refViews.registerMarkdownPreview）
+
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：Unreleased
+
+**目标**：组件为已经读取的特定 Markdown 格式提供只读预览，复用正文嵌入卡的文件解析、布局、预算和更新通道。
+
+语义要点：
+- **适用模式**：Live 和阅读态正文全文嵌入共用；不接管标题、块或行号定位、悬停浮窗和原文件的默认编辑器。匹配后嵌入内部不再建立编辑端口。
+- **坐标与数据形状**：目标包含内核已解析的宿主绝对 fsPath、展示用 relPath 及当前 Markdown 全文；普通文档继续走内置呈现。
+- **生命周期**：每组件每页至多登记一个提供者，同一目标由第一个匹配的在场提供者呈现。每次 mount 有独立容器和 AbortSignal；目标更新、实例释放、句柄撤销或组件停用时终止旧挂载。打开目标入口委托给提供者。
+- **错误与拒绝**：提供者的回调异常按所属组件运行故障上报；组件停用后未再匹配的卡片恢复内置呈现。旧宿主的此方法为 undefined。
+
+签名事实源：`src/shared/addonRefViews.ts`
+
+```ts
+/** 已由内核解析和读取的全文 Markdown 嵌入目标。 */
+export interface AddonMarkdownPreviewTarget {
+  readonly fsPath: string
+  readonly relPath: string
+  readonly text: string
+}
+
+/** 文件类型自行识别；只接管全文预览，不改变源文或原文件的默认编辑器。 */
+export interface AddonMarkdownPreviewProvider {
+  matches(target: AddonMarkdownPreviewTarget): boolean
+  mount(container: HTMLElement, target: AddonMarkdownPreviewTarget, signal: AbortSignal): void | Promise<void>
+  open(target: AddonMarkdownPreviewTarget): void | Promise<void>
+}
+```
+
+**验证**：`test/unit/addonRefViewsEmbedCard.test.ts`
 
 ### `theme-environment` 主题环境快照与订阅（themeEnvironment）
 

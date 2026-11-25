@@ -46,7 +46,7 @@ interface Harness {
   sent: WebviewToHost[]
 }
 
-function makeHarness(): Harness {
+function makeHarness(overrides: Partial<EmbedCardContext> = {}): Harness {
   const sent: WebviewToHost[] = []
   const context: EmbedCardContext = {
     session: () => SESSION,
@@ -54,6 +54,7 @@ function makeHarness(): Harness {
     codeHighlight: () => true,
     maxHeightPx: () => 480,
     maxDepth: () => 3,
+    ...overrides,
   }
   return { manager: new EmbedCardManager(context), sent }
 }
@@ -115,6 +116,46 @@ function loadOk(h: Harness, target = 'b.md', text = B_TEXT, fsPath = B_FS): void
 afterEach(() => {
   document.body.innerHTML = ''
   vi.restoreAllMocks()
+})
+
+describe('Markdown 文件预览', () => {
+  it('匹配全文时只读挂载、打开原文件；撤销登记后恢复 Markdown 并终止旧绘制', async () => {
+    const open = vi.fn()
+    const mount = vi.fn((container: HTMLElement, _target: unknown, _signal: AbortSignal) => {
+      container.textContent = '绘图预览'
+    })
+    const preview = { provider: { matches: () => true, open, mount }, reportFault: vi.fn() }
+    let enabled = true
+    const h = makeHarness({ markdownPreview: () => enabled ? preview : undefined })
+    const host = mountAddonEmbed(h, 'preview-1')
+    loadOk(h)
+    await Promise.resolve()
+    expect(host.textContent).toContain('绘图预览')
+    expect(host.textContent).not.toContain('目标正文一段。')
+    expect(h.sent.some(message => message.kind === 'refEdit.bind')).toBe(false)
+    const target = { fsPath: B_FS, relPath: 'b.md', text: B_TEXT }
+    expect(mount.mock.calls[0]?.[1]).toEqual(target)
+    host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!.click()
+    await Promise.resolve()
+    expect(open).toHaveBeenCalledWith(target)
+    enabled = false
+    h.manager.refreshMarkdownPreviews()
+    expect(mount.mock.calls[0]?.[2].aborted).toBe(true)
+    expect(host.textContent).not.toContain('绘图预览')
+    expect(host.textContent).toContain('目标正文一段。')
+    h.manager.dispose()
+  })
+
+  it('链接到标题时保留 Markdown 呈现，不调用全文预览提供者', () => {
+    const select = vi.fn()
+    const h = makeHarness({ markdownPreview: select })
+    const host = mountAddonEmbed(h, 'preview-heading', 'b.md#B 目标标题')
+    const result = okReply(requestOf(h, 'b.md#B 目标标题'), B_TEXT, B_FS)
+    h.manager.notifyResult({ ...result, scope: { kind: 'heading', anchor: 'B 目标标题' } })
+    expect(select).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('目标正文一段。')
+    h.manager.dispose()
+  })
 })
 
 describe('组件容器挂载与请求载荷', () => {
