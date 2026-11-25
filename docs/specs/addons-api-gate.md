@@ -112,6 +112,8 @@ bootstrap 锚点是提交而非 tag 的边界：合并采用 merge commit（非 
 
 **1.6.0 发行重锚（2026-11-23）**：Vsidian 1.9.0 发行块公式槽，宿主的 `ADDON_API_VERSION` 从 1.5.0 升到 1.6.0，台账追加一条发行记录。以含这两项的发布提交 `cf782870b5e303fe3e6620d9b287660184545ce5` 重新锚定；保留已有公开签名、历史台账和检查规则。
 
+**全文嵌入预览候选重锚**：`e07cdd98b476a5dfa5627433e00725c0c677176a` 在 `AddonSdkRefViewsFacet` 追加可选的 `registerMarkdownPreview`，既有浮窗和组件容器嵌入签名与语义不变。旧基线可信复验通过，候选检查仅报告该 facet 的声明变化（`out/preview-api-before-anchor.log`）。按功能提交重锚，保持发行台账、版本常量与检查器不变。
+
 ## CI 接线（代码侧，已交付）
 
 `.github/workflows/ci.yml` 新增独立 job **`addon-api-contract`**（job 名即 required status check 的 context 名），与 `style-contract` 同序同型——**先证检查器可信，再信检查结果**：

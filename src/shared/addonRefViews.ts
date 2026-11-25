@@ -148,6 +148,20 @@ export function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {
     v.container !== null && typeof v.container === 'object'
 }
 
+/** 已由内核解析和读取的全文 Markdown 嵌入目标。 */
+export interface AddonMarkdownPreviewTarget {
+  readonly fsPath: string
+  readonly relPath: string
+  readonly text: string
+}
+
+/** 文件类型自行识别；只接管全文预览，不改变源文或原文件的默认编辑器。 */
+export interface AddonMarkdownPreviewProvider {
+  matches(target: AddonMarkdownPreviewTarget): boolean
+  mount(container: HTMLElement, target: AddonMarkdownPreviewTarget, signal: AbortSignal): void | Promise<void>
+  open(target: AddonMarkdownPreviewTarget): void | Promise<void>
+}
+
 /** SDK refViews 面（仅编辑器页提供；设置页为 undefined）。T05（#544）
  *  浮窗请求 + T06（#545）组件容器嵌入挂载——两者共用来源解析与目标语义 */
 export interface AddonSdkRefViewsFacet {
@@ -161,6 +175,8 @@ export interface AddonSdkRefViewsFacet {
    *  （子根留在场显示错误分态，随容器/组件生命周期整组释放）。多处同
    *  目标各挂各的（实例/滚动/属性状态独立，读取数据共享缓存） */
   mountEmbed(request: AddonRefEmbedRequest): Promise<AddonRefEmbedOutcome>
+  /** 为匹配的全文 Markdown 嵌入登记只读替代预览。旧宿主不提供本方法。 */
+  registerMarkdownPreview?(provider: AddonMarkdownPreviewProvider): { dispose(): void }
 }
 
 // ---- 守卫（SDK 请求入口与测试共用；非法请求不进入浮窗管线） ----

@@ -1450,7 +1450,7 @@ describe('#534 普通链接尾部行号：浮窗解析与分派（md/text 通道
       expect(out.content.lfText.split('\n')[2]).toBe('第一段')
       expect(out.content.range.start).toBe('# 标题\n\n'.length)
       expect(out.content.range.end).toBe(out.content.lfText.length)
-      expect(out.content.selector).toEqual({ kind: 'full' })
+      expect(out.content.selector).toEqual({ kind: 'full', line: 3 })
     } else {
       expect.unreachable('md 行号应回 markdown 载荷')
     }
@@ -1474,6 +1474,7 @@ describe('#534 普通链接尾部行号：浮窗解析与分派（md/text 通道
         last += lines[i]!.length + 1
       }
       expect(out.content.range.start).toBe(last)
+      expect(out.content.selector).toEqual({ kind: 'full', line: 99 })
     }
   })
 

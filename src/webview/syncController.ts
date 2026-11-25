@@ -79,6 +79,7 @@ import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage, PdfExportEntryMode } from '../shared/protocol'
 import type { TableEditOp } from '../shared/protocol'
 import type { AddonRefEmbedCardInput } from './addonRefViews'
+import type { AddonMarkdownPreviewProvider } from '../shared/addonRefViews'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
@@ -1470,6 +1471,15 @@ export class WebviewSyncController {
       // T06（#355）：embed 句柄登记/注销（内部 Live 实例创建/销毁点；
       // attachAddonViews 前装配时不注册——注册表随主正文句柄同一注入）
       addonViews: () => this.addonViews,
+      markdownPreview: (target) => {
+        for (const candidate of this.addonMarkdownPreviews.values()) {
+          try {
+            if (candidate.provider.matches(target)) return candidate
+          } catch (error) {
+            candidate.reportFault(error)
+          }
+        }
+      },
       // T07（#356）：嵌入内键入的输入行为链驱动（与主正文同一 runtime）
       driveAddonBehaviors: (input) => this.driveAddonBehaviors?.(input),
     })
@@ -2444,6 +2454,23 @@ export class WebviewSyncController {
     return this.sessionId !== '' && this.docUri !== ''
       ? { sessionId: this.sessionId, docUri: this.docUri }
       : null
+  }
+
+  private readonly addonMarkdownPreviews = new Map<string, {
+    provider: AddonMarkdownPreviewProvider
+    reportFault: (error: unknown) => void
+  }>()
+
+  registerAddonMarkdownPreview(addonId: string, provider: AddonMarkdownPreviewProvider, reportFault: (error: unknown) => void): () => void {
+    if (this.addonMarkdownPreviews.has(addonId)) throw new Error('Duplicate Markdown preview registration')
+    const registration = { provider, reportFault }
+    this.addonMarkdownPreviews.set(addonId, registration)
+    this.embedCards?.refreshMarkdownPreviews({ added: true })
+    return () => {
+      if (this.addonMarkdownPreviews.get(addonId) !== registration) return
+      this.addonMarkdownPreviews.delete(addonId)
+      this.embedCards?.refreshMarkdownPreviews()
+    }
   }
 
   /**
@@ -3806,6 +3833,23 @@ export class WebviewSyncController {
             }),
           )
         }
+        break
+      }
+      case 'wikilink.test.confirmFile': {
+        const view = this.view
+        if (!view) break
+        const classes = WIKILINK_SUGGEST_CLASS_NAMES
+        const enterWhenFresh = () => {
+          if (this.view !== view || this.viewMode !== 'live' || Date.now() >= message.deadline) return
+          const popup = document.querySelector<HTMLElement>(`.${classes.popup}`)
+          const name = popup?.querySelector(`.${classes.itemActive} .${classes.name}`)?.textContent
+          if (popup && name === message.name && wikilinkFileResultFresh(popup)) {
+            view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+            return // 只等就绪；一旦派发，不重试按键。
+          }
+          setTimeout(enterWhenFresh, 25)
+        }
+        enterWhenFresh()
         break
       }
       case 'table.test.cellClick': {
@@ -11967,7 +12011,10 @@ export class WebviewSyncController {
       if (rect.width <= 0 || rect.height <= 0 || rect.bottom <= 0 || rect.top >= window.innerHeight ||
         rect.right <= 0 || rect.left >= window.innerWidth) continue
       const color = getComputedStyle(token).color
-      let visible = hitPaintedElement(token) && color !== '' && color !== 'transparent' &&
+      // 折行 token 的整体中心可能落在两行之间；实际命中按各片段判断。
+      const hit = Array.from(token.getClientRects()).some(part => part.width > 0 && part.height > 0 &&
+        token.contains(document.elementFromPoint(part.left + part.width / 2, part.top + part.height / 2)))
+      let visible = hit && color !== '' && color !== 'transparent' &&
         !/rgba\([^)]*,\s*0(?:\.0+)?\s*\)/.test(color)
       for (let ancestor: HTMLElement | null = token; visible && ancestor; ancestor = ancestor.parentElement) {
         const style = getComputedStyle(ancestor)

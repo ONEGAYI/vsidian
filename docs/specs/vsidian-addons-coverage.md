@@ -128,6 +128,8 @@ T03 自动化运行证据随票面实施回填，人工验收仍开放。内部�
 | T05 只读引用浮窗（#544，[规格](addon-reference-views.md)） | R-U01–R-U07、R-U12 | `ref-views-popup`（`sdk.refViews.requestPopup`——来源 B 解析语境、互斥锚点、单浮窗仲裁、句柄与代次释放、错误分态透传） | 单 `addonRefViews`/`addonRefViewsRuntime`/`addonRefViewsPopup`/`documentSessionRefViews`/`addonPageLoader`；浏 `addonRefViews`（真实指针/键盘 + 绘制层）；集 `addonRefViewsCases`（绘制层与历史样式命中、来源 B、目标更新/失效、停用/页面关闭/租约回收）。R-U08–R-U11（组件容器嵌入）由 T06（#545）交付 |
 | T06 组件容器嵌入（#545，[规格](addon-reference-views.md)） | R-U08–R-U11（复验 R-U03/R-U04/R-U07） | `ref-views-embed`（`sdk.refViews.mountEmbed`——容器归属（面板内容根/渲染内容根及其后代）、同容器重复挂载仲裁、独立 occurrence 双实例、整组释放（句柄/脱树/停用/页面结束）、readOnly 递归传递、addonSource 来源覆盖与既有 watch/预算/错误分态复用） | 单 `addonRefViews`（嵌入守卫）/`addonRefViewsEmbed`（容器归属/重复挂载/双实例/释放矩阵/迟到结局）/`addonRefViewsEmbedCard`（只读挂载/首结局兑现/watch 失效恢复/整组释放/孙卡只读继承）/`embedCardCssContract`（卡片壳四锚点并列）/`addonPageLoader`（mountEmbed 注入与 released 守卫）；浏 `addonRefViewsEmbed`（真实面板挂载绘制层——竖条计算色与命中、双实例滚动独立、零写通道、重复挂载、面板关闭整组释放）；集 `addonRefViewsCases`（真宿主目标更新/删除/恢复、释放无残留订阅、文档版本不变） |
 
+全文 Markdown 嵌入预览（`markdown-embed-preview`）：`addonRefViewsEmbedCard` 验证全文匹配、标题引用不受影响、只读打开和撤销登记；Vsidian Excalidraw 的 `preview-vscode` / `preview-obsidian` 宿主测试验证同一笔记中两种图档的 Live、阅读态绘制和双端保真。
+
 ## 组件设置详情自绘页优先覆盖（#553）
 
 本票改设置详情呈现关系并新增页面上下文面，公开接口映射为 `page-settings-context`（`sdk.settingsContext`——仅设置页）；呈现规格见 [addon-settings-detail.md](addon-settings-detail.md)。29 项故事中的 13/14/16/18（作用域、清除继承、停用可配置、故障排障）语义不变，呈现载体随本票演进。
