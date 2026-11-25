@@ -18683,8 +18683,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const typeText = async (text: string) => {
         await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text })
       }
-      const pressKey = async (key: 'down' | 'up' | 'escape' | 'enter' | 'backspace') => {
+      const pressKey = async (key: 'down' | 'up' | 'escape' | 'backspace') => {
         await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key })
+      }
+      const confirmFile = async (name: string, expected: string, label: string) => {
+        const timeoutMs = 20000 // 沿用插入断言的等待预算。
+        await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+          kind: 'wikilink.test.confirmFile', name, deadline: Date.now() + timeoutMs,
+        })
+        await poll(label, () => doc.getText() === expected ? true : undefined, timeoutMs)
       }
       const suggestPaint = async (): Promise<
         NonNullable<NonNullable<ViewState['paint']>['wikilinkSuggest']> | undefined
@@ -18740,9 +18747,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
         return s?.fileResultFresh === true && s.activeIndex === 0 &&
           s.names?.[0] === '同目录目标.md' ? s : undefined
       })
-      await pressKey('enter')
-      const afterSame = '来源正文\n[[同目录目标.md|同目录目标]]'
-      await poll('同目录目标按相对路径插入', () => doc.getText() === afterSame ? true : undefined)
+      // 在宿主读完就绪快照后插入真实失效消息，固定读回与 Enter 之间的竞争窗口。
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'wikilink.invalidate' })
+      await confirmFile('同目录目标.md', '来源正文\n[[同目录目标.md|同目录目标]]', '同目录目标按相对路径插入')
       assert(doc.isDirty, '确认插入后文档应 dirty')
       await poll('确认后候选关闭', async () => (await suggestPaint()) === undefined ? true : undefined)
 
@@ -18761,9 +18768,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
         return s?.fileResultFresh === true && s.activeIndex === 0 &&
           s.names?.[0] === '子目录目标.md' ? s : undefined
       })
-      await pressKey('enter')
-      const afterNested = '来源正文\n[[../子目录目标.md|子目录目标]]'
-      await poll('子目录目标按 .. 上行相对路径插入', () => doc.getText() === afterNested ? true : undefined)
+      await confirmFile('子目录目标.md', '来源正文\n[[../子目录目标.md|子目录目标]]', '子目录目标按 .. 上行相对路径插入')
       assert(doc.isDirty, '第二次确认后文档仍应 dirty')
       await doc.save()
     } catch (error) {

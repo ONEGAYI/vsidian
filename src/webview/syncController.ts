@@ -3835,6 +3835,23 @@ export class WebviewSyncController {
         }
         break
       }
+      case 'wikilink.test.confirmFile': {
+        const view = this.view
+        if (!view) break
+        const classes = WIKILINK_SUGGEST_CLASS_NAMES
+        const enterWhenFresh = () => {
+          if (this.view !== view || this.viewMode !== 'live' || Date.now() >= message.deadline) return
+          const popup = document.querySelector<HTMLElement>(`.${classes.popup}`)
+          const name = popup?.querySelector(`.${classes.itemActive} .${classes.name}`)?.textContent
+          if (popup && name === message.name && wikilinkFileResultFresh(popup)) {
+            view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+            return // 只等就绪；一旦派发，不重试按键。
+          }
+          setTimeout(enterWhenFresh, 25)
+        }
+        enterWhenFresh()
+        break
+      }
       case 'table.test.cellClick': {
         if (this.view && this.viewMode === 'live') {
           const row = this.view.contentDOM.querySelectorAll<HTMLElement>('.vsidian-table-grid-row')[message.rowIndex]

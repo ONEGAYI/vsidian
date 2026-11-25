@@ -400,6 +400,8 @@ export type HostToWebview =
    *  真实键盘事件，以此通道验证导航装配。#378 T03 起另接受任意**单字符**
    *  key（'#'／'^'／'|' 等字符键，驱动候选会话转阶段按键） */
   | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' | 'down' | 'up' | 'escape' | (string & {}) }
+  /** #376 T01 测试钩子：在同一 webview 任务中核对新鲜候选并派发一次 Enter。 */
+  | { kind: 'wikilink.test.confirmFile'; name: string; deadline: number }
   /** 测试钩子：模拟 Live 纯光标移动和纯滚动；空载荷仅启用绘制探针。 */
   | { kind: 'viewport.test.position'; cursorLine?: number; scrollNearLine?: number; scrollBiasPx?: number }
   /** 测试钩子（#42）：在真实 webview 网格单元格派发鼠标点击及当前位置输入。 */
@@ -5823,6 +5825,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         v.key === 'backspace' || v.key === 'delete' || v.key === 'down' || v.key === 'up' ||
         v.key === 'escape' ||
         (typeof v.key === 'string' && v.key.length === 1 && v.key !== ' ') // #378 T03：单字符键（# ^ | 等）
+    case 'wikilink.test.confirmFile':
+      return typeof v.name === 'string' && v.name.length > 0 && isPositiveInt(v.deadline)
     case 'viewport.test.position':
       return (v.cursorLine === undefined || isNonNegativeInt(v.cursorLine)) &&
         (v.scrollNearLine === undefined || isNonNegativeInt(v.scrollNearLine)) &&

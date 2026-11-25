@@ -680,6 +680,37 @@ describe('确认与光标位置（文件字段整体替换）', () => {
 })
 
 describe('异步列表更新按候选身份保留手动高亮', () => {
+  it('真宿主确认夹具只在精确目标的新鲜候选就绪时按一次 Enter', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    const { controller, sent, view } = setup('[[Aa]]')
+    try {
+      locate(controller, 4)
+      typeAt(view, 4, 'x')
+      deleteAt(view, 4, 5)
+      respond(controller, sent, [FANGAN])
+      controller.handleHostMessage({ kind: 'wikilink.invalidate' })
+      controller.handleHostMessage({
+        kind: 'wikilink.test.confirmFile', name: '方案.md', deadline: Date.now() + 1000,
+      })
+      expect(view.state.doc.toString()).toBe('[[Aa]]')
+
+      vi.advanceTimersByTime(300)
+      respond(controller, sent, [TONGZHI])
+      vi.advanceTimersByTime(50)
+      expect(view.state.doc.toString()).toBe('[[Aa]]')
+
+      controller.handleHostMessage({ kind: 'wikilink.invalidate' })
+      vi.advanceTimersByTime(300)
+      respond(controller, sent, [FANGAN])
+      vi.advanceTimersByTime(50)
+      expect(view.state.doc.toString()).toBe('[[../资料/方案.md|方案]]')
+      expect(popupState().open).toBe(false)
+    } finally {
+      controller.dispose()
+      vi.useRealTimers()
+    }
+  })
+
   it('空查询 watcher 失效重排：保留已高亮身份，下一次 ↓ 选当前列表下一身份且不移动正文光标', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
     let fixture: ReturnType<typeof setup> | undefined
