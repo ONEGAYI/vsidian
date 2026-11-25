@@ -2473,7 +2473,7 @@ export class EmbedCardManager {
    *  P2-05：该 entry 的在场模态随端口取消（端口释放后确认链路无目标；
    *  离屏回收不弹窗契约不受影响——模态取消不是新弹窗）、挂起意图与
    *  拦截 spec 清空 */
-  private teardownLive(entry: EmbedEntry): void {
+  private teardownLive(entry: EmbedEntry, { keepContentBudget = false } = {}): void {
     const live = entry.live
     if (!live) {
       return
@@ -2520,7 +2520,7 @@ export class EmbedCardManager {
         fsPath: live.fsPath,
       })
     }
-    this.budget.clearContent(entry.hostId)
+    if (!keepContentBudget) this.budget.clearContent(entry.hostId)
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) {
         continue
@@ -4046,11 +4046,10 @@ export class EmbedCardManager {
       return
     }
     if (preview) {
-      if (handle.entry.live) this.teardownLive(handle.entry)
-      handle.content.clear()
+      if (handle.entry.live) this.teardownLive(handle.entry, { keepContentBudget: true })
       const container = document.createElement('div')
       const abort = new AbortController()
-      handle.scrollEl.appendChild(container)
+      handle.content.mountCustomContent(container)
       handle.markdownPreview = {
         ...preview,
         stop: () => { abort.abort(); container.remove() },
@@ -4098,9 +4097,18 @@ export class EmbedCardManager {
 
   refreshMarkdownPreviews(): void {
     for (const handle of [...this.active.values()]) {
+      if (this.active.get(handle.hostEl) !== handle) continue
       const loaded = handle.entry.loaded
-      if (loaded && this.active.get(handle.hostEl) === handle &&
-          this.markdownPreviewFor(handle, loaded)?.registration !== handle.markdownPreview?.registration) {
+      const preview = handle.markdownPreview
+      if (!loaded) {
+        // A silent reload leaves the old rendering in place while the host reads again.
+        // Revoking its provider must not wait for that response.
+        if (preview && this.context.markdownPreview?.(preview.target) !== preview.registration) {
+          this.budget.clearContent(handle.entry.hostId)
+          this.applyDisplay(handle, 'loading', t('embed.loading'))
+          this.refreshModeChrome(handle)
+        }
+      } else if (this.markdownPreviewFor(handle, loaded)?.registration !== preview?.registration) {
         this.applyLoaded(handle, loaded)
       }
     }

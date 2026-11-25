@@ -156,6 +156,50 @@ describe('Markdown 文件预览', () => {
     expect(host.textContent).toContain('目标正文一段。')
     h.manager.dispose()
   })
+
+  it('目标正在静默刷新时，撤销登记也立即清除旧预览和打开委托', async () => {
+    const open = vi.fn()
+    const mount = vi.fn((container: HTMLElement, _target: unknown, _signal: AbortSignal) => {
+      container.textContent = '旧绘图预览'
+    })
+    const preview = { provider: { matches: () => true, open, mount }, reportFault: vi.fn() }
+    let enabled = true
+    const h = makeHarness({ markdownPreview: () => enabled ? preview : undefined })
+    const host = mountAddonEmbed(h, 'preview-refresh')
+    loadOk(h)
+    await Promise.resolve()
+    expect(host.textContent).toContain('旧绘图预览')
+    h.manager.notifyInvalidated({ fsPath: B_FS, status: 'changed', generation: 1 })
+    const pending = requestOf(h)
+    enabled = false
+    h.manager.refreshMarkdownPreviews()
+    expect(mount.mock.calls[0]?.[2].aborted).toBe(true)
+    expect(host.textContent).not.toContain('旧绘图预览')
+    host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!.click()
+    await Promise.resolve()
+    expect(open).not.toHaveBeenCalled()
+    expect(h.sent.some(message => message.kind === 'wikilink.activate')).toBe(true)
+    h.manager.notifyResult(okReply(pending, B_TEXT, B_FS))
+    expect(host.textContent).toContain('目标正文一段。')
+    h.manager.dispose()
+  })
+
+  it('接管 Live 卡片后，绘图预览沿用阅读内容区且仍计入预算', async () => {
+    const mount = (container: HTMLElement) => { container.textContent = '绘图预览' }
+    const preview = { provider: { matches: () => true, open: vi.fn(), mount }, reportFault: vi.fn() }
+    let enabled = false
+    const h = makeHarness({ parentMode: () => 'live', markdownPreview: () => enabled ? preview : undefined })
+    const host = document.body.appendChild(document.createElement('div'))
+    h.manager.mountCardInto(host, 'b.md', 0, 7, 'live')
+    loadOk(h)
+    expect(h.sent.some(message => message.kind === 'refEdit.bind')).toBe(true)
+    enabled = true
+    h.manager.refreshMarkdownPreviews()
+    await Promise.resolve()
+    expect(h.manager.budgetStats().panelBytes).toBeGreaterThan(0)
+    expect(host.querySelector('.vsidian-view-reading')?.textContent).toContain('绘图预览')
+    h.manager.dispose()
+  })
 })
 
 describe('组件容器挂载与请求载荷', () => {

@@ -443,14 +443,7 @@ export class RefContentMount {
     private readonly onRelease: () => void,
   ) {
     this.generation = generation
-    this.view = options.strategy === 'virtual' ? new VirtualReadingView(options.contentEl, {
-      scrollEl: options.scrollEl,
-      onBlockMounted: (el) => this.mountBlock(el),
-      onBlockUnmounted: (el) => this.unmountBlock(el),
-      // #659（T08）Reading 侧 callout 折叠交互：翻转实例状态源（Live 在场
-      // 时经 surface 回调同步其 StateField），呈现刷新走 syncCalloutFolds
-      onCalloutFoldToggle: (key) => this.toggleCalloutFold(key),
-    }) : null
+    this.view = options.strategy === 'virtual' ? this.createVirtualView() : null
     // #258：滚轮事件可能只是驱动外层（卡已到边由滚动链接续外层，或事件
     // target 在卡域边界附近穿过）——内层未实际滚动就不构成新阅读意图。
     // wheel 只记在场见证，由随后的内层 scroll 事件证实后才取消恢复；
@@ -495,6 +488,15 @@ export class RefContentMount {
       document.addEventListener('scroll', onOuterScroll, { capture: true, passive: true })
       this.onDispose(() => document.removeEventListener('scroll', onOuterScroll, true))
     }
+  }
+
+  private createVirtualView(): VirtualReadingView {
+    return new VirtualReadingView(this.options.contentEl, {
+      scrollEl: this.options.scrollEl,
+      onBlockMounted: (el) => this.mountBlock(el),
+      onBlockUnmounted: (el) => this.unmountBlock(el),
+      onCalloutFoldToggle: (key) => this.toggleCalloutFold(key),
+    })
   }
 
   /** #258：外部滚动停歇后核对卡内滚动。归零且与最后已知值不符（用户
@@ -565,6 +567,7 @@ export class RefContentMount {
       this.target = null
       return false
     }
+    if (this.options.strategy === 'virtual') this.view ??= this.createVirtualView()
     this.images = createSourcedImageManager({
       session: this.options.session,
       send: this.options.send,
@@ -723,17 +726,7 @@ export class RefContentMount {
     if (this.target !== null || this.options.scrollEl.scrollTop > 0) {
       this.instance.scrollTop = this.options.scrollEl.scrollTop
     }
-    this.clear()
-    // #569：text 装载无 Markdown 正文——文档样式随 markdown 目标一并释放
-    this.releaseDocStyle()
-    // text 内容接管 contentEl：释放 Markdown 虚拟视图——VirtualReadingView
-    // 复用 contentEl 作为块容器，其 updateNow/clearAll 会重建容器内容并
-    // 清掉文本视图（挂载期互斥的结构性表达；同挂载点切回 markdown 走
-    // render 的无布局回退路径，行为不回归）
-    if (this.view !== null) {
-      this.view.dispose()
-      this.view = null
-    }
+    this.releaseMarkdownSurface()
     this.target = loaded
     const bytes = loaded.text.length * 2 + 512
     if (beforeMount && !beforeMount(bytes)) {
@@ -883,6 +876,19 @@ export class RefContentMount {
     this.htmlResources = null // #570：随装载目标清退（块级订阅已随 unmount 退订）
     this.target = null
     if (!this.view) this.options.contentEl.textContent = ''
+  }
+
+  mountCustomContent(container: HTMLElement): void {
+    this.releaseMarkdownSurface()
+    this.options.contentEl.appendChild(container)
+  }
+
+  private releaseMarkdownSurface(): void {
+    this.clear()
+    this.releaseDocStyle()
+    // The virtual view owns the container's children; stop it before another renderer takes over.
+    this.view?.dispose()
+    this.view = null
   }
 
   /** #569：释放文档样式装载（mount 终结/换装 text 内容时） */
