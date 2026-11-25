@@ -231,6 +231,8 @@ const ICON_PATHS = {
   // links 字形原样再登记，组语义收敛到内部链接单一职责后重新启用）
   link:
     'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  // PDF 导出组沿用编辑器工具栏的纸张和向下箭头，合为一个 path。
+  pdfExport: 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z M14 2v6h6 M12 12v6 M9 15l3 3 3-3',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
@@ -257,7 +259,7 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
  *  一并退役（全仓引用迁移至新字形）；link（#556）：「内部链接」组标题
  *  （文件与链接分页首组）——旧 links 断链环字形原样再登记（lucide link
  *  线性化），组语义收敛到内部链接生成单一职责。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink' | 'inputCursor' | 'sliders' | 'link'
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink' | 'inputCursor' | 'sliders' | 'link' | 'pdfExport'
 
 /** 生图资产槽位：这些 kind 不走 ICON_PATHS 内联字形，装配为 generated
  *  span（CSS 按 data-icon 映射 media/quick-actions 明暗背景） */
