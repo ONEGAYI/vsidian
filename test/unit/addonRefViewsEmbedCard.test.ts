@@ -19,6 +19,7 @@ import {
   type EmbedAddonMountOptions,
 } from '../../src/webview/embedCard'
 import type { RefSourceContext } from '../../src/webview/refContentInstance'
+import { setLiveEmbedCards } from '../../src/webview/liveEmbed'
 import {
   __resetPdfjsSingletonsForTest,
   __setPdfAssetsForTest,
@@ -114,9 +115,16 @@ function loadOk(h: Harness, target = 'b.md', text = B_TEXT, fsPath = B_FS): void
 }
 
 afterEach(() => {
+  setLiveEmbedCards(null)
   document.body.innerHTML = ''
   vi.restoreAllMocks()
 })
+
+function mountDocumentEmbed(h: Harness, target = 'b.md', mode: 'reading' | 'live' = 'reading') {
+  const host = document.body.appendChild(document.createElement('div'))
+  h.manager.mountCardInto(host, target, 0, 7, mode)
+  return host
+}
 
 describe('Markdown 文件预览', () => {
   it('匹配全文时只读挂载、打开原文件；撤销登记后恢复 Markdown 并终止旧绘制', async () => {
@@ -127,7 +135,7 @@ describe('Markdown 文件预览', () => {
     const preview = { provider: { matches: () => true, open, mount }, reportFault: vi.fn() }
     let enabled = true
     const h = makeHarness({ markdownPreview: () => enabled ? preview : undefined })
-    const host = mountAddonEmbed(h, 'preview-1')
+    const host = mountDocumentEmbed(h)
     loadOk(h)
     await Promise.resolve()
     expect(host.textContent).toContain('绘图预览')
@@ -149,7 +157,7 @@ describe('Markdown 文件预览', () => {
   it('链接到标题时保留 Markdown 呈现，不调用全文预览提供者', () => {
     const select = vi.fn()
     const h = makeHarness({ markdownPreview: select })
-    const host = mountAddonEmbed(h, 'preview-heading', 'b.md#B 目标标题')
+    const host = mountDocumentEmbed(h, 'b.md#B 目标标题')
     const result = okReply(requestOf(h, 'b.md#B 目标标题'), B_TEXT, B_FS)
     h.manager.notifyResult({ ...result, scope: { kind: 'heading', anchor: 'B 目标标题' } })
     expect(select).not.toHaveBeenCalled()
@@ -165,7 +173,7 @@ describe('Markdown 文件预览', () => {
     const preview = { provider: { matches: () => true, open, mount }, reportFault: vi.fn() }
     let enabled = true
     const h = makeHarness({ markdownPreview: () => enabled ? preview : undefined })
-    const host = mountAddonEmbed(h, 'preview-refresh')
+    const host = mountDocumentEmbed(h)
     loadOk(h)
     await Promise.resolve()
     expect(host.textContent).toContain('旧绘图预览')
@@ -189,15 +197,238 @@ describe('Markdown 文件预览', () => {
     const preview = { provider: { matches: () => true, open: vi.fn(), mount }, reportFault: vi.fn() }
     let enabled = false
     const h = makeHarness({ parentMode: () => 'live', markdownPreview: () => enabled ? preview : undefined })
-    const host = document.body.appendChild(document.createElement('div'))
-    h.manager.mountCardInto(host, 'b.md', 0, 7, 'live')
+    const host = mountDocumentEmbed(h, 'b.md', 'live')
     loadOk(h)
-    expect(h.sent.some(message => message.kind === 'refEdit.bind')).toBe(true)
+    const bind = h.sent.find(message => message.kind === 'refEdit.bind')!
+    expect(bind).toBeDefined()
     enabled = true
     h.manager.refreshMarkdownPreviews()
     await Promise.resolve()
     expect(h.manager.budgetStats().panelBytes).toBeGreaterThan(0)
     expect(host.querySelector('.vsidian-view-reading')?.textContent).toContain('绘图预览')
+    h.manager.notifyBound({
+      kind: 'refEdit.bound', reqId: bind.reqId, ok: true, fsPath: B_FS, portId: 'late-port',
+      docUri: 'file:///d%3A/notes/b.md', version: 2, dirty: false,
+    })
+    expect(h.sent).toContainEqual({
+      kind: 'refEdit.unbind', panelSessionId: SESSION.sessionId, panelDocUri: SESSION.docUri, fsPath: B_FS, portId: 'late-port',
+    })
+    h.manager.dispose()
+  })
+
+  it('注册提供者时先重读已失效的 Live 目标，再用最后一次回包匹配', async () => {
+    const mount = vi.fn((container: HTMLElement) => { container.textContent = '绘图预览' })
+    const preview = { provider: { matches: () => true, open: vi.fn(), mount }, reportFault: vi.fn() }
+    let enabled = false
+    const h = makeHarness({
+      parentMode: () => 'live',
+      markdownPreview: target => enabled && target.text.includes('新绘图') ? preview : undefined,
+    })
+    const host = mountDocumentEmbed(h, 'b.md', 'live')
+    loadOk(h)
+    const original = requestOf(h)
+    expect(h.sent.some(message => message.kind === 'refEdit.bind')).toBe(true)
+
+    h.manager.notifyInvalidated({ fsPath: B_FS, status: 'changed', generation: 1 })
+    enabled = true
+    h.manager.refreshMarkdownPreviews({ added: true })
+    const first = requestOf(h)
+    expect(first.reqId).toBeGreaterThan(original.reqId)
+    h.manager.notifyInvalidated({ fsPath: B_FS, status: 'changed', generation: 2 })
+    const latest = requestOf(h)
+    expect(latest.reqId).toBeGreaterThan(first.reqId)
+    h.manager.notifyResult({ ...okReply(first, '# 新绘图一\n', B_FS), version: 3 })
+    await Promise.resolve()
+    expect(mount).not.toHaveBeenCalled()
+    h.manager.notifyResult({ ...okReply(latest, '# 新绘图二\n', B_FS), version: 4 })
+    await Promise.resolve()
+    expect(mount).toHaveBeenCalledWith(expect.any(HTMLElement), expect.objectContaining({ text: '# 新绘图二\n' }), expect.any(AbortSignal))
+    expect(host.textContent).toContain('绘图预览')
+    h.manager.dispose()
+  })
+
+  it('输入提交未确认时保留内嵌编辑器，确认后用最新文本接管', async () => {
+    const mount = vi.fn((container: HTMLElement) => { container.textContent = '绘图预览' })
+    const preview = { provider: { matches: () => true, open: vi.fn(), mount }, reportFault: vi.fn() }
+    let enabled = false
+    const h = makeHarness({ parentMode: () => 'live', markdownPreview: () => enabled ? preview : undefined })
+    const host = mountDocumentEmbed(h, 'b.md', 'live')
+    loadOk(h)
+    const original = requestOf(h)
+    const bind = h.sent.find(message => message.kind === 'refEdit.bind')!
+    const binding = { fsPath: B_FS, portId: 'editing-port' }
+    const docUri = 'file:///d%3A/notes/b.md'
+    h.manager.notifyBound({ kind: 'refEdit.bound', reqId: bind.reqId, ok: true, ...binding, docUri, version: 2, dirty: false })
+    h.manager.notifyPush({ kind: 'refEdit.push', ...binding,
+      message: { kind: 'init', sessionId: binding.portId, docUri, version: 2, text: B_TEXT } })
+    expect(h.manager.typeInEmbed('b.md', B_TEXT.length, '输入中')).toBe(true)
+    const request = h.sent.find(message => message.kind === 'refEdit.message' && message.message.kind === 'edit.request')
+    if (request?.kind !== 'refEdit.message' || request.message.kind !== 'edit.request') throw new Error('未发出本地输入')
+
+    enabled = true
+    h.manager.refreshMarkdownPreviews({ added: true })
+    await Promise.resolve()
+    expect(mount).not.toHaveBeenCalled()
+    expect(h.sent.some(message => message.kind === 'refEdit.unbind')).toBe(false)
+    expect(host.querySelector('.cm-content')?.textContent).toContain('输入中')
+
+    h.manager.notifyPush({ kind: 'refEdit.push', ...binding,
+      message: { kind: 'edit.ack', seq: request.message.seq, ok: true, version: 3 } })
+    await Promise.resolve()
+    const fresh = requestOf(h)
+    expect(fresh.reqId).toBeGreaterThan(original.reqId)
+    h.manager.notifyResult({ ...okReply(fresh, B_TEXT + '输入中', B_FS), version: 3 })
+    await Promise.resolve()
+    expect(mount).toHaveBeenCalledWith(expect.any(HTMLElement), expect.objectContaining({ text: B_TEXT + '输入中' }), expect.any(AbortSignal))
+    expect(host.textContent).toContain('绘图预览')
+    expect(h.sent).toContainEqual({ kind: 'refEdit.unbind', ...binding, panelSessionId: SESSION.sessionId, panelDocUri: SESSION.docUri })
+    h.manager.dispose()
+  })
+
+  it('组件容器及其子卡保留原生 Markdown 与首次装载结果', async () => {
+    const mount = vi.fn()
+    const preview = { provider: { matches: () => true, open: vi.fn(), mount }, reportFault: vi.fn() }
+    const match = vi.fn(() => preview)
+    const outcome = vi.fn()
+    const h = makeHarness({ markdownPreview: match })
+    const host = mountAddonEmbed(h, 'addon-original-with-child', 'b.md', { onFirstOutcome: outcome })
+    loadOk(h, 'b.md', B_WITH_EMBED)
+    expect(match).not.toHaveBeenCalled()
+    expect(outcome).toHaveBeenCalledExactlyOnceWith({ ok: true })
+    loadOk(h, C_INNER, C_TEXT, C_FS)
+    await Promise.resolve()
+    expect(mount).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('孙卡正文。')
+    h.manager.dispose()
+  })
+
+  it('没有正文树根的浮窗子卡不被全文预览接管', () => {
+    const match = vi.fn()
+    const h = makeHarness({ markdownPreview: match })
+    const host = document.body.appendChild(document.createElement('div'))
+    h.manager.mountCardInto(host, 'b.md', 0, 7, 'reading', {
+      panelDocUri: SESSION.docUri, sourceDocUri: B_FS, range: { start: 0, end: 7 },
+      occurrence: 'hover/child', parentInstanceId: 'hover', treeId: 'hover',
+    })
+    loadOk(h)
+    expect(match).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('目标正文一段。')
+    h.manager.dispose()
+  })
+
+  it('用已知 Live 版本识别旧缓存；重读失败时保留现有编辑器', async () => {
+    const mount = vi.fn()
+    const preview = { provider: { matches: () => true, open: vi.fn(), mount }, reportFault: vi.fn() }
+    let enabled = false
+    const text = '# 新绘图\n'
+    const h = makeHarness({ parentMode: () => 'live', markdownPreview: target => enabled && target.text === text ? preview : undefined })
+    const host = mountDocumentEmbed(h, 'b.md', 'live')
+    loadOk(h)
+    const original = requestOf(h)
+    const bind = h.sent.find(message => message.kind === 'refEdit.bind')!
+    const portId = 'newer-port'
+    const docUri = 'file:///d%3A/notes/b.md'
+    h.manager.notifyBound({ kind: 'refEdit.bound', reqId: bind.reqId, ok: true, portId, fsPath: B_FS, docUri, version: 3, dirty: true })
+    h.manager.notifyPush({ kind: 'refEdit.push', portId, fsPath: B_FS, message: { kind: 'init', sessionId: portId, docUri, version: 3, text } })
+    enabled = true
+    h.manager.refreshMarkdownPreviews({ added: true })
+    const first = requestOf(h)
+    expect(first.reqId).toBeGreaterThan(original.reqId)
+    h.manager.notifyResult(okReply(first, B_TEXT, B_FS))
+    const retry = requestOf(h)
+    expect(retry.reqId).toBeGreaterThan(first.reqId)
+    h.manager.notifyResult({ kind: 'hover.result', reqId: retry.reqId, instanceId: retry.instanceId, ok: false, reason: 'read-failed' })
+    expect(host.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`)?.style.display).not.toBe('none')
+    expect(h.manager.probe()[0]?.liveBound).toBe(true)
+    expect(mount).not.toHaveBeenCalled()
+    h.manager.notifyInvalidated({ fsPath: B_FS, status: 'changed', generation: 1 })
+    const recovered = requestOf(h)
+    expect(recovered.reqId).toBeGreaterThan(retry.reqId)
+    h.manager.notifyResult({ ...okReply(recovered, text, B_FS), version: 3 })
+    await Promise.resolve()
+    expect(mount).toHaveBeenCalledOnce()
+    h.manager.dispose()
+  })
+
+  it('无匹配的预览探测不会抵消 Live 切回阅读所需的正常刷新', () => {
+    const h = makeHarness({ parentMode: () => 'live', markdownPreview: () => undefined })
+    const host = mountDocumentEmbed(h, 'b.md', 'live')
+    loadOk(h)
+    const bind = h.sent.find(message => message.kind === 'refEdit.bind')!
+    const portId = 'ordinary-port'
+    const docUri = 'file:///d%3A/notes/b.md'
+    const updated = '# B 目标标题\n\n最新 Markdown 正文。\n'
+    h.manager.notifyBound({ kind: 'refEdit.bound', reqId: bind.reqId, ok: true, portId, fsPath: B_FS, docUri, version: 3, dirty: true })
+    h.manager.notifyPush({ kind: 'refEdit.push', portId, fsPath: B_FS,
+      message: { kind: 'init', sessionId: portId, docUri, version: 3, text: updated } })
+    h.manager.notifyInvalidated({ fsPath: B_FS, status: 'changed', generation: 1 })
+    h.manager.refreshMarkdownPreviews({ added: true })
+    const probe = requestOf(h)
+    h.manager.notifyResult({ ...okReply(probe, updated, B_FS), version: 3 })
+    host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.mode}`)!.click()
+    const reading = requestOf(h)
+    expect(reading.reqId).toBeGreaterThan(probe.reqId)
+    h.manager.notifyResult({ ...okReply(reading, updated, B_FS), version: 3 })
+    expect(host.querySelector('.vsidian-view-reading')?.textContent).toContain('最新 Markdown 正文。')
+    h.manager.dispose()
+  })
+
+  it.each(['live', 'reading-invalidated', 'reading-revoked'] as const)('子卡输入落定前不接管父卡（%s）', async (scenario) => {
+    const mount = vi.fn()
+    const preview = { provider: { matches: () => true, open: vi.fn(), mount }, reportFault: vi.fn() }
+    let enabled = false
+    const mode = scenario === 'live' ? 'live' : 'reading'
+    const h = makeHarness({ parentMode: () => mode, markdownPreview: target => enabled && target.fsPath === B_FS ? preview : undefined })
+    setLiveEmbedCards(h.manager)
+    const root = mountDocumentEmbed(h, 'b.md', mode)
+    loadOk(h, 'b.md', B_WITH_EMBED)
+    const bind = (fsPath: string, portId: string, docUri: string, text: string) => {
+      const request = h.sent.find(message => message.kind === 'refEdit.bind' && message.fsPath === fsPath)!
+      if (request.kind !== 'refEdit.bind') throw new Error('未绑定 Live 编辑器')
+      h.manager.notifyBound({ kind: 'refEdit.bound', reqId: request.reqId, ok: true, portId, fsPath, docUri, version: 2, dirty: false })
+      h.manager.notifyPush({ kind: 'refEdit.push', portId, fsPath, message: { kind: 'init', sessionId: portId, docUri, version: 2, text } })
+    }
+    if (mode === 'live') bind(B_FS, 'parent-port', 'file:///d%3A/notes/b.md', B_WITH_EMBED)
+    loadOk(h, C_INNER, C_TEXT, C_FS)
+    if (mode === 'reading') {
+      root.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.card} .${EMBED_CARD_CLASS_NAMES.card} .${EMBED_CARD_CLASS_NAMES.mode}`)!.click()
+    }
+    bind(C_FS, 'child-port', 'file:///d%3A/notes/child.md', C_TEXT)
+    expect(h.manager.typeInEmbed(C_INNER, C_TEXT.length, '子卡输入')).toBe(true)
+    const request = h.sent.find(message => message.kind === 'refEdit.message' && message.message.kind === 'edit.request')
+    if (request?.kind !== 'refEdit.message' || request.message.kind !== 'edit.request') throw new Error('未发出子卡输入')
+
+    enabled = true
+    h.manager.refreshMarkdownPreviews({ added: true })
+    if (scenario === 'reading-invalidated') {
+      h.manager.notifyInvalidated({ fsPath: B_FS, status: 'changed', generation: 1 })
+      loadOk(h, 'b.md', B_WITH_EMBED)
+    }
+    const beforeAck = requestOf(h)
+    await Promise.resolve()
+    expect(mount).not.toHaveBeenCalled()
+    expect(h.sent.some(message => message.kind === 'refEdit.unbind')).toBe(false)
+    h.manager.notifyPush({ kind: 'refEdit.push', portId: 'child-port', fsPath: C_FS,
+      message: { kind: 'edit.ack', seq: request.message.seq, ok: true, version: 3 } })
+    await Promise.resolve()
+    expect(requestOf(h).reqId).toBeGreaterThan(beforeAck.reqId)
+    if (scenario === 'reading-revoked') {
+      expect(h.manager.typeInEmbed(C_INNER, C_TEXT.length, '第二笔子卡输入')).toBe(true)
+      enabled = false
+      h.manager.refreshMarkdownPreviews()
+      loadOk(h, 'b.md', B_WITH_EMBED)
+      await Promise.resolve()
+      expect(mount).not.toHaveBeenCalled()
+      expect(h.sent.some(message => message.kind === 'refEdit.unbind')).toBe(false)
+      expect(root.textContent).toContain('第二笔子卡输入')
+      h.manager.dispose()
+      return
+    }
+    loadOk(h, 'b.md', B_WITH_EMBED)
+    await Promise.resolve()
+    expect(mount).toHaveBeenCalledOnce()
+    expect(h.sent.filter(message => message.kind === 'refEdit.unbind').map(message => message.portId))
+      .toEqual(expect.arrayContaining(mode === 'live' ? ['parent-port', 'child-port'] : ['child-port']))
     h.manager.dispose()
   })
 })

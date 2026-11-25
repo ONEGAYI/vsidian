@@ -436,6 +436,8 @@ interface EmbedEntry {
   liveSelection: { anchor: number; head: number } | null
   /** P2-04 Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
   pendingReadingRefresh: boolean
+  /** 热接管待输入落定；不缓存旧提供者或旧目标。 */
+  pendingMarkdownPreview?: true
   loaded: EmbedLoaded | null
   markdownPreview?: MarkdownPreviewRegistration
   /** P1-2（review 修复）最近已应用的目标版本（fsPath + version；成功应用
@@ -444,7 +446,7 @@ interface EmbedEntry {
    *  按文档单调，同目标跨 entry 同一版本空间，可比 */
   lastKnown: { fsPath: string; version: number } | null
   /** 在途请求配对（卸载后的迟到回包仍写入缓存） */
-  lastReq: { instanceId: string; reqId: number } | null
+  lastReq: { instanceId: string; reqId: number; previewOnly?: boolean } | null
   /** P1-2 循环防护：最近一次自愈重发发出的 reqId（该请求的回包若仍过期，
    *  视为版本谱系断点——如目标文档关闭重开后 TextDocument.version 重置
    *  ——终态落地不再重发，避免无限循环；正常请求路径置回 null） */
@@ -1330,6 +1332,9 @@ export class EmbedCardManager {
         if (other.lastKnown !== null && other.lastKnown.fsPath === message.target.fsPath) {
           reference = Math.max(reference ?? 0, other.lastKnown.version)
         }
+        if (other.live?.fsPath === message.target.fsPath) {
+          reference = Math.max(reference ?? 0, other.live.lastSeenVersion)
+        }
       }
     }
     const stale = message.ok && reference !== null && message.version < reference
@@ -1345,6 +1350,7 @@ export class EmbedCardManager {
     }
     if (matchedEntries.size > 0) {
       for (const entry of matchedEntries) {
+        const previewOnly = entry.lastReq?.previewOnly === true
         if (stale && entry.healReqId !== message.reqId) {
           if (message.ok) releaseRefSourceLease(this.context, message.sourceLeaseId)
           // 过期回包按 entry 丢弃：清在途配对并自愈重发一次（有已渲染内容
@@ -1356,7 +1362,15 @@ export class EmbedCardManager {
             silent: matched.some((h) => h.entry === entry && h.display === 'content'),
             heal: true,
             reload: true,
+            previewOnly,
           })
+          continue
+        }
+        if ((entry.live || entry.pendingMarkdownPreview || previewOnly) && (stale || !message.ok)) {
+          // 预览重读不是结束编辑：读取失败或仍过期时保留当前现场和待刷新意图。
+          if (message.ok) releaseRefSourceLease(this.context, message.sourceLeaseId)
+          entry.lastReq = null
+          entry.pendingReadingRefresh = true
           continue
         }
         for (const handle of matched) {
@@ -1364,7 +1378,7 @@ export class EmbedCardManager {
             continue
           }
           if (message.ok) {
-            this.applyResult(handle, message)
+            this.applyResult(handle, message, previewOnly)
           } else {
             this.applyError(handle, message.reason, message.anchor, message.anchorDetail)
           }
@@ -1499,6 +1513,9 @@ export class EmbedCardManager {
       // 也一样：B 的 TextDocument 驻留，编辑会话继续）
       if (entry.live) {
         entry.pendingReadingRefresh = true
+        // 预览接管可在编辑器仍在场时读取新快照。新失效要替换这笔在途读取。
+        if (entry.lastReq !== null) this.restoreReadingDisplay(entry, entry.lastReq.previewOnly)
+        else if (entry.pendingMarkdownPreview) this.refreshMarkdownPreviews({ added: true, entry })
         continue
       }
       // 在场滚动位置先保存（重建后恢复；离屏 entry 保留旧值）
@@ -1858,7 +1875,7 @@ export class EmbedCardManager {
   /** 切回 Reading 的内容恢复：目标失效过（Live 期间挂起）或无缓存时静默
    *  重载；否则从装载缓存直接渲染。P2-06：浮窗根的重载走浮窗自己的
    *  请求机械（reloadContent）——Reading 请求/订阅归浮窗，管理器不代发 */
-  private restoreReadingDisplay(entry: EmbedEntry): void {
+  private restoreReadingDisplay(entry: EmbedEntry, previewOnly = false): void {
     const handles = [...this.active.values()].filter((h) => h.entry === entry)
     if (handles.length === 0) {
       return
@@ -1873,9 +1890,10 @@ export class EmbedCardManager {
       return
     }
     if (entry.pendingReadingRefresh || !entry.loaded) {
-      entry.pendingReadingRefresh = false
+      // 探测可能被撤销或没有匹配者；真正消费刷新的是普通读取或成功接管。
+      if (!previewOnly) entry.pendingReadingRefresh = false
       entry.lastReq = null
-      this.requestLoad(handles[0]!, { silent: true, reload: true })
+      this.requestLoad(handles[0]!, { silent: true, reload: true, previewOnly })
       return
     }
     for (const handle of handles) {
@@ -1951,7 +1969,7 @@ export class EmbedCardManager {
             this.applyDisplay(handle, 'error', note)
           }
         }
-        continue
+        return
       }
       live.status = 'bound'
       live.portId = message.portId
@@ -1960,7 +1978,10 @@ export class EmbedCardManager {
       live.lastSeenVersion = Math.max(live.lastSeenVersion, message.version)
       this.createLiveInstance(entry)
       this.refreshLiveChrome(entry)
+      return
     }
+    // 例如预览在 bind 回包前接管：宿主已创建端口，取消本地意图不能替代解绑。
+    if (message.ok) this.unbindLivePort(message.portId, message.fsPath)
   }
 
   /** 创建嵌入 Live 实例（portId/docUri 已知后；EditorView 空文档，init
@@ -2033,6 +2054,7 @@ export class EmbedCardManager {
         if (instanceLive.instance) {
           instanceLive.suspended = instanceLive.instance.isSuspended
           this.refreshLiveChrome(entryRef)
+          if (!instanceLive.suspended) this.retryPendingMarkdownPreview(entryRef, instanceLive)
         }
       },
       // P2-10：根 chrome 联动（快速操作条状态刷新）——轻量转发，根自行调度
@@ -2043,6 +2065,7 @@ export class EmbedCardManager {
       onLocalInputSettled: () => {
         this.retryPendingClose(entryRef)
         this.refreshLiveChrome(entryRef)
+        this.retryPendingMarkdownPreview(entryRef, instanceLive)
       },
       // P2-11 图片弹窗实例上下文：B 管理器 + B 全文 + B 来源导出（打开弹窗
       // 时经 EditorView 反查捕获；sendExport 守卫 entry.live 仍为本实例——
@@ -2510,16 +2533,8 @@ export class EmbedCardManager {
     live.instance?.destroy()
     live.images?.dispose()
     entry.live = null
-    const session = this.context.session()
-    if (live.portId && session.sessionId && session.docUri) {
-      this.context.send({
-        kind: 'refEdit.unbind',
-        panelSessionId: session.sessionId,
-        panelDocUri: session.docUri,
-        portId: live.portId,
-        fsPath: live.fsPath,
-      })
-    }
+    entry.pendingMarkdownPreview = undefined
+    if (live.portId) this.unbindLivePort(live.portId, live.fsPath)
     if (!keepContentBudget) this.budget.clearContent(entry.hostId)
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) {
@@ -2530,6 +2545,13 @@ export class EmbedCardManager {
       handle.content.applyCalloutFoldOverrides(entry.content.calloutFoldOverrides)
       this.applyInternalDom(handle)
       this.refreshModeChrome(handle)
+    }
+  }
+
+  private unbindLivePort(portId: string, fsPath: string): void {
+    const session = this.context.session()
+    if (session.sessionId && session.docUri) {
+      this.context.send({ kind: 'refEdit.unbind', panelSessionId: session.sessionId, panelDocUri: session.docUri, portId, fsPath })
     }
   }
 
@@ -3917,7 +3939,7 @@ export class EmbedCardManager {
    *  回包重建，无闪烁）；heal = P1-2 过期回包的自愈重发（循环防护标记） */
   private requestLoad(
     handle: EmbedCardHandle,
-    opts?: { silent?: boolean; heal?: boolean; reload?: boolean },
+    opts?: { silent?: boolean; heal?: boolean; reload?: boolean; previewOnly?: boolean },
   ): void {
     const session = this.context.session()
     if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
@@ -3937,7 +3959,7 @@ export class EmbedCardManager {
       return
     }
     const reqId = ++this.reqSeq
-    handle.entry.lastReq = { instanceId: handle.instanceId, reqId }
+    handle.entry.lastReq = { instanceId: handle.instanceId, reqId, previewOnly: opts?.previewOnly }
     handle.entry.healReqId = opts?.heal === true ? reqId : null
     if (!opts?.silent) {
       this.applyDisplay(handle, 'loading', t('embed.loading'))
@@ -3976,7 +3998,7 @@ export class EmbedCardManager {
    *  管线，不经卡片请求——防御性第二道防线与 #333 同口径）。
    *  #338（P3-06）：pdf 载荷在此分派到 PDF 视图（applyPdfLoaded——嵌入
    *  卡侧挂 PdfHoverView 实例，不进 Markdown Reading 装载链） */
-  private applyResult(handle: EmbedCardHandle, message: Extract<HoverPreviewResult, { ok: true }>): void {
+  private applyResult(handle: EmbedCardHandle, message: Extract<HoverPreviewResult, { ok: true }>, previewOnly: boolean): void {
     if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
       handle.entry.lastReq = null
@@ -3984,6 +4006,12 @@ export class EmbedCardManager {
       return
     }
     const converted = refLoadedContentOfResult(message)
+    if (previewOnly && (converted === null || !isRefLoadedMarkdown(converted))) {
+      handle.entry.lastReq = null
+      handle.entry.pendingMarkdownPreview = undefined
+      releaseRefSourceLease(this.context, message.sourceLeaseId)
+      return
+    }
     // #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
     // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）；#341：text
     // 载荷接入卡片装载（同一 TextRefView 渲染管线）；#338：pdf 载荷接入
@@ -4001,7 +4029,7 @@ export class EmbedCardManager {
       this.applyPdfLoaded(handle, loaded, message.sourceLeaseId)
       return
     }
-    this.applyLoaded(handle, loaded, message.sourceLeaseId)
+    this.applyLoaded(handle, loaded, message.sourceLeaseId, previewOnly)
   }
 
   /** 装载结果渲染（首载与缓存重挂共用）：B Reading 视图 + 状态恢复。
@@ -4011,7 +4039,7 @@ export class EmbedCardManager {
    *  在场（伪宿主/慢宿主不回 bind 时卡片不空白），绑定成功经
    *  applyInternalDom 切换到编辑器容器；生效内部模式为 Live 时随后发起
    *  端口绑定（装载完成的 watch 固定是宿主 bind 校验的前置）。 */
-  private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded, sourceLeaseId?: string): void {
+  private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded, sourceLeaseId?: string, previewOnly = false): void {
     if (isRefLoadedPdf(loaded)) {
       // 防御性入口归一（外部调用点已分流；联合收窄保证下方 render 只见 markdown）
       this.applyPdfLoaded(handle, loaded, sourceLeaseId)
@@ -4020,9 +4048,24 @@ export class EmbedCardManager {
     if (handle.scrollEl.scrollTop > 0) {
       handle.entry.content.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
     }
+    const registered = this.markdownPreviewFor(handle, loaded)
+    if (previewOnly && !registered && handle.display === 'content') {
+      // 提供者撤销或不再匹配：专用探测不能重画原生内容。
+      handle.entry.pendingMarkdownPreview = undefined
+      releaseRefSourceLease(this.context, sourceLeaseId)
+      return
+    }
+    const waiting = (registered !== undefined || handle.entry.pendingMarkdownPreview === true)
+      && this.delayMarkdownPreviewForInput(handle.entry)
+    if (waiting && handle.display === 'content') {
+      // 读回时仍有人在卡片树内编辑：不重建旧容器，也不迁移来源租约。
+      releaseRefSourceLease(this.context, sourceLeaseId)
+      return
+    }
     handle.entry.loaded = loaded
     this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
-    const preview = this.markdownPreviewFor(handle, loaded)
+    if (!waiting) handle.entry.pendingMarkdownPreview = undefined
+    const preview = waiting ? undefined : registered
     handle.entry.markdownPreview = preview?.registration
     handle.markdownPreview?.stop()
     handle.markdownPreview = undefined
@@ -4046,6 +4089,7 @@ export class EmbedCardManager {
       return
     }
     if (preview) {
+      handle.entry.pendingReadingRefresh = false
       if (handle.entry.live) this.teardownLive(handle.entry, { keepContentBudget: true })
       const container = document.createElement('div')
       const abort = new AbortController()
@@ -4087,18 +4131,67 @@ export class EmbedCardManager {
     // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
   }
 
-  private markdownPreviewFor(handle: EmbedCardHandle, loaded: EmbedLoaded) {
-    if (handle.host === 'hover' || !isRefLoadedMarkdown(loaded) || loaded.scope !== 'full' || loaded.range.start !== 0) return
+  private markdownPreviewTarget(handle: EmbedCardHandle, loaded: EmbedLoaded) {
+    if (!isRefLoadedMarkdown(loaded) || loaded.scope !== 'full' || loaded.range.start !== 0) return
+    const source = handle.entry.content.source
+    // 只接管正文嵌入。组件引用的 readOnly 逐层继承；普通浮窗子卡按引用树根识别。
+    if (handle.host === 'hover' || source.readOnly) return
+    if (source.parentInstanceId !== undefined) {
+      const root = source.treeId !== undefined ? this.entryOfHostId(source.treeId) : undefined
+      if (!root || root.popupRoot) return
+    }
     const { fsPath, relPath, text } = loaded
-    const target = { fsPath, relPath, text }
+    return { fsPath, relPath, text }
+  }
+
+  private markdownPreviewFor(handle: EmbedCardHandle, loaded: EmbedLoaded) {
+    const target = this.markdownPreviewTarget(handle, loaded)
+    if (!target) return
     const registration = this.context.markdownPreview?.(target)
     if (registration) return { registration, target }
   }
 
-  refreshMarkdownPreviews(): void {
+  private *embedAncestors(entry: EmbedEntry): Iterable<EmbedEntry> {
+    for (let current: EmbedEntry | undefined = entry; current !== undefined;) {
+      yield current
+      const parentId: string | undefined = current.content.source.parentInstanceId
+      current = parentId === undefined ? undefined : this.entryOfHostId(parentId)
+    }
+  }
+
+  private delayMarkdownPreviewForInput(entry: EmbedEntry): boolean {
+    // 重画当前卡会卸载整个子树，包括正在编辑的多层正文引用。
+    for (const candidate of this.entries.values()) {
+      if (candidate.live?.suspended || candidate.live?.instance?.hasPendingLocalInput()) {
+        for (const ancestor of this.embedAncestors(candidate)) {
+          if (ancestor !== entry) continue
+          entry.pendingMarkdownPreview = true
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  private retryPendingMarkdownPreview(entry: EmbedEntry, live: EmbedLiveState): void {
+    const waiting = [...this.embedAncestors(entry)].filter(candidate => candidate.pendingMarkdownPreview).reverse()
+    if (waiting.length === 0) return
+    // 等本次输入回执栈结束，再决定是否接管并销毁当前编辑器。
+    queueMicrotask(() => {
+      if (entry.live !== live) return
+      for (const candidate of waiting) {
+        if (!candidate.pendingMarkdownPreview || this.delayMarkdownPreviewForInput(candidate)) continue
+        candidate.pendingReadingRefresh = true
+        this.refreshMarkdownPreviews({ added: true, entry: candidate })
+      }
+    })
+  }
+
+  refreshMarkdownPreviews({ added = false, entry: only }: { added?: boolean; entry?: EmbedEntry } = {}): void {
     for (const handle of [...this.active.values()]) {
-      if (this.active.get(handle.hostEl) !== handle) continue
-      const loaded = handle.entry.loaded
+      const entry = handle.entry
+      if (this.active.get(handle.hostEl) !== handle || (only && entry !== only)) continue
+      const loaded = entry.loaded
       const preview = handle.markdownPreview
       if (!loaded) {
         // A silent reload leaves the old rendering in place while the host reads again.
@@ -4108,8 +4201,26 @@ export class EmbedCardManager {
           this.applyDisplay(handle, 'loading', t('embed.loading'))
           this.refreshModeChrome(handle)
         }
-      } else if (this.markdownPreviewFor(handle, loaded)?.registration !== preview?.registration) {
-        this.applyLoaded(handle, loaded)
+        if (added && entry.pendingMarkdownPreview && entry.lastReq === null && !this.delayMarkdownPreviewForInput(entry)) {
+          // 普通失效已清空缓存：等子卡输入落定后重新建立正文快照。
+          this.restoreReadingDisplay(entry)
+        }
+      } else if (entry.lastReq === null) {
+        const target = this.markdownPreviewTarget(handle, loaded)
+        if (!target) continue
+        if (added && (entry.pendingReadingRefresh || (entry.live && entry.live.lastSeenVersion > loaded.version))) {
+          entry.pendingMarkdownPreview = true
+          if (!this.delayMarkdownPreviewForInput(entry)) {
+            entry.pendingReadingRefresh = true
+            this.restoreReadingDisplay(entry, true)
+          }
+          continue
+        }
+        const registration = this.context.markdownPreview?.(target)
+        if (!registration) entry.pendingMarkdownPreview = undefined
+        if (registration !== preview?.registration && (!registration || !this.delayMarkdownPreviewForInput(entry))) {
+          this.applyLoaded(handle, loaded)
+        }
       }
     }
   }

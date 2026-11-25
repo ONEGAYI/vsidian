@@ -2465,7 +2465,7 @@ export class WebviewSyncController {
     if (this.addonMarkdownPreviews.has(addonId)) throw new Error('Duplicate Markdown preview registration')
     const registration = { provider, reportFault }
     this.addonMarkdownPreviews.set(addonId, registration)
-    this.embedCards?.refreshMarkdownPreviews()
+    this.embedCards?.refreshMarkdownPreviews({ added: true })
     return () => {
       if (this.addonMarkdownPreviews.get(addonId) !== registration) return
       this.addonMarkdownPreviews.delete(addonId)
