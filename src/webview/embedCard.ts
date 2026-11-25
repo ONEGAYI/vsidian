@@ -492,7 +492,7 @@ interface EmbedCardHandle {
    *  与 Reading/Live 容器并列——每容器一份，同 URI 多 occurrence 经共
    *  享文档存储复用文档数据，滚动各自独立） */
   pdfView: PdfHoverView | null
-  markdownPreview?: { registration: MarkdownPreviewRegistration; target: AddonMarkdownPreviewTarget; stop(): void }
+  markdownPreview?: { registration: MarkdownPreviewRegistration; target: AddonMarkdownPreviewTarget; signal: AbortSignal; stop(): void }
   display: 'loading' | 'content' | 'error'
   note: string
   /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配）。P2-06
@@ -981,7 +981,11 @@ export class EmbedCardManager {
       event.stopPropagation()
       const preview = handle.markdownPreview
       if (preview) {
-        void Promise.resolve().then(() => preview.registration.provider.open(preview.target)).catch(preview.registration.reportFault)
+        void Promise.resolve().then(() => {
+          if (!preview.signal.aborted) return preview.registration.provider.open(preview.target)
+        }).catch(error => {
+          if (!preview.signal.aborted) preview.registration.reportFault(error)
+        })
         return
       }
       const session = this.context.session()
@@ -4096,6 +4100,7 @@ export class EmbedCardManager {
       handle.content.mountCustomContent(container)
       handle.markdownPreview = {
         ...preview,
+        signal: abort.signal,
         stop: () => { abort.abort(); container.remove() },
       }
       void Promise.resolve().then(() => {
@@ -4133,6 +4138,8 @@ export class EmbedCardManager {
 
   private markdownPreviewTarget(handle: EmbedCardHandle, loaded: EmbedLoaded) {
     if (!isRefLoadedMarkdown(loaded) || loaded.scope !== 'full' || loaded.range.start !== 0) return
+    // 首行定位（含刷新时钳到首行）也是显式选择，不因偏移为 0 而接管。
+    if (loaded.selector?.kind === 'full' && loaded.selector.line !== undefined) return
     const source = handle.entry.content.source
     // 只接管正文嵌入。组件引用的 readOnly 逐层继承；普通浮窗子卡按引用树根识别。
     if (handle.host === 'hover' || source.readOnly) return

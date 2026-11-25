@@ -9,7 +9,7 @@
 //（show 完成才兑现首结局——预布局可见态不算内容装载成功）。
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HoverPreviewResult, WebviewToHost } from '../../src/shared/protocol'
+import { isHostToWebview, type HoverPreviewResult, type WebviewToHost } from '../../src/shared/protocol'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import {
@@ -162,6 +162,79 @@ describe('Markdown 文件预览', () => {
     h.manager.notifyResult({ ...result, scope: { kind: 'heading', anchor: 'B 目标标题' } })
     expect(select).not.toHaveBeenCalled()
     expect(host.textContent).toContain('目标正文一段。')
+    h.manager.dispose()
+  })
+
+  it.each([1, 2])('显式第 %i 行与刷新钳到首行都不交给全文预览', async (line) => {
+    const open = vi.fn()
+    const mount = vi.fn()
+    const select = vi.fn(() => ({ provider: { matches: () => true, open, mount }, reportFault: vi.fn() }))
+    const h = makeHarness({ markdownPreview: select })
+    const target = `b.md:${line}`
+    const host = mountDocumentEmbed(h, target)
+    const result = okReply(requestOf(h, target), B_TEXT, B_FS)
+    const scope = { kind: 'full' as const, line }
+    const located = {
+      ...result, scope, range: { start: line === 1 ? 0 : B_TEXT.indexOf('\n') + 1, end: B_TEXT.length },
+    }
+    expect(isHostToWebview(located)).toBe(true)
+    expect(isHostToWebview({ ...located, scope: { kind: 'full', line: 0 } })).toBe(false)
+    h.manager.notifyResult(located)
+    await Promise.resolve()
+    expect(host.textContent).toContain('目标正文一段。')
+    expect(select).not.toHaveBeenCalled()
+    host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!.click()
+    expect(h.sent.some(message => message.kind === 'wikilink.activate' && message.target === target)).toBe(true)
+
+    h.manager.notifyInvalidated({ fsPath: B_FS, status: 'changed', generation: 1 })
+    const refreshed = okReply(requestOf(h, target), '仅剩一行。', B_FS)
+    h.manager.notifyResult({ ...refreshed, scope, version: 3 })
+    await Promise.resolve()
+    expect(host.textContent).toContain('仅剩一行。')
+    expect(mount).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
+    h.manager.dispose()
+  })
+
+  it('点击排队后撤销登记，不再调用已经卸载的打开处理器', async () => {
+    const open = vi.fn()
+    const mount = vi.fn((container: HTMLElement) => { container.textContent = '旧预览' })
+    const preview = { provider: { matches: () => true, open, mount }, reportFault: vi.fn() }
+    let enabled = true
+    const h = makeHarness({ markdownPreview: () => enabled ? preview : undefined })
+    const host = mountDocumentEmbed(h)
+    loadOk(h)
+    await Promise.resolve()
+    host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!.click()
+    enabled = false
+    h.manager.refreshMarkdownPreviews()
+    await Promise.resolve()
+    expect(open).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('目标正文一段。')
+    h.manager.dispose()
+  })
+
+  it('替换提供者后忽略旧打开操作的迟到错误，当前错误仍会上报', async () => {
+    let rejectOld!: (error: Error) => void
+    const pending = new Promise<void>((_, reject) => { rejectOld = reject })
+    const old = { provider: { matches: () => true, open: vi.fn(() => pending), mount: vi.fn() }, reportFault: vi.fn() }
+    const currentError = new Error('当前打开失败')
+    const current = { provider: { matches: () => true, open: vi.fn(async () => { throw currentError }), mount: vi.fn() }, reportFault: vi.fn() }
+    let registered = old
+    const h = makeHarness({ markdownPreview: () => registered })
+    const host = mountDocumentEmbed(h)
+    loadOk(h)
+    const button = host.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!
+    button.click()
+    await Promise.resolve()
+    expect(old.provider.open).toHaveBeenCalledTimes(1)
+    registered = current
+    h.manager.refreshMarkdownPreviews()
+    rejectOld(new Error('旧打开迟到失败'))
+    button.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(old.reportFault).not.toHaveBeenCalled()
+    expect(current.reportFault).toHaveBeenCalledExactlyOnceWith(currentError)
     h.manager.dispose()
   })
 

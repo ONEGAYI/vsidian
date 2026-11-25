@@ -242,7 +242,7 @@ async function readMarkdownContent(
           content: {
             ...base,
             range: { start: hostLineStart(lfText, lines.length) ?? 0, end: lfText.length },
-            selector: { kind: 'full' },
+            selector: { kind: 'full', line: opts.line },
           },
         }
       }
@@ -253,7 +253,7 @@ async function readMarkdownContent(
       content: {
         ...base,
         range: { start: hostLineStart(lfText, opts.line) ?? 0, end: lfText.length },
-        selector: { kind: 'full' },
+        selector: { kind: 'full', line: opts.line },
       },
     }
   }

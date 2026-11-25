@@ -2553,7 +2553,7 @@ export interface HoverPreviewTargetIdentity {
  *  OutlinkItemPayload.anchor 同口径）。P2-03（#280）起只作初始定位与
  *  引用身份标识，不再是内容、授权或编辑边界——内容范围恒为目标全文） */
 export type HoverPreviewScope =
-  | { kind: 'full' }
+  | { kind: 'full'; line?: number } // 显式行号仍返回全文；line 区分无定位与定位到首行。
   | { kind: 'heading'; anchor: string }
   | { kind: 'block'; anchor: string }
 
@@ -6263,7 +6263,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           isNonNegativeInt(v.range.end) &&
           v.range.start <= v.range.end &&
           isObject(v.scope) &&
-          (v.scope.kind === 'full' ||
+          ((v.scope.kind === 'full' && (v.scope.line === undefined || isPositiveInt(v.scope.line))) ||
             ((v.scope.kind === 'heading' || v.scope.kind === 'block') && isString(v.scope.anchor)))
         )
       }

@@ -315,7 +315,7 @@ export function refLoadedContentOfResult(
   }
   const rawScope = message.scope as HoverPreviewScope
   const scope: HoverPreviewScope = rawScope.kind === 'full'
-    ? { kind: 'full' }
+    ? { kind: 'full', ...(rawScope.line !== undefined ? { line: rawScope.line } : {}) }
     : rawScope.kind === 'heading'
       ? { kind: 'heading', anchor: rawScope.anchor }
       : { kind: 'block', anchor: rawScope.anchor }
