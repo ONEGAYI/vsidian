@@ -378,7 +378,7 @@ const result = await sdk.views?.openDocument({
 
 ### 全文 Markdown 嵌入预览
 
-文件格式组件可通过 `sdk.refViews?.registerMarkdownPreview?.(provider)` 注册全文嵌入预览。用 `matches` 识别已经解析的 Markdown，用 `mount(container, target, signal)` 挂载只读视图，用 `open(target)` 打开原文件。异步挂载完成后先检查 `signal.aborted`；切换目标或停用时旧容器会被撤下。普通笔记、标题／块引用及悬停仍走默认呈现。旧版本没有此 API，组件可按需保留其他入口。见[预览 API](api-reference.md#markdown-embed-preview)。
+从 API 1.7.0 起，文件格式组件可通过 `sdk.refViews?.registerMarkdownPreview?.(provider)` 注册全文嵌入预览。用 `matches` 识别已经解析的 Markdown，用 `mount(container, target, signal)` 挂载只读视图，用 `open(target)` 打开原文件。异步挂载完成后先检查 `signal.aborted`；切换目标或停用时旧容器会被撤下。未匹配的普通笔记、标题／块／行号引用及悬停仍走默认呈现。旧版本没有此 API，组件可按需保留其他入口。见[预览 API](api-reference.md#markdown-embed-preview)。
 
 ## 6. 调试
 
@@ -391,7 +391,7 @@ const result = await sdk.views?.openDocument({
 
 ## 7. 版本、兼容与迁移
 
-- **API 版本独立于 Vsidian 本体版本**：兼容判定看清单 `api` 范围与宿主稳定 API 版本（当前 1.6.0，随 Vsidian 1.9.0 发行；兼容承诺自 1.1.0 起）。`inlineMath` 自 1.5.0 可用，`blockMath` 自 1.6.0 可用。只支持块公式而不提供旧宿主回退的组件，可声明 `^1.6.0`；仍兼容旧宿主的组件可以分批登记新旧规则。
+- **API 版本独立于 Vsidian 本体版本**：兼容判定看清单 `api` 范围与宿主稳定 API 版本（当前 1.7.0，随 Vsidian 1.10.0 发行；兼容承诺自 1.1.0 起）。`inlineMath` 自 1.5.0 可用，`blockMath` 自 1.6.0 可用，`registerMarkdownPreview` 自 1.7.0 可用。组件的核心功能依赖某个入口时，可声明相应的最低版本；可选能力可以先检测宿主是否提供。
 - **实验入口另行声明**：`experimental.cm6`、`experimental.headingFold` 等入口可能随版本调整，不随稳定 API 弃用期限承诺；使用前必须在清单声明兼容范围。
 - **稳定移除规则**：稳定 API 确需移除时，先发布弃用说明与替代方案；从弃用版本实际发布日起，同时满足两个后续 API 次版本和 30 天才允许移除。
 - **发行记录**：稳定 API 自 1.1.0 起随本体发行，各版日期见 [API 变更记录](../../CHANGELOG-API.md)。experimental 实验入口维持候选状态。迁移内容在出现破坏性变更时补充。

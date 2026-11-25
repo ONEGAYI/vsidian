@@ -17,6 +17,7 @@
 | 1.4.0 | 已发布 | 2026-10-29 | 语义澄清（随 Vsidian 1.6.0 发布）：行为链驱动的代码上下文排除面收窄为块级（#649）——驱动门控与符号补全的代码上下文口径拆分，排除面为 frontmatter、围栏/缩进代码块与块级 HTML，行内代码内的键入（input.type）与 IME 定稿（input.type.compose）照常驱动恰一次、载荷形态与其他正文键入同构；删除白名单事件（delete.*）同样在行内代码内照常驱动。属兼容性修订而非破坏性变更（「代码上下文不驱动」从未在契约中承诺行内代码不驱动）。无新增能力面与实验入口。 |
 | 1.5.0 | 已发布 | 2026-11-22 | 新增能力（随 Vsidian 1.8.0 发布）：声明式粘贴模板的可选 inlineMath 文本槽从非块级 MathML 注解提取 TeX 并还原行内公式（#694）。已有规则与无规则时的粘贴行为不变；无新增实验入口。 |
 | 1.6.0 | 已发布 | 2026-11-23 | 新增能力（随 Vsidian 1.9.0 发布）：声明式粘贴模板的可选 blockMath 文本槽从块级 MathML 注解提取 TeX，保留公式内部换行并还原独立公式块（#707）。组件可分批登记以保留旧宿主支持的规则；无新增实验入口。 |
+| 1.7.0 | 已发布 | 2026-11-26 | 新增能力（随 Vsidian 1.10.0 发布）：页面 SDK 的可选 refViews.registerMarkdownPreview 为特定 Markdown 文件格式提供只读的全文嵌入预览（#714）。既有引用接口保持兼容，无新增实验入口。 |
 
 **实验入口兼容清单**（使用须在清单 `experimental` 声明对应入口与兼容范围；实验入口可能随版本调整，不随稳定 API 弃用期限承诺）：
 
@@ -150,7 +151,7 @@ export type AddonDeclarationParseResult =
  * api 范围须包含该版本才判兼容；API 版本独立于 Vsidian 本体版本号， 随
  * 携带 API 变更的本体发布同笔升版。
  */
-export const ADDON_API_VERSION = '1.6.0'
+export const ADDON_API_VERSION = '1.7.0'
 
 /** 兼容判定的宿主侧输入 */
 export interface AddonCompatibilityHost {
@@ -1389,7 +1390,7 @@ export function isAddonRefEmbedRequest(v: unknown): v is AddonRefEmbedRequest {
 
 ### `markdown-embed-preview` 全文 Markdown 嵌入预览（refViews.registerMarkdownPreview）
 
-**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：Unreleased
+**分层**：稳定 API 面（发行状态见台账与条目说明） · **执行端**：编辑器页 · **引入**：#714（API 1.7.0）
 
 **目标**：组件为已经读取的特定 Markdown 格式提供只读预览，复用正文嵌入卡的文件解析、布局、预算和更新通道。
 

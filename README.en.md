@@ -86,7 +86,9 @@ A VS Code extension can declare itself a Vsidian add-on. Vsidian discovers it on
 
 Install [Vsidian Agent Bridge](https://github.com/ONEGAYI/vsidian-agent-bridge) to restore formulas when pasting rich text from sources such as Antigravity. Inline formulas require Vsidian 1.8.0 or later; display formulas require Vsidian 1.9.0 and Bridge 0.3.0 or later.
 
-See the [add-on developer guide](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md). The current stable API is 1.6.0. Compatibility commitments began with 1.1.0.
+Install [Vsidian Excalidraw](https://github.com/ONEGAYI/vsidian-excalidraw) to edit the same drawing in VS Code and Obsidian. With Vsidian 1.10.0 or later, a standalone `![[Drawing]]` in a note shows a read-only preview.
+
+See the [add-on developer guide](https://github.com/ONEGAYI/vsidian/blob/main/docs/addons/developer-guide.md). The current stable API is 1.7.0. Compatibility commitments began with 1.1.0.
 
 ## More features
 
