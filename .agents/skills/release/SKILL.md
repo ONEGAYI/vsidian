@@ -52,11 +52,11 @@ VSIX 解压总量警告 16.5 MiB / 上限 17.0 MiB（#85 代码块高亮后基�
 
 ## CI 自动发布
 
-`.github/workflows/release.yml` 由 `v*` 标签触发。`release` job 在 `npm run release` 前先跑契约复验链（`check:stylecontract:baseline` + `check:stylecontract`，#135：30 天期限/发布跨度/兼容性复验，失败即不打包不产出 Release），随后跑 `npm run release`（检查失败即中止，不产出 Release）；`marketplace` job 从 Release 下载同一 VSIX 发布到 Marketplace（上市场的与 Release 附带的是同一份字节），需先配置仓库 secret `VSCE_PAT`（Azure DevOps PAT：Organization 选 All accessible organizations，Scope 选 Marketplace → Manage）并将 variable `MARKETPLACE_PUBLISH` 设为 `true`——两道开关配置前，推 tag 只产出 GitHub Release。
+`.github/workflows/release.yml` 由 `v*` 标签触发。`release` job 在 `npm run release` 前先跑契约复验链（`check:stylecontract:baseline` + `check:stylecontract`，#135：30 天期限/发布跨度/兼容性复验，失败即不打包不产出 Release），随后跑 `npm run release`（检查失败即中止，不产出 Release）；`marketplace` job 从 Release 下载同一 VSIX 发布到 Marketplace（上市场的与 Release 附带的是同一份字节），凭据使用 Marketplace Trusted Publishing：为发布者 ONEGAYI 配置仓库 `ONEGAYI/vsidian`、工作流 `release.yml`、环境 `marketplace`；GitHub 同名环境分别放行 `main` 分支与 `v*` 标签。设置仓库 variable `MARKETPLACE_PUBLISH=true` 才允许发布到市场；开关关闭时只产出 GitHub Release。首次实际发布成功前保留旧 PAT，不需把 PAT 交给工作流。
 
 ## marketplace 失败的兜底
 
-v0.1.0 首发实测两坑——job 级 `if` 隐式 `success() &&` 前缀会跳过 dispatch 场景（已用 `!cancelled()` 豁免）；给已注册 workflow 新增触发器后平台注册实体可能滞留旧解析（dispatch 持续 422，对文件做字节变更推送也未能刷新）。**已验证的补发路径**：本地 `gh release download <tag> --pattern '*.vsix'` 下载同一 VSIX 后 `npx @vscode/vsce publish --no-dependencies --packagePath <vsix>`（依赖本地 `vsce login onegayi` 凭证）；dispatch 入口保留，注册表自愈后仍可用。
+v0.1.0 首发实测两坑——job 级 `if` 隐式 `success() &&` 前缀会跳过 dispatch 场景（已用 `!cancelled()` 豁免）；给已注册 workflow 新增触发器后平台注册实体可能滞留旧解析（dispatch 持续 422，对文件做字节变更推送也未能刷新）。**已验证的补发路径**：本地 `gh release download <tag> --pattern '*.vsix'` 下载同一 VSIX 后 `npx @vscode/vsce publish --no-dependencies --packagePath <vsix>`（依赖本地 `vsce login onegayi` 凭证）；dispatch 从 `main` 启动 OIDC 补发，沿用 GitHub Release 内的 VSIX，不重推标签或重建包；历史本地 PAT 补发不作为迁移后的长期路径。
 
 ## README 双语
 

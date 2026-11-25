@@ -7,8 +7,8 @@
 //   工作流解析失败）；
 // - !cancelled() 豁免位于 gate 之前（86535e71：gate 放在前面会被 job 级
 //   if 隐式 success() && 前缀在 dispatch 场景判 false，补跑入口失效）。
-// 双开关语义的事实源：release 技能「CI 自动发布」节与本 yml 头注释——
-// 未配置 VSCE_PAT secret 与 MARKETPLACE_PUBLISH variable 时，推 tag 只产出
+// 发布开关的事实源：release 技能「CI 自动发布」节与本 yml 头注释——
+// 未开启 MARKETPLACE_PUBLISH variable 时，推 tag 只产出
 // GitHub Release。文本断言模式对齐 chromeContract.test.ts（无 YAML 解析
 // 依赖）；断言粒度对齐 easy-typing 的 release-workflow.test.ts，只钉 gate
 // 相关锚点，不钉场景区分等其他细节。
@@ -36,8 +36,8 @@ describe('Release 工作流 marketplace gate 契约（#615）', () => {
     const ifValue = marketplaceIfValue()
     expect(
       ifValue,
-      'marketplace 的 if 缺少 vars.MARKETPLACE_PUBLISH gate——双开关语义丢失，'
-        + '已配 VSCE_PAT 未设 variable 时推 tag 会直发 Marketplace',
+      'marketplace 的 if 缺少 vars.MARKETPLACE_PUBLISH gate——发布开关语义丢失，'
+        + '已配 Trusted Publishing 未设 variable 时推 tag 会直发 Marketplace',
     ).toContain("vars.MARKETPLACE_PUBLISH == 'true'")
   })
 
@@ -54,5 +54,19 @@ describe('Release 工作流 marketplace gate 契约（#615）', () => {
     expect(exempt, 'if 条件缺少 !cancelled() 豁免').toBeGreaterThanOrEqual(0)
     expect(gate, 'if 条件缺少 MARKETPLACE_PUBLISH gate').toBeGreaterThanOrEqual(0)
     expect(gate, 'gate 须位于 !cancelled() 之后').toBeGreaterThan(exempt)
+  })
+})
+
+describe('Release 工作流 Trusted Publishing 契约', () => {
+  it('只在 Marketplace job 申请 OIDC，并沿用 Release 资产', () => {
+    const [releaseJob, marketplaceJob] = workflowText.split(/^  marketplace:\s*$/m)
+    expect(releaseJob).not.toContain('id-token: write')
+    expect(marketplaceJob).toContain('environment: marketplace')
+    expect(marketplaceJob).toContain('id-token: write')
+    expect(marketplaceJob).toContain('gh release download')
+    expect(marketplaceJob).toContain('@vscode/vsce@4.1.1 publish --oidc')
+    expect(marketplaceJob).toContain('--packagePath ./*.vsix')
+    expect(marketplaceJob).not.toContain('secrets.VSCE_PAT')
+    expect(marketplaceIfValue()).toContain("(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')")
   })
 })
