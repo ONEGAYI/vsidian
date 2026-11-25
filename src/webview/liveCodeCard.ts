@@ -400,6 +400,7 @@ export function buildWrapButton(wrapOn: boolean, onToggle: () => void): HTMLButt
 // ---- 装饰实例缓存（增量与全量产出相同实例，RangeSet.eq 前提） ----
 
 const fenceHideDeco = Decoration.replace({})
+const codeSelectionDeco = Decoration.mark({ class: CODE_CARD_CLASS_NAMES.selection })
 
 const cardLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
 /** 卡片行装饰（#189）：attributes 携带按块计算的 --vsidian-code-indent
@@ -591,11 +592,16 @@ export function buildCodeCardDecorations(
     }
     const openLine = doc.lineAt(fence.from)
     const closeLine = doc.lineAt(Math.min(fence.to, doc.length))
+    const numbersOn = config.card && config.lineNumbers && closeLine.number > openLine.number + 1
     // drawSelection 位于正文背景下；代码主题允许不透明底色，选区在文字层补绘。
+    // 行号启用时逐行补绘，避免跨行 mark 包住后续行行首的行号 widget。
     for (const range of selection.ranges) {
-      const from = Math.max(range.from, fence.from)
       const to = Math.min(range.to, fence.to)
-      if (to > from) out.push(Decoration.mark({ class: CODE_CARD_CLASS_NAMES.selection }).range(from, to))
+      for (let from = Math.max(range.from, fence.from); from < to;) {
+        const end = numbersOn ? Math.min(to, doc.lineAt(from).to) : to
+        if (end > from) out.push(codeSelectionDeco.range(from, end))
+        from = end + 1
+      }
     }
     const lang = resolveCodeLanguage(fence.info)
     // 语法高亮（#83）：卡片关闭时朴素围栏仍可着色；折叠块不可见跳过。
@@ -635,7 +641,6 @@ export function buildCodeCardDecorations(
     // #189 围栏行与代码文本列真实对齐：缩进值 = 行号列宽 + 24px 间距，
     // 按块注入 --vsidian-code-indent；行号关闭或无内容行时归零（围栏与
     // 文本同在 x=0）。代码行同值复用为续行悬挂缩进的列宽基准（#191）
-    const numbersOn = config.lineNumbers && closeLine.number > openLine.number + 1
     const widthCh = Math.max(2, String(closeLine.number - openLine.number - 1).length)
     const indent = numbersOn ? `calc(${widthCh}ch + 24px)` : '0px'
     for (let n = openLine.number; n <= closeLine.number; n++) {

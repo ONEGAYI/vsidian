@@ -445,8 +445,8 @@ try {
   // ---- 跨行代码选区不越界卡内行号（#484 满宽块左界的台账外场景） ----
   // 代码卡片行的悬挂缩进（#191 padding-left + 负 text-indent）把行盒左缘
   // 留在卡内行号区：跨行选区的中间/末行满宽块左界若取行盒左缘，高亮会
-  // 横穿行号 widget 区。断言对象是绘制层真实几何：任何可见选区块不得与
-  // 行号盒水平相交；正文折行满宽惯例保持（满宽块左界 ≈ 正文行盒左缘）。
+  // 横穿行号 widget 区。检查矩形层几何与真实像素：字符层补绘也不得染到
+  // 行号；正文折行满宽惯例保持（满宽块左界 ≈ 正文行盒左缘）。
   {
     const SEL_DOC = [
       '正文' + '长文折行观测'.repeat(28) + '段落', '',
@@ -465,6 +465,15 @@ try {
     }, { anchor, head })
 
     // (a) 代码跨行选区：中行满宽块不进行号区
+    await page.evaluate(() => window.controller.getView().focus())
+    // 先进入编辑态显出围栏，避免前后截图取到行号的不同纵坐标。
+    await setSelection(codeLine1From + 6, codeLine1From + 6)
+    const number = await page.locator('.cm-line', { hasText: 'let bb' })
+      .locator('.vsidian-code-card-linenumber').boundingBox()
+    assert.ok(number, '中间代码行的行号应可见')
+    const clip = { x: Math.ceil(number.x), y: Math.floor(number.y + number.height / 2),
+      width: Math.floor(number.width), height: 1 }
+    const gutterBefore = await page.screenshot({ clip })
     await setSelection(codeLine1From + 6, codeLine3From + 6)
     await page.waitForFunction(() =>
       document.querySelectorAll('.vsidian-selection-layer .vsidian-selection-background:not([style*="display: none"])').length >= 3)
@@ -500,6 +509,8 @@ try {
       `选区块不得伸入卡内行号区 [${codeGeom.lnLeft},${codeGeom.lnRight}]：${JSON.stringify(offenders)}`)
     const fullWidth = blocks.filter((b) => codeGeom.textX !== null && b.left >= codeGeom.textX - 1)
     assert.ok(fullWidth.length >= 1, `中间满宽块左界应不小于代码文本列 x（${codeGeom.textX}）：${JSON.stringify(blocks)}`)
+    assert.ok((await page.screenshot({ clip })).equals(gutterBefore),
+      '跨行选中代码时，中间行的行号绘制不得随选区染色')
 
     // (b) 正文折行满宽惯例保持：满宽块左界 ≈ 正文行盒左缘（无悬挂缩进）
     const plainFrom = SEL_DOC.indexOf('正文')
