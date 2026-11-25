@@ -2,12 +2,10 @@
 # 段落、打包 VSIX 并做包内容/体积检查（失败即中止），随后创建 GitHub Release
 # 附带该 VSIX——release 与 Marketplace 发布的是同一份字节。
 #
-# Marketplace 发布为可选 job，两道开关都配置后才会执行：
-#   1. Settings → Secrets and variables → Actions → Secrets → VSCE_PAT
-#      （Azure DevOps PAT，Organization 选 All accessible organizations，
-#       Scope 选 Marketplace → Manage）
-#   2. Settings → Secrets and variables → Actions → Variables → MARKETPLACE_PUBLISH = true
-# 配置完成前，推 tag 只产出 GitHub Release，不影响市场。
+# Marketplace 发布为可选 job：配置 Marketplace Trusted Publishing
+# （ONEGAYI/vsidian、release.yml、marketplace），GitHub marketplace 环境
+# 分别放行 main 分支（手动补发）和 v* 标签（正式发版），并设置仓库
+# variable MARKETPLACE_PUBLISH=true。开关未启用时仅产出 GitHub Release。
 #
 # workflow_dispatch 用于补跑：Release 已存在但 marketplace job 失败时（如本次
 # v0.1.0 下载步骤缺仓库上下文的事故），填标签名手动重发，无需重推 tag——
@@ -75,9 +73,15 @@ jobs:
     # push 场景等 release 成功；dispatch 补跑场景 release 被跳过（skipped），
     # 直接对指定标签的既有 Release 发布。注意 job 级 if 隐式带 success() &&
     # 前缀——上游 skipped 时会把整个条件判 false，故须以 !cancelled() 显式豁免
-    if: ${{ !cancelled() && vars.MARKETPLACE_PUBLISH == 'true' && ((github.event_name == 'push' && needs.release.result == 'success') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && vars.MARKETPLACE_PUBLISH == 'true' && ((github.event_name == 'push' && needs.release.result == 'success') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/setup-node@v5
         with:
@@ -86,8 +90,6 @@ jobs:
       - name: 从 Release 下载 VSIX
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download "${{ inputs.tag || github.ref_name }}" --pattern '*.vsix' -R "$GITHUB_REPOSITORY"
-      - name: 发布到 VSCode Marketplace
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce publish --no-dependencies --packagePath ./*.vsix
+        run: gh release download --pattern '*.vsix' -R "$GITHUB_REPOSITORY" -- "$RELEASE_TAG"
+      - name: 使用 OIDC 发布到 VS Code Marketplace
+        run: npx --yes @vscode/vsce@4.1.1 publish --oidc --no-dependencies --packagePath ./*.vsix
