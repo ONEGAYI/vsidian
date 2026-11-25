@@ -51,7 +51,7 @@ Preview and edit one note from inside another, or export a document with equatio
 
 ![A table selection, callout type previews, a code card, and a rendered equation and diagram](docs/images/readme/blocks-en.png)
 
-- **Tables**: type into cells, drag to select and copy a rectangle, and add, delete, or reorder rows and columns. This works inside lists and quotes too.
+- **Tables**: in Live Preview, edit cells, drag to select and copy a rectangle, and add, delete, or reorder rows and columns, including in lists and quotes. You can also select and copy a rectangle in Reading mode.
 - **Callouts**: type `> [!note]` or preview the colors of 13 built-in types in the context menu. Callouts can fold or nest and render in hover previews, embeds, and PDF exports.
 - **Math and diagrams**: KaTeX and Mermaid render in both views. Zoom diagrams in a full-screen viewer or export them as SVG or PNG.
 - **Code cards**: get line numbers, a language badge, copy and fold buttons, and syntax colors from the VS Code theme.
