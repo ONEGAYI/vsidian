@@ -350,7 +350,7 @@ describe('窗口失焦与不可见释放', () => {
 
 describe('标题条与跳转入口（嵌入卡片同款 header）', () => {
   // 验收反馈（2026-09-30）：浮层加嵌入同款标题+跳转按钮 header——标题为
-  // 目标显示名（spec.target 常驻，不随回包换），跳转按钮按 spec 形态分派
+  // 目标显示名（常驻，不随回包换），跳转按钮按 spec 形态分派
   // 到既有激活消息族（双链 wikilink.activate / 普通链接 link.activate /
   // 面板形态调用方经 openAction 闭包自带通道），点击即上下文切换关闭
   it('header 在场（loading 态即有）：标题为目标显示名，跳转按钮带图标与可访问名', () => {
@@ -388,18 +388,20 @@ describe('标题条与跳转入口（嵌入卡片同款 header）', () => {
     expect(popupEl()).toBeNull()
   })
 
-  it('普通链接形态点击跳转按钮：link.activate 附 href 原文', () => {
+  it.each([
+    { href: './%E7%AC%94%E8%AE%B0%23a.md#%E7%AB%A0%E8%8A%82', title: './笔记%23a.md#章节' },
+    { href: './report%FF.md#%E7%AB%A0%E8%8A%82', title: './report%FF.md#章节' },
+  ])('阅读模式的普通链接标题为 $title，预览和跳转沿用 href 原文', ({ href, title }) => {
     vi.useFakeTimers()
     const h = makeHarness()
     h.anchor.classList.remove('vsidian-wikilink')
-    hoverPreviewAnchorEnter(h.anchor, { target: '笔记.md', linkHref: '笔记.md', sourceStart: 10, sourceEnd: 30 })
+    h.anchor.setAttribute('href', href)
+    hoverPreviewAnchorEnter(h.anchor)
     vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    expect(popupEl()!.querySelector('.vsidian-hover-popup-title')!.textContent).toBe(title)
+    expect(requestOf(h).linkHref).toBe(href)
     popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')!.click()
-    const msg = h.sent.find((m) => m.kind === 'link.activate')
-    expect(msg, '应发 link.activate').toBeDefined()
-    if (msg && msg.kind === 'link.activate') {
-      expect(msg.href).toBe('笔记.md')
-    }
+    expect(h.sent).toContainEqual(expect.objectContaining({ kind: 'link.activate', href }))
   })
 
   it('面板形态（openAction 闭包）：跳转走调用方通道，回调后同样关闭', () => {

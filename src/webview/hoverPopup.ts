@@ -120,7 +120,7 @@ export const HOVER_POPUP_CLASS_NAMES = {
   popup: 'vsidian-hover-popup',
   /** 标题条（目标显示名 + 跳转入口；嵌入卡片同款，浮层生命周期常驻） */
   header: 'vsidian-hover-popup-header',
-  /** 标题（目标显示名 = spec.target，不随回包换） */
+  /** 标题（目标显示名，不随回包换） */
   title: 'vsidian-hover-popup-title',
   /** P2-06 头部右侧动作组（保存/退回卡片/模式切换/关闭编辑 + 打开入口） */
   actions: 'vsidian-hover-popup-actions',
@@ -212,6 +212,8 @@ export interface HoverPopupTargetSpec {
   /** 目标原文（双链 `|` 前 target / 链接 href / 面板条目显示名——错误
    *  分态文案的目标原文取材） */
   target: string
+  /** 阅读侧普通本地链接的可读标题，不替换目标原文或跳转地址。 */
+  displayTarget?: string
   /** 普通链接形态（宿主走 readHoverMdLinkTarget）；缺省 = 双链形态 */
   linkHref?: string
   /** 面板直接目标 fsPath（宿主直读不走文本解析）；空串 = 断链出链条目
@@ -244,19 +246,35 @@ export function hoverPopupSpecOfAnchor(
   if (target === null) {
     return null
   }
-  if (!anchorIsWikilink(anchor) && !isHoverableMdLinkHref(target) &&
+  const wikilink = anchorIsWikilink(anchor)
+  const localLink = !wikilink && isHoverableMdLinkHref(target)
+  if (!wikilink && !localLink &&
     !(opts?.allowExternalHttp === true && isHttpLinkHref(target))) {
     return null
   }
   const block = anchor.closest<HTMLElement>('[data-vsidian-src-start]')
   const sourceStart = Number(block?.dataset['vsidianSrcStart'] ?? 0)
   const sourceEnd = Number(block?.dataset['vsidianSrcEnd'] ?? sourceStart)
-  return {
+  const spec: HoverPopupTargetSpec = {
     target,
-    ...(anchorIsWikilink(anchor) ? {} : { linkHref: target }),
+    ...(wikilink ? {} : { linkHref: target }),
     sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
     sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
   }
+  if (localLink) {
+    // 路径、查询与锚点分别解码。保留编码的分隔符及宿主按字面解析的路径（如 %FF）。
+    spec.displayTarget = target.replace(/^[^?#]+|\?[^#]*|#.*/gs, (part) => {
+      try {
+        return decodeURI(part)
+      } catch (error) {
+        if (error instanceof URIError) {
+          return part
+        }
+        throw error
+      }
+    })
+  }
+  return spec
 }
 
 /**
@@ -953,7 +971,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   header.className = HOVER_POPUP_CLASS_NAMES.header
   const titleEl = document.createElement('span')
   titleEl.className = HOVER_POPUP_CLASS_NAMES.title
-  titleEl.textContent = spec.target
+  titleEl.textContent = spec.displayTarget ?? spec.target
   const headerActions = document.createElement('span')
   headerActions.className = HOVER_POPUP_CLASS_NAMES.actions
   const mkChromeBtn = (
