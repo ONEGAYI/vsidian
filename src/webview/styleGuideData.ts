@@ -3054,12 +3054,12 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-header（live block widget / 阅读头部容器共用）",
-    "purpose": "卡片头部横带：语言标签 + 右侧按钮区，底部 1px 分隔线（观感参照 Code Styler 插件方向，本项目自有结构）。",
+    "purpose": "卡片的语言标签与右侧按钮区，常规头部有 1px 底部分隔线。阅读长围栏展开的续片只在悬停、聚焦或复制反馈时显示右侧按钮，不插入标题行。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "卡片首行上方横带（live block widget 挂载层内 / 阅读块首子元素）。",
+    "dom": "live block widget 挂载层内 / 阅读块首子元素。展开续片的按钮与代码并排；尾片右列的按钮优先横排，宽度不足时换行。",
     "example": ".vsidian-code-card-header {\n  border-bottom: 1px solid rgba(128, 128, 128, 0.3);\n}",
     "obsidian": {
       "counterpart": ".code-styler-header-container（Code Styler 插件方向）",
@@ -3067,7 +3067,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "codeCardPaintCssContract",
-      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-header-live\"] 探针命中"
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-header-live\"] 探针命中",
+      "浏览器 codeCardChrome：阅读续片无重复语言标题、工具可达"
     ],
     "introduced": "#79（2026-09-26）"
   },
@@ -3151,7 +3152,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "reading"
     ],
     "states": "折行开启（默认）/ 关闭（-off，title 提示开启）；与复制钮同口径进卡即显（默认隐藏、悬停卡片显现）；收起态不发射。",
-    "dom": "头部按钮区最左（[折行] [复制] [折叠]）。",
+    "dom": "常规头部按钮区最左（[折行] [复制] [折叠]）；阅读续片在右侧按钮区。",
     "example": ".vsidian-code-card-wrap-off {\n  filter: opacity(0.4);\n}",
     "obsidian": {
       "counterpart": "无对应（Obsidian 代码块无逐块折行开关）",
@@ -3216,7 +3217,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-reading-code-card（+ .vsidian-reading-code-line 行结构 / .vsidian-code-card-folded 收起态）",
-    "purpose": "阅读视图卡片容器（vsidian-reading-code-block 的卡片化外壳）；language-x 类保留在 code 上供路由；行结构 span.vsidian-reading-code-line 携行号与 token；收起态块级修饰隐藏 pre（头部保留）。",
+    "purpose": "阅读代码块卡片外壳，同一围栏的分片共享连续的边框与底色。language-x 保留在 code 上供路由，行结构 span.vsidian-reading-code-line 承载 token；收起时隐藏 pre、保留头部。",
     "views": [
       "reading"
     ],
@@ -3228,7 +3229,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "readingCodeCard 单元（幂等增强与形态矩阵）",
-      "集成「界面域样式契约」（#133）：chromeSelectors[\"reading-code-card\"] 探针命中"
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"reading-code-card\"] 探针命中",
+      "浏览器 codeCardChrome：卡壳跨片像素连续，保留旧样式变量着色"
     ],
     "introduced": "#79（2026-09-26）"
   },
@@ -6613,8 +6615,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-code-card-header": {
-    "purpose": "The card header band: the language label + the button area on the right, with a bottom 1px separator (the look references the Code Styler plugin direction; the structure is vsidian-specific).",
-    "dom": "The band above the card's first line (inside the live block widget's mount layer / the reading block's first child).",
+    "purpose": "The card language label and right-hand buttons, with a 1px divider in the regular header. Expanded reading continuations show right-hand buttons on hover, focus, or copy feedback without adding a title row.",
+    "dom": "Inside the live block widget's mount layer, or the reading block's first child. In expanded continuations, buttons sit beside the code; on the final chunk they form a row when room allows and wrap otherwise.",
     "obsidian": {
       "counterpart": ".code-styler-header-container (the Code Styler plugin direction)"
     }
@@ -6645,7 +6647,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   "live-code-card-wrap": {
     "purpose": "The word-wrap toggle (#191): one click toggles auto word wrap for all reading-view code blocks at once — on is the current pre-wrap wrapping, off makes the code area scroll horizontally (the header band sits outside the pre and never scrolls; the sticky line-number column was removed in 2026-10 together with reading-view in-card line numbers); -off is the wrapped-off modifier (weakened via filter: opacity(0.4), orthogonal to the show/hide opacity). Reading-card header only: live view always wraps (CM6 wrapping is an editor-level facet and cannot be turned off per block). A view state, not persisted and with no setting (same semantics as the fold chevron).",
     "states": "Wrapping on (default) / off (-off, the title offers to turn it back on); revealed on card hover like the copy button (hidden by default); not emitted in the collapsed state.",
-    "dom": "The leftmost slot of the header button area ([wrap] [copy] [fold]).",
+    "dom": "The leftmost slot in the regular header ([wrap] [copy] [fold]); in the right-hand controls on a reading continuation.",
     "obsidian": {
       "counterpart": "No counterpart (Obsidian code blocks have no per-block wrap toggle)"
     }
@@ -6665,7 +6667,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "reading-code-card": {
-    "purpose": "The reading view card container (the card shell of vsidian-reading-code-block); the language-x class stays on code for routing; the line structure span.vsidian-reading-code-line carries line numbers and tokens; the collapsed block-level modifier hides the pre (the header is kept).",
+    "purpose": "The reading code card shell, with a continuous border and background across chunks of the same fence. The language-x class stays on code for routing, span.vsidian-reading-code-line carries tokens, and collapsing hides the pre while retaining the header.",
     "dom": "The reading code block shell (discarded with the DOM when the block unmounts; rebuilt idempotently from the source snapshot on remount).",
     "obsidian": {
       "counterpart": ".markdown-preview-view pre (the original mapping is kept in the content domain)"

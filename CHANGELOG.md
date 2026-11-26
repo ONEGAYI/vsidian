@@ -15,6 +15,10 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 ## Unreleased - 开发中
 
+### 修复
+
+- 阅读模式的长代码卡片连续显示，中途不再插入卡片间距、横边或重复的语言标题。
+
 ## 1.10.0 - 2026-11-26
 
 Vsidian 1.10.0 搭配 Excalidraw 附加组件，可在笔记里直接预览 Obsidian 图档。附加组件公开 API 升至 1.7.0，见 [API 变更记录](https://github.com/ONEGAYI/vsidian/blob/v1.10.0/CHANGELOG-API.md)。

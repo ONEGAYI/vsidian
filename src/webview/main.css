@@ -5573,6 +5573,111 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   padding-right: 24px;
 }
 
+/* 同一围栏的挂载片共用连续卡壳：只有首尾有纵向内边距、横边和外圆角。 */
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-next-chunk] {
+  margin-bottom: 0;
+  border-bottom-width: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-next-chunk] > pre {
+  padding-bottom: 0;
+  border-radius: 0;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk] {
+  border-top-width: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk] > pre {
+  grid-area: 1 / 1;
+  padding-top: 0;
+  padding-right: 0;
+}
+
+/* 折行开启时不让不可断的词元溢出到按钮列；关闭折行仍由 white-space: pre 控制。 */
+#app .vsidian-view-reading .vsidian-reading-code-card:is([data-vsidian-code-prev-chunk], [data-vsidian-code-next-chunk]) > pre {
+  overflow-wrap: anywhere;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk] > .vsidian-code-card-header {
+  margin-top: 0;
+  padding-block: 0;
+  padding-right: 1px;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk] > .vsidian-code-card-header > .vsidian-code-card-header-actions {
+  /* 收起后标题可以换行或随主题变高，折叠钮仍钉在右上。 */
+  align-self: flex-start;
+  flex: none;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk].vsidian-code-card-folded > .vsidian-code-card-header > .vsidian-code-card-header-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 用原有的 24px 右内边距容纳一列 22px 按钮。代码列宽不变，横滚时也在
+   代码列内裁切；工具栏与代码并列，极短尾片也不会把按钮伸到块外。 */
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk]:not(.vsidian-code-card-folded) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: start;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk]:not(.vsidian-code-card-folded) > .vsidian-code-card-header {
+  grid-area: 1 / 2;
+  justify-content: center;
+  padding: 0;
+  border-radius: 0 0 0 6px;
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk]:not(.vsidian-code-card-folded):is(:hover, :focus-within, :has(.vsidian-code-card-copy-done)) > .vsidian-code-card-header {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk]:not(.vsidian-code-card-folded) > .vsidian-code-card-header > .vsidian-code-card-header-label {
+  display: none;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk]:not(.vsidian-code-card-folded) > .vsidian-code-card-header > .vsidian-code-card-header-actions {
+  flex-direction: column;
+  gap: 0;
+}
+
+/* 尾片的右列最多用约 1/3 宽度，优先横排；不足时按钮换行而不挤掉正文。 */
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk='tail']:not(.vsidian-code-card-folded) {
+  grid-template-columns: minmax(0, 1fr) fit-content(33.333%);
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk='tail']:not(.vsidian-code-card-folded) > .vsidian-code-card-header {
+  min-width: 24px;
+  justify-content: flex-end;
+  padding-right: 1px;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk='tail']:not(.vsidian-code-card-folded) > .vsidian-code-card-header > .vsidian-code-card-header-actions {
+  width: 100%;
+  flex-flow: row-reverse wrap;
+}
+
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk='tail']:not(.vsidian-code-card-folded) > .vsidian-code-card-header button {
+  flex: none;
+}
+
+/* 由竖栏统一控制显隐；按钮保持可聚焦，Tab 进入即显。 */
+#app .vsidian-view-reading .vsidian-reading-code-card[data-vsidian-code-prev-chunk]:not(.vsidian-code-card-folded) > .vsidian-code-card-header :is(.vsidian-code-card-copy, .vsidian-code-card-wrap) {
+  opacity: 1;
+  visibility: visible;
+}
+
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line {
   display: block;
   min-height: 1.5em;

@@ -763,6 +763,218 @@ try {
     '#389 真正绘制的折行 token 不得报不可见')
   await page.setViewportSize({ width: 760, height: 640 })
 
+  // 同一围栏的续片不占额外行高：切片前后的两行应像同片相邻行一样贴合。
+  const seamRows = Array.from({ length: 1200 }, (_, i) =>
+    `console.log("SCROLL-${String(i + 1).padStart(4, '0')}");`)
+  const seamSource = ['```js', ...seamRows, '```', '',
+    '```js', 'console.log("下一段代码");', '```', '', '## 已到达代码块后正文'].join('\n')
+  await page.evaluate((source) => {
+    window.initCode(source)
+    window.setCodeMode('reading')
+  }, seamSource)
+  const readingLine = '.vsidian-view-reading .vsidian-reading-code-line'
+  const beforeSeam = page.locator(readingLine, { hasText: 'SCROLL-0059' })
+  const afterSeam = page.locator(readingLine, { hasText: 'SCROLL-0060' })
+  const assertSeam = async () => {
+    await beforeSeam.scrollIntoViewIfNeeded()
+    await page.waitForFunction((selector) => window.codePaint(selector, 'SCROLL-0060')?.visible, readingLine)
+    const before = await beforeSeam.boundingBox()
+    const after = await afterSeam.boundingBox()
+    const gap = after.y - (before.y + before.height)
+    assert.ok(Math.abs(gap) < 1, `同一围栏的第 59/60 行之间不应有留白或标题栏，实际间隔 ${gap}px`)
+    return after
+  }
+  const seamBox = await assertSeam()
+  const continuationStart = seamSource.indexOf(seamRows[59])
+  const continuation = page.locator(`.vsidian-view-reading .vsidian-reading-code-card[data-vsidian-src-start="${continuationStart}"]`)
+  const label = continuation.locator('.vsidian-code-card-header-label')
+  const fold = continuation.locator('button.vsidian-code-card-fold')
+  const wrap = continuation.locator('button.vsidian-code-card-wrap')
+  await page.mouse.move(0, 0)
+  // 验证 v1.10.0 的卡壳变量仍能真正上色。扫描接缝两侧，左右竖边与内侧底色
+  // 连续，排除只移除卡间距却留下横线或圆角缺口的实现。
+  const oldSnippet = await page.addStyleTag({ content: `
+    #app .vsidian-reading-code-card {
+      --vsidian-code-card-background: rgb(37, 48, 59);
+      --vsidian-code-card-border: rgb(108, 127, 145);
+    }` })
+  const shell = await continuation.boundingBox()
+  const strip = await page.screenshot({ clip: {
+    x: Math.round(shell.x), y: Math.floor(seamBox.y) - 3, width: Math.round(shell.width), height: 7,
+  } })
+  const seamPixels = await page.evaluate(async (base64) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(bitmap, 0, 0)
+    return Array.from({ length: canvas.height }, (_, y) =>
+      [0, 8, canvas.width - 9, canvas.width - 1].map((x) => [...ctx.getImageData(x, y, 1, 1).data.slice(0, 3)]))
+  }, strip.toString('base64'))
+  assert.ok(seamPixels.every(([left, leftInside, rightInside, right]) =>
+    [left, right].every(rgb => rgb.join() === '108,127,145') &&
+    [leftInside, rightInside].every(rgb => rgb.join() === '37,48,59')),
+    `切片边界的两条竖边与底色应连续：${JSON.stringify(seamPixels)}`)
+  await oldSnippet.evaluate((style) => style.remove())
+  await page.screenshot({ path: artifactPath(root, 'codeCardChrome/reading-seam.png'), clip: {
+    x: Math.round(shell.x), y: Math.floor(seamBox.y - seamBox.height * 4),
+    width: Math.round(shell.width), height: Math.round(seamBox.height * 8),
+  } })
+
+  await afterSeam.hover()
+  assert.equal(await label.isVisible(), false, '悬停续片也不应重复绘制语言标题')
+  await continuation.locator('button.vsidian-code-card-copy').click()
+  assert.equal(await page.evaluate(() => window.readCodeCopy()), seamRows.slice(59, 119).join('\n'),
+    '续片复制仍只取该片，不应误复制首片或整段')
+  const toggleBox = await fold.boundingBox()
+  await fold.click()
+  assert.equal(await afterSeam.isVisible(), false, '折叠续片后代码应隐藏')
+  assert.equal(await beforeSeam.isVisible(), true, '折叠续片不得隐藏前一片')
+  assert.equal(await label.isVisible(), true, '折叠的续片应保留可辨认的展开入口')
+  await page.mouse.click(toggleBox.x + toggleBox.width / 2, toggleBox.y + toggleBox.height / 2)
+  await afterSeam.waitFor({ state: 'visible' })
+  await page.mouse.move(0, 0)
+  await wrap.focus()
+  assert.equal(await wrap.evaluate((button) => {
+    const box = button.getBoundingClientRect()
+    return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
+  }), true, '键盘聚焦续片按钮后，浮条应真实显示且可命中')
+  await wrap.press('Enter')
+  assert.equal(await page.locator('.vsidian-view-reading.vsidian-reading-nowrap').count(), 1,
+    '从续片仍可关闭全文代码块折行')
+  await afterSeam.hover()
+  await wrap.click()
+
+  // 用实际滚轮跨过全部切片；独立围栏仍有自己的标题，返回首片重挂后接缝不复发。
+  await page.mouse.move(seamBox.x + 32, seamBox.y)
+  const reachedCodeTail = () => page.evaluate(() =>
+    window.codePaint('.vsidian-view-reading h2', '已到达代码块后正文')?.visible === true)
+  for (let step = 0; step < 45 && !await reachedCodeTail(); step++) {
+    await page.mouse.wheel(0, 900)
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  }
+  assert.equal(await reachedCodeTail(), true, '在 1200 行代码块上滚动应能到达后续正文')
+  const lastCodeLine = page.locator(readingLine, { hasText: 'SCROLL-1200' })
+  const paddingAfterCode = (locator) => locator.evaluate((line) => {
+    const card = line.closest('.vsidian-reading-code-card')
+    return card.getBoundingClientRect().bottom - line.getBoundingClientRect().bottom -
+      parseFloat(getComputedStyle(card).borderBottomWidth)
+  })
+  const shortTailPadding = await paddingAfterCode(lastCodeLine)
+  await lastCodeLine.hover()
+  const shortTailActions = await lastCodeLine.evaluate((line) => {
+    const card = line.closest('.vsidian-reading-code-card')
+    const pre = line.closest('pre').getBoundingClientRect()
+    const buttons = [...card.querySelectorAll('button')]
+    return buttons.length === 3 && buttons.every((button) => {
+      const r = button.getBoundingClientRect()
+      return r.left >= pre.right && r.bottom <= card.getBoundingClientRect().bottom &&
+        button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))
+    })
+  })
+  assert.equal(await page.locator('.vsidian-view-reading .vsidian-reading-code-card', { hasText: '下一段代码' })
+    .locator('.vsidian-code-card-header-label').isVisible(), true, '独立围栏仍应有标题栏')
+  assert.equal(await beforeSeam.count(), 0, '滚出视口后首片应真的卸载')
+  await page.evaluate((offset) => window.locateCode(offset), seamSource.indexOf('SCROLL-0059'))
+  await assertSeam()
+
+  // 窄窗长行、复制反馈及只有闭围栏的尾片：不能用无接缝换取文字失去命中。
+  await page.setViewportSize({ width: 302, height: 640 })
+  const longToken = 'abcdefghijklmnopqrstuvwxyz'.repeat(7)
+  const shortTail = ['```js', ...Array.from({ length: 119 }, (_, i) =>
+    i === 59 ? `console.log("${longToken}");` : `console.log(${i + 1});`), '```', '', '## 代码块后正文'].join('\n')
+  await page.evaluate(source => window.initCode(source), shortTail)
+  const narrowLine = page.locator(readingLine, { hasText: longToken })
+  await narrowLine.hover({ position: { x: 8, y: 10 } })
+  const textHittable = await narrowLine.evaluate((line) => {
+    const token = line.querySelector('.tok-string')
+    const rect = token.getClientRects()[0]
+    const y = rect.top + rect.height / 2
+    for (let x = rect.left + 1; x < rect.right - 1; x += 4) {
+      if (!line.contains(document.elementFromPoint(x, y))) return false
+    }
+    return true
+  })
+  const narrowCard = page.locator('.vsidian-reading-code-card', { hasText: longToken })
+  const narrowWrap = narrowCard.locator('button.vsidian-code-card-wrap')
+  await narrowWrap.click()
+  const nowrapSeparated = await narrowCard.evaluate((card) => {
+    const pre = card.querySelector('pre')
+    const header = card.querySelector('.vsidian-code-card-header')
+    return getComputedStyle(pre).whiteSpace === 'pre' && pre.scrollWidth > pre.clientWidth &&
+      pre.getBoundingClientRect().right <= header.getBoundingClientRect().left
+  })
+  await narrowWrap.click()
+  const narrowCopy = narrowCard.locator('button.vsidian-code-card-copy')
+  await narrowCopy.click()
+  await page.mouse.move(0, 0)
+  const copyFeedbackVisible = await narrowCopy.evaluate((button) =>
+    getComputedStyle(button.closest('.vsidian-code-card-header')).opacity !== '0' &&
+    getComputedStyle(button.querySelector('.vsidian-code-card-copy-icon-check')).display !== 'none')
+  await page.evaluate((offset) => window.locateCode(offset), shortTail.indexOf('代码块后正文'))
+  const closeOnly = page.locator(`.vsidian-reading-code-card[data-vsidian-src-start="${shortTail.lastIndexOf('```')}"]`)
+  await closeOnly.waitFor({ state: 'attached' })
+  assert.deepEqual({ textHittable, nowrapSeparated, copyFeedbackVisible, emptyTailButtons: await closeOnly.locator('button').count() },
+    { textHittable: true, nowrapSeparated: true, copyFeedbackVisible: true, emptyTailButtons: 0 },
+    '窄窗文字仍可命中，退出悬停后仍绘制已复制反馈，只含闭围栏的尾片不放置按钮')
+  const tallLineTheme = await page.addStyleTag({ content: '#app .vsidian-view-reading { --vsidian-reading-line-height: 48px; }' })
+  await page.evaluate((offset) => window.locateCode(offset), shortTail.indexOf(longToken))
+  await narrowLine.hover({ position: { x: 8, y: 10 } })
+  const tallFold = page.locator(`.vsidian-reading-code-card[data-vsidian-src-start="${shortTail.indexOf(`console.log("${longToken}");`)}"]`)
+    .locator('button.vsidian-code-card-fold')
+  const foldOffset = (locator) => locator.evaluate((button) => {
+    const r = button.getBoundingClientRect()
+    const card = button.closest('.vsidian-reading-code-card').getBoundingClientRect()
+    return { x: r.left - card.left, y: r.top - card.top }
+  })
+  const expandedOffset = await foldOffset(tallFold)
+  await tallFold.click()
+  const foldedOffset = await foldOffset(tallFold)
+  await tallFold.click()
+  await tallLineTheme.evaluate((style) => style.remove())
+  assert.deepEqual({ shortTailPadding, shortTailActions, foldShift: foldedOffset.y - expandedOffset.y },
+    { shortTailPadding: 8, shortTailActions: true, foldShift: 0 },
+    '一行尾片不被按钮撑高且按钮不越界；自定义行高不改变折叠钮的位置')
+
+  await page.evaluate((source) => {
+    window.initCode(source)
+    window.controller.handleHostMessage({ kind: 'settings.snapshot', values: { 'editor.readableLineWidth': 80 } })
+    window.locateCode(source.indexOf('SCROLL-1200'))
+  }, seamSource)
+  await page.locator('.vsidian-reading-code-card', { hasText: 'SCROLL-1200' }).hover({ position: { x: 4, y: 8 } })
+  const readableAt80 = await lastCodeLine.evaluate((line) => {
+    const pre = line.closest('pre')
+    const card = pre.parentElement
+    const toolbar = card.querySelector('.vsidian-code-card-header')
+    const range = document.createRange()
+    const firstText = document.createTreeWalker(line, NodeFilter.SHOW_TEXT).nextNode()
+    range.setStart(firstText, 0)
+    range.setEnd(firstText, 1)
+    const glyph = range.getBoundingClientRect()
+    return pre.getBoundingClientRect().right <= toolbar.getBoundingClientRect().left &&
+      line.contains(document.elementFromPoint(glyph.x + glyph.width / 2, glyph.y + glyph.height / 2))
+  })
+  const narrowTailFold = page.locator(`.vsidian-reading-code-card[data-vsidian-src-start="${seamSource.indexOf(seamRows.at(-1))}"]`)
+    .locator('button.vsidian-code-card-fold')
+  const narrowExpanded = await foldOffset(narrowTailFold)
+  await narrowTailFold.click()
+  assert.deepEqual(await foldOffset(narrowTailFold), narrowExpanded, '80px 阅读列中标题不应挤走折叠钮')
+  await narrowTailFold.click()
+  const smallFontTheme = await page.addStyleTag({ content:
+    '#app .vsidian-view-reading { --vsidian-reading-font-size: 8px; --vsidian-reading-line-height: 1.5; }' })
+  const smallFontSource = ['```js', ...Array.from({ length: 123 }, (_, i) => `console.log(${i + 1});`), '```'].join('\n')
+  await page.evaluate((source) => {
+    window.initCode(source)
+    window.controller.handleHostMessage({ kind: 'settings.snapshot', values: { 'editor.readableLineWidth': 0 } })
+    window.locateCode(source.indexOf('console.log(123)'))
+  }, smallFontSource)
+  const smallFontTailPadding = await paddingAfterCode(page.locator(readingLine, { hasText: 'console.log(123)' }))
+  await smallFontTheme.evaluate((style) => style.remove())
+  assert.deepEqual({ readableAt80, smallFontTailPadding }, { readableAt80: true, smallFontTailPadding: 8 },
+    '80px 阅读列中代码与工具不可相交；8px 字号的四行尾片仍不被按钮撑高')
+  await page.setViewportSize({ width: 760, height: 640 })
+
   // Markdown hover/embed 的共用 RefContentInstance 装配：朴素 code 路径也
   // 必须读取整块上下文。这里不伪造 token DOM，也不复制阅读增强逻辑。
   const refSource = ['```toml', 'message = """paint_open',
@@ -827,7 +1039,7 @@ try {
   }
 
   assert.deepEqual(errors, [], '页面不得有脚本错误')
-  console.log('codeCardChrome: #189 + #190 + #191 + #389 + #391 断言通过（围栏真实对齐、折叠钮位置恒定、整卡悬停恒显、整条热区、折行开关、续行对齐与语言文字真实着色）')
+  console.log('codeCardChrome: 断言通过（围栏对齐、折叠与折行、文字着色、阅读长围栏跨片无接缝及末尾可达）')
 } finally {
   await browser.close()
 }

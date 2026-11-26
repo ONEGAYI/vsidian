@@ -32,7 +32,7 @@
 | `10px` | 设置页二级组卡片（`vsidian-settings-group`）、frontmatter Popover |
 | `9px` | 侧栏导航条目 |
 | `8px` | 搜索框（设置页/快捷键页）、callout、悬停弹窗、toast（变量化）、富文本粘贴对话框、设置页页内菜单、图片相框与图上按钮组底座 |
-| `6px` | 按钮、键位牌、图标钮、悬停提示卡、双链联想浮层、附加组件面板 |
+| `6px` | 按钮、键位牌、图标钮、代码卡片、悬停提示卡、双链联想浮层、附加组件面板 |
 | `5px` | 右键菜单族（正文右键/大纲菜单/子菜单/快速操作标题菜单） |
 | `4px` | 反链排序菜单、查找面板、tooltip 键位徽章 |
 | `3px` | 定位高亮外框 |
@@ -297,6 +297,8 @@ T05（#544）组件引用请求复用悬停弹窗模式：位置由有效触发�
 **内容流内悬停辨识框（#567/T02）**：块级原生 HTML 的 Live 渲染宿主（`.vsidian-live-html`，非浮层——内容流内块）悬停呈现 1px `--vscode-focusBorder` outline（§1.1 焦点强调档，offset 2px、圆角 6px 档）；右上角编辑按钮**复用图形块按钮族**（`.vsidian-graphic-chrome` 的尺寸/底色/悬停透明度规则随类名命中，DOM 经 buildGraphicChrome 的仅 edit 形态，#567 起 onPopup 可缺省）——不发明新按钮档位，按钮组定位由宿主自身 position:relative 承担（不入 graphic-frame 类，探针计数不混）。悬停词走 `data-tooltip`（html.blockTooltip 词条）。绘制层断言在 `liveHtml` 浏览器套件（outline 非透明 + 按钮透明度两态）。
 
 **图片相框与图上按钮组**：已加载图片以 8px 圆角、细边线和贴边小阴影区分图面与页面；悬停时右上角由一个 8px 圆角阴影底座承载操作（按钮 40×32px、图标 20px，按钮之间不分底色，悬停单个按钮才着色）。图面空间不足时，紧凑底座贴到图外（按钮 24×24px、图标 15px），避开拖动热区。Live 右下角使用圆弯折角手柄，图面不绘制光带。图形代码块与块级 HTML 仍沿用原按钮形态。见 [image-popup.md](image-popup.md)、[image-resize.md](image-resize.md)；绘制层由 `imagePopup`、`imageResize` 浏览器套件覆盖。
+
+**阅读长代码卡片**：同一围栏只有首尾画横边和 6px 外圆角，两侧边线与底色跨片连续。展开的续片沿用 22px 按钮与底色，悬停或聚焦时在代码右侧显示。普通续片复用 24px 右侧留白；尾片工具列在够宽时横排，过窄时按钮换行，始终不挡文字或下一块。收起时保留头部。见 [代码块卡片规格](code-block-card.md#阅读视图)，外壳实绘和窄列文字命中由 `codeCardChrome` 覆盖。
 
 **表格矩形选区**：普通矩形在 Live 与阅读共用 `--vscode-focusBorder` 的 14% 整格淡底、2px 外描边与 6px 外角。选区内部沿用表格自身格线。阅读模式在格子的伪元素上描边，不改变原生表格的折叠边框与布局。绘制由 `blockquoteTablePaint` 和宿主的 `paint.table` 验证。
 

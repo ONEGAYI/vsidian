@@ -85,8 +85,8 @@ export interface ReadingBlock {
   references?: ReadonlySet<string>
   /** 渲染器接受且隐藏的引用定义区间；同名非法定义不在其中。 */
   referenceDefinitions?: readonly { from: number; to: number }[]
-  /** 分片高亮上下文：完整围栏界限 + 本片正文首字符（均为全文坐标）。 */
-  codeContext?: { fence: ReadingCodeFence; from: number }
+  /** 分片上下文：完整围栏界限、本片正文首字符（全文坐标）与是否最后一片。 */
+  codeContext?: { fence: ReadingCodeFence; from: number; last: boolean }
 }
 
 /** 超过该行数的围栏代码块按行细分为多个挂载单位（#7 超大单块缓解） */
@@ -505,7 +505,7 @@ function pushBlock(
           start: cs,
           end: ce,
           html: fenceChunkHtml(text, contentFrom, contentTo, info),
-          codeContext: { fence, from: contentFrom },
+          codeContext: { fence, from: contentFrom, last: chunkEnd === endLine },
         })
       }
       return

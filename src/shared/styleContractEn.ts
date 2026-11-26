@@ -833,8 +833,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'live-code-card-header': {
     purpose:
-      'The card header band: the language label + the button area on the right, with a bottom 1px separator (the look references the Code Styler plugin direction; the structure is vsidian-specific).',
-    dom: "The band above the card's first line (inside the live block widget's mount layer / the reading block's first child).",
+      'The card language label and right-hand buttons, with a 1px divider in the regular header. Expanded reading continuations show right-hand buttons on hover, focus, or copy feedback without adding a title row.',
+    dom: "Inside the live block widget's mount layer, or the reading block's first child. In expanded continuations, buttons sit beside the code; on the final chunk they form a row when room allows and wrap otherwise.",
     obsidian: { counterpart: '.code-styler-header-container (the Code Styler plugin direction)' },
   },
   'live-code-card-header-parts': {
@@ -860,7 +860,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     purpose:
       'The word-wrap toggle (#191): one click toggles auto word wrap for all reading-view code blocks at once — on is the current pre-wrap wrapping, off makes the code area scroll horizontally (the header band sits outside the pre and never scrolls; the sticky line-number column was removed in 2026-10 together with reading-view in-card line numbers); -off is the wrapped-off modifier (weakened via filter: opacity(0.4), orthogonal to the show/hide opacity). Reading-card header only: live view always wraps (CM6 wrapping is an editor-level facet and cannot be turned off per block). A view state, not persisted and with no setting (same semantics as the fold chevron).',
     states: 'Wrapping on (default) / off (-off, the title offers to turn it back on); revealed on card hover like the copy button (hidden by default); not emitted in the collapsed state.',
-    dom: 'The leftmost slot of the header button area ([wrap] [copy] [fold]).',
+    dom: 'The leftmost slot in the regular header ([wrap] [copy] [fold]); in the right-hand controls on a reading continuation.',
     obsidian: { counterpart: 'No counterpart (Obsidian code blocks have no per-block wrap toggle)' },
   },
   'live-code-card-linenumber': {
@@ -877,7 +877,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'reading-code-card': {
     purpose:
-      'The reading view card container (the card shell of vsidian-reading-code-block); the language-x class stays on code for routing; the line structure span.vsidian-reading-code-line carries line numbers and tokens; the collapsed block-level modifier hides the pre (the header is kept).',
+      'The reading code card shell, with a continuous border and background across chunks of the same fence. The language-x class stays on code for routing, span.vsidian-reading-code-line carries tokens, and collapsing hides the pre while retaining the header.',
     dom: 'The reading code block shell (discarded with the DOM when the block unmounts; rebuilt idempotently from the source snapshot on remount).',
     obsidian: { counterpart: '.markdown-preview-view pre (the original mapping is kept in the content domain)' },
   },

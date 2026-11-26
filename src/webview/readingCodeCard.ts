@@ -32,7 +32,13 @@ const fenceSources = new Map<ReadingCodeFence, string>()
 
 /** Both main reading and Markdown references use createReadingBlockElement. */
 export function bindReadingCodeContext(block: HTMLElement, text: string, slice: ReadingBlock['codeContext']): void {
-  if (slice) codeContexts.set(block, { text, slice })
+  if (!slice) return
+  codeContexts.set(block, { text, slice })
+  // 挂载可以从任意片开始，不能按当前 DOM 的相邻节点判断围栏边界。
+  if (slice.from !== slice.fence.from) {
+    block.setAttribute('data-vsidian-code-prev-chunk', slice.last ? 'tail' : '')
+  }
+  block.toggleAttribute('data-vsidian-code-next-chunk', !slice.last)
 }
 
 function readingTokenRanges(block: HTMLElement, languageId: string, code: string): readonly CodeTokenRange[] {
@@ -126,6 +132,13 @@ export function decorateReadingCodeCard(block: HTMLElement, opts: ReadingCodeCar
 
   // 卡片形态：头部 + 行结构（token；卡内行号已随 2026-10 阅读侧退场移除）
   block.classList.add(READING_CODE_CARD_CLASS)
+  const chunk = block.getAttribute('data-vsidian-code-prev-chunk')
+  const continuation = chunk !== null
+  // 闭围栏恰好落在新片首行时，保留源锚点和卡片底边，但没有可操作的代码。
+  if (continuation && code === '') {
+    codeEl.textContent = ''
+    return
+  }
   if (opts.folded) {
     block.classList.add(READING_CODE_CARD_FOLDED_CLASS)
   }
@@ -145,9 +158,14 @@ export function decorateReadingCodeCard(block: HTMLElement, opts: ReadingCodeCar
     actions.appendChild(buildWrapButton(opts.wrap !== false, opts.onWrapToggle))
   }
   if (opts.config.copyButton && !opts.folded) {
-    actions.appendChild(buildCopyButton(code, opts.onCopy))
+    const copy = buildCopyButton(code, opts.onCopy)
+    if (chunk === 'tail') actions.prepend(copy)
+    else actions.appendChild(copy)
   }
-  actions.appendChild(buildFoldButton(opts.folded, opts.onFoldToggle))
+  const fold = buildFoldButton(opts.folded, opts.onFoldToggle)
+  // 续片从折叠钮起排，固定在右上；尾片从右向左排，不够宽才换行。
+  if (continuation) actions.prepend(fold)
+  else actions.appendChild(fold)
   // #190 整条折叠热区：头部横带整体可点击切换折叠，排除按钮本身（按钮
   // click 已 stopPropagation，不会走到这里）；阅读侧无 CM6，无需拦 mousedown
   header.addEventListener('click', (event) => {
