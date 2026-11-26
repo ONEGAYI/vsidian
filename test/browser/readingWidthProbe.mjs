@@ -330,7 +330,7 @@ try {
   // 阅读表格（列表项内和独立块）继承同一主题下 Live 表格的色彩与线条。
   {
     const tablePage = await browser.newPage({ viewport: { width: 800, height: 480 } })
-    await tablePage.setContent('<body class="vscode-light"><div id="app"></div></body>')
+    await tablePage.setContent('<!doctype html><body class="vscode-light"><div id="app"></div></body>')
     // Light+ 主题的相关 webview 变量与宿主 code 默认规则。
     await tablePage.addStyleTag({ content: `body {
       --vscode-editor-foreground: #000;
@@ -347,7 +347,7 @@ try {
       '| `packages/core/` | `https://git.example.test/tools/core.git` | `feature/reading-table` |',
     ]
     const nativeTable = '<table><tr><th>原生表头</th></tr><tr><td><code>html</code></td></tr></table>'
-    const source = ['1. 克隆仓库：', '', ...rows.map(row => `   ${row}`), `   | HTML | ${nativeTable} | 原生 |`,
+    const source = ['1. 克隆仓库：', '', `   | 路径 | 远端 | ${nativeTable} |`, ...rows.slice(1).map(row => `   ${row}`),
       '2. 安装 `bun`。', '', ...rows].join('\n')
     await tablePage.evaluate(source => window.initReadingWidth(source), source)
     const live = await tablePage.locator('.vsidian-table-cell-header').first().evaluate(header => {
@@ -391,9 +391,11 @@ try {
       border: getComputedStyle(table.rows[1].cells[0]).borderRightWidth,
       code: getComputedStyle(table.querySelector('code')).color,
     }))
-    check('格内原生 HTML 表格不继承外层 Markdown 表格的边框、表头和代码字色',
+    check('表头内原生 HTML 表格不继承外层 Markdown 表格的网格或强调色',
       native.header === 'rgb(0, 0, 0)' && native.separator === 'none' &&
         native.border === '0px' && native.code === 'rgb(163, 21, 21)', JSON.stringify(native))
+    const mixedSeparator = await nested.locator(':scope > thead > tr > th').last().evaluate(cell => getComputedStyle(cell).boxShadow)
+    check('含原生表格的表头仍保留外层表头下沿分隔线', mixedSeparator === live.separator, mixedSeparator)
     await tablePage.addStyleTag({ content: '.markdown-preview-view li > table td { border: none; padding: 2px; }' })
     const overridden = await nested.locator('td').first().evaluate(cell => {
       const style = getComputedStyle(cell)

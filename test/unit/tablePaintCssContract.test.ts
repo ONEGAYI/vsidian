@@ -30,8 +30,9 @@ describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
 
   it('阅读表头沿用 Live 主题色与底线，表格内代码继承字色；片段仍可覆盖', () => {
     const header = rule(readingTableHeader, /box-shadow:/)
-    expect(header).toMatch(/color:\s*var\(--vscode-symbolIcon-fieldForeground, inherit\)/)
     expect(header).toMatch(/box-shadow:\s*inset 0 -1px 0 var\(--vscode-panel-border/)
+    const accent = rule(`:where(${anchoredReadingTable} > thead > tr > th:not(:has(table, .vsidian-reading-embed-mixed)))`)
+    expect(accent).toMatch(/color:\s*var\(--vscode-symbolIcon-fieldForeground, inherit\)/)
     const code = rule(':where(#app .vsidian-view-reading) code:where(.vsidian-reading-table-code)')
     expect(code).toMatch(/color:\s*inherit/)
   })
@@ -176,9 +177,11 @@ describe('表格行背景透明契约（#213）', () => {
     )
     expect(headerCell).toMatch(/background:\s*var\(--vsidian-table-background/)
     const readingTh = rule(readingTableHeader, /background-color:/)
+    expect(readingTh).toContain('#app .vsidian-view-reading .vsidian-reading-table th,')
     expect(readingTh).toMatch(/background-color:\s*var\(--vsidian-table-background/)
     // 阅读 td 无背景（透明）。
     const readingTd = rule(`:where(${anchoredReadingTable} > tbody > tr > td)`)
+    expect(readingTd).toContain('#app .vsidian-view-reading .vsidian-reading-table td,')
     expect(readingTd).not.toMatch(/background/)
   })
 })

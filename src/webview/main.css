@@ -4494,10 +4494,14 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   font-family: var(--vscode-editor-font-family, monospace);
 }
 
-/* 与 Live 表格同源的表头强调与分隔线。低特异性保留用户片段覆盖。 */
+/* 与 Live 表格同源的分隔线。低特异性保留用户片段覆盖。 */
 :where(#app .vsidian-view-reading table[data-vsidian-table-from] > thead > tr > th) {
-  color: var(--vscode-symbolIcon-fieldForeground, inherit);
   box-shadow: inset 0 -1px 0 var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+}
+
+/* 混排表头保留原字色，避免让原生表格或嵌入正文继承系统强调色。 */
+:where(#app .vsidian-view-reading table[data-vsidian-table-from] > thead > tr > th:not(:has(table, .vsidian-reading-embed-mixed))) {
+  color: var(--vscode-symbolIcon-fieldForeground, inherit);
 }
 
 /* 只改表格自己的 Markdown 行内代码，不跨入单元格所含的原生 HTML 或嵌入卡。 */
