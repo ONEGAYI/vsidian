@@ -8,6 +8,10 @@
 // @vscode/test-electron 中模拟，"webview -> 宿主"链路经 injectWebviewMessage
 // 注入（与真实 webview.onDidReceiveMessage 同一入口），宿主侧行为全部真实。
 import * as vscode from 'vscode'
+import {
+  READABLE_LINE_WIDTH_DEFAULT, READABLE_LINE_WIDTH_KEY,
+  READING_TABLE_LAYOUT_DEFAULT, READING_TABLE_LAYOUT_KEY,
+} from '../../../src/shared/settings'
 import { cases } from './cases'
 import { selectIntegrationCases, SENSITIVE_CASES, sshMarkerCaseFilter } from './caseSelection'
 import { CLIPBOARD_CASE_NAMES, withClipboardLock } from './clipboardLock'
@@ -103,6 +107,9 @@ export async function run(): Promise<void> {
             // #423 阅读宽松换行（默认关 = 严格软换行；用例自行显式开启，
             // 残留 true 会改变后续阅读渲染用例的段落呈现断言）
             'editor.readingBreaks': false,
+            // 表格用例设置的窄行宽和单行表格布局不能影响后续绘制层断言。
+            [READABLE_LINE_WIDTH_KEY]: READABLE_LINE_WIDTH_DEFAULT,
+            [READING_TABLE_LAYOUT_KEY]: READING_TABLE_LAYOUT_DEFAULT,
             // #161 图片粘贴三键并入重置面：pasteLocation/pasteSubpath 残留会
             // 让后续粘贴用例落盘到错误位置（paste 总开关残留 false 则整链
             // 静默失效）
@@ -113,10 +120,12 @@ export async function run(): Promise<void> {
           const readBack = (await vscode.commands.executeCommand(
             'onegayi.vsidian._test.getSettings')) as Record<string, unknown>
           if ((readBack['editor.lineNumbers'] === true && readBack['general.language'] === 'auto' &&
+            readBack[READABLE_LINE_WIDTH_KEY] === READABLE_LINE_WIDTH_DEFAULT &&
+            readBack[READING_TABLE_LAYOUT_KEY] === READING_TABLE_LAYOUT_DEFAULT &&
             readBack['image.pasteLocation'] === 'same-dir' && readBack['image.pasteSubpath'] === 'assets') || attempt >= 10) {
             if (attempt >= 10) {
               console.warn(
-                `[集成测试][WARN] 设置重置未稳定（lineNumbers=true / language=auto，最终 ${String(readBack['editor.lineNumbers'])} / ${String(readBack['general.language'])}），放行用例「${name}」`,
+                `[集成测试][WARN] 设置重置未稳定（最终 lineNumbers=${String(readBack['editor.lineNumbers'])} / language=${String(readBack['general.language'])} / readableLineWidth=${String(readBack[READABLE_LINE_WIDTH_KEY])} / readingTableLayout=${String(readBack[READING_TABLE_LAYOUT_KEY])}），放行用例「${name}」`,
               )
             }
             break
