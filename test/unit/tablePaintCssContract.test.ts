@@ -181,8 +181,8 @@ describe('表格行背景透明契约（#213）', () => {
     expect(readingTh).toContain('#app .vsidian-view-reading .vsidian-reading-table th,')
     expect(readingTh).toMatch(/background-color:\s*var\(--vsidian-table-background/)
     // 阅读 td 无背景（透明）。
-    const readingTd = rule(`:where(${anchoredReadingTable} > tbody > tr > td)`)
-    expect(readingTd).toContain('#app .vsidian-view-reading .vsidian-reading-table td,')
+    const readingTd = rule('#app .vsidian-view-reading .vsidian-reading-table td')
+    expect(readingTd).toMatch(/font-family:\s*var\(--vscode-editor-font-family/)
     expect(readingTd).not.toMatch(/background/)
   })
 })

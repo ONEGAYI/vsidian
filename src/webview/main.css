@@ -4493,8 +4493,8 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   font-weight: 600;
 }
 
-#app .vsidian-view-reading .vsidian-reading-table td,
-:where(#app .vsidian-view-reading table[data-vsidian-table-from] > tbody > tr > td) {
+/* 独立表格保留既有字体；容器内的数据格继续继承所在表格的字体。 */
+#app .vsidian-view-reading .vsidian-reading-table td {
   font-family: var(--vscode-editor-font-family, monospace);
 }
 

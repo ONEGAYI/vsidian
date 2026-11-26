@@ -396,13 +396,17 @@ try {
         native.border === '0px' && native.code === 'rgb(163, 21, 21)', JSON.stringify(native))
     const mixedSeparator = await nested.locator(':scope > thead > tr > th').last().evaluate(cell => getComputedStyle(cell).boxShadow)
     check('含原生表格的表头仍保留外层表头下沿分隔线', mixedSeparator === live.separator, mixedSeparator)
-    await tablePage.addStyleTag({ content: '.markdown-preview-view li > table td { border: none; padding: 2px; }' })
-    const overridden = await nested.locator('td').first().evaluate(cell => {
+    await tablePage.addStyleTag({ content: `
+      .markdown-preview-view li > table { font-family: Georgia, serif; }
+      .markdown-preview-view li > table td { border: none; padding: 2px; }
+    ` })
+    const overridden = await nested.locator(':scope > tbody > tr > td').first().evaluate(cell => {
       const style = getComputedStyle(cell)
-      return { border: style.borderRightWidth, padding: style.paddingLeft }
+      return { border: style.borderRightWidth, padding: style.paddingLeft, font: style.fontFamily }
     })
-    check('原有 CSS 片段仍可覆盖列表表格格线和留白',
-      overridden.border === '0px' && overridden.padding === '2px', JSON.stringify(overridden))
+    check('原有 CSS 片段仍可覆盖列表表格格线和留白，数据格继承表格字体',
+      overridden.border === '0px' && overridden.padding === '2px' && overridden.font === 'Georgia, serif',
+      JSON.stringify(overridden))
     await tablePage.close()
   }
 
