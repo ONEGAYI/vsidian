@@ -802,10 +802,15 @@ export function createMarkdownRenderer(opts?: { breaks?: boolean }): InstanceTyp
       if (inTable && token.type === 'inline') {
         const content = token.content
         const decode = content.includes('![[') && content.includes('\\|')
-        const reparsed = decode ? decodeCellView(content).text : content
-        if (!decode && !/<br/i.test(content)) continue
-        token.children = []
-        md.inline.parse(reparsed, md, { ...state.env, vsidianTableCell: true }, token.children)
+        if (decode || /<br/i.test(content)) {
+          const reparsed = decode ? decodeCellView(content).text : content
+          token.children = []
+          md.inline.parse(reparsed, md, { ...state.env, vsidianTableCell: true }, token.children)
+        }
+        // 标在本格的 Markdown token 上，后续挂入格子的嵌入正文不参与着色。
+        for (const child of token.children!) {
+          if (child.type === 'code_inline') child.attrJoin('class', 'vsidian-reading-table-code')
+        }
       }
     }
   })
