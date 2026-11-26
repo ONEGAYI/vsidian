@@ -1623,16 +1623,16 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="live-code-card-header">
       <h3><code>.vsidian-code-card-header（live block widget / 阅读头部容器共用）</code><span class="eid">live-code-card-header</span></h3>
-      <p class="purpose">卡片头部横带：语言标签 + 右侧按钮区，底部 1px 分隔线（观感参照 Code Styler 插件方向，本项目自有结构）。</p>
+      <p class="purpose">卡片的语言标签与右侧按钮区，常规头部有 1px 底部分隔线。阅读长围栏展开的续片只在悬停、聚焦或复制反馈时显示右侧按钮，不插入标题行。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
 
       <p class="obsidian">Obsidian 对应：.code-styler-header-container（Code Styler 插件方向）</p>
 
-      <p class="dom">DOM 关系：卡片首行上方横带（live block widget 挂载层内 / 阅读块首子元素）。</p>
+      <p class="dom">DOM 关系：live block widget 挂载层内 / 阅读块首子元素。展开续片的按钮与代码并排；尾片右列的按钮优先横排，宽度不足时换行。</p>
       <pre><code>.vsidian-code-card-header {
   border-bottom: 1px solid rgba(128, 128, 128, 0.3);
 }</code></pre>
-      <p class="verify">验证：codeCardPaintCssContract；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-header-live&quot;] 探针命中</p>
+      <p class="verify">验证：codeCardPaintCssContract；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-header-live&quot;] 探针命中；浏览器 codeCardChrome：阅读续片无重复语言标题、工具可达</p>
       <p class="life">引入：#79（2026-09-26）</p>
     </article>
     <article class="entry" id="live-code-card-header-parts">
@@ -1684,7 +1684,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 <p class="states">状态：折行开启（默认）/ 关闭（-off，title 提示开启）；与复制钮同口径进卡即显（默认隐藏、悬停卡片显现）；收起态不发射。</p>
       <p class="obsidian">Obsidian 对应：无对应（Obsidian 代码块无逐块折行开关）</p>
 
-      <p class="dom">DOM 关系：头部按钮区最左（[折行] [复制] [折叠]）。</p>
+      <p class="dom">DOM 关系：常规头部按钮区最左（[折行] [复制] [折叠]）；阅读续片在右侧按钮区。</p>
       <pre><code>.vsidian-code-card-wrap-off {
   filter: opacity(0.4);
 }</code></pre>
@@ -1721,7 +1721,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="reading-code-card">
       <h3><code>.vsidian-reading-code-card（+ .vsidian-reading-code-line 行结构 / .vsidian-code-card-folded 收起态）</code><span class="eid">reading-code-card</span></h3>
-      <p class="purpose">阅读视图卡片容器（vsidian-reading-code-block 的卡片化外壳）；language-x 类保留在 code 上供路由；行结构 span.vsidian-reading-code-line 携行号与 token；收起态块级修饰隐藏 pre（头部保留）。</p>
+      <p class="purpose">阅读代码块卡片外壳，同一围栏的分片共享连续的边框与底色。language-x 保留在 code 上供路由，行结构 span.vsidian-reading-code-line 承载 token；收起时隐藏 pre、保留头部。</p>
       <p class="views"><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
 
       <p class="obsidian">Obsidian 对应：.markdown-preview-view pre（原有映射保留于正文域）</p>
@@ -1730,7 +1730,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>.vsidian-reading-code-card {
   background: var(--vsidian-code-card-background);
 }</code></pre>
-      <p class="verify">验证：readingCodeCard 单元（幂等增强与形态矩阵）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;reading-code-card&quot;] 探针命中</p>
+      <p class="verify">验证：readingCodeCard 单元（幂等增强与形态矩阵）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;reading-code-card&quot;] 探针命中；浏览器 codeCardChrome：卡壳跨片像素连续，保留旧样式变量着色</p>
       <p class="life">引入：#79（2026-09-26）</p>
     </article>
     <article class="entry" id="var-code-card-background">

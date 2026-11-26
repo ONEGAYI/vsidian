@@ -8727,6 +8727,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
       kind: 'settings.snapshot', values: { 'editor.readableLineWidth': 0 },
     })
     assert(await readDisk('code-card.md') === diskBefore, '阅读卡片交互不得改写源文')
+
+    const longFile = 'code-card-continuation.md'
+    const marker = 'visible continuation token'
+    const source = ['```js', ...Array.from({ length: 180 }, (_, i) =>
+      i === 59 ? `console.log("${marker}");` : `console.log(${i + 1});`), '```'].join('\n')
+    await vscode.workspace.fs.writeFile(wsUri(longFile), Buffer.from(source))
+    await openWithEditor(longFile)
+    await waitSessionReady(longFile)
+    const longUri = wsUri(longFile).toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, longUri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState(longFile, (v) => v.viewMode === 'reading' && v.paint?.code?.visible === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, longUri, { kind: 'view.locate', offset: source.indexOf(marker) })
+    const continuation = await waitViewState(longFile, (v) =>
+      v.paint?.code?.tokenPaint?.some((sample) => sample.text.includes(marker) && sample.visible) === true)
+    assert(continuation.paint?.code?.visible === false, '定位到续片后代码应真实绘制，未悬停的续片不应绘制头部')
   }],
 
   ['新增围栏语言：现成与新增词法双模式文字真实着色（#389/#390）', async () => {

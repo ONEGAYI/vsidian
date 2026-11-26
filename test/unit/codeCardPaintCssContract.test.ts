@@ -31,6 +31,25 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     expect(css).toMatch(/--vsidian-code-card-background:\s*var\(--vscode-textCodeBlock-background/)
   })
 
+  it('阅读代码卡片的内部分片边界不画横边，续片代码与按钮共享一行网格且分列', () => {
+    const scope = '#app .vsidian-view-reading .vsidian-reading-code-card'
+    const before = `${scope}[data-vsidian-code-next-chunk]`
+    const after = `${scope}[data-vsidian-code-prev-chunk]`
+    expect(rule(before)).toMatch(/border-bottom-width:\s*0\s*;/)
+    expect(rule(before)).toMatch(/margin-bottom:\s*0\s*;/)
+    expect(rule(`${before} > pre`)).toMatch(/padding-bottom:\s*0\s*;/)
+    expect(rule(after)).toMatch(/border-top-width:\s*0\s*;/)
+    expect(rule(`${after} > pre`)).toMatch(/padding-top:\s*0\s*;/)
+    expect(rule(`${after} > pre`)).toMatch(/grid-area:\s*1\s*\/\s*1\s*;/)
+    expect(rule(`${after}:not(.vsidian-code-card-folded)`)).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+24px/)
+    expect(rule(`${after}:not(.vsidian-code-card-folded) > .vsidian-code-card-header`))
+      .toMatch(/grid-area:\s*1\s*\/\s*2\s*;/)
+    const tail = `${scope}[data-vsidian-code-prev-chunk='tail']:not(.vsidian-code-card-folded)`
+    expect(rule(tail)).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+fit-content\(33\.333%\)/)
+    expect(rule(`${tail} > .vsidian-code-card-header > .vsidian-code-card-header-actions`))
+      .toMatch(/flex-flow:\s*row-reverse wrap\s*;/)
+  })
+
   it('首尾行圆角：尾行圆角承担底边，首行顶角必须是直角（顶边唯一由头部承担）', () => {
     expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-bottom'))
       .toMatch(/border-bottom-left-radius:\s*6px/)
