@@ -400,6 +400,37 @@ try {
   passed++
   console.log('[正文嵌入][PASS] 1000 块首中末绘制、峰值有界、回收与零重解析；巨大单块实测边界')
 
+  // 容器内宽表格溢出归卡片滚动区，长表无需先纵滚到底才可横滚。
+  const widePage = await browser.newPage({ viewport: { width: 600, height: 640 } })
+  await widePage.setContent(`<!doctype html><html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
+  await widePage.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await widePage.addScriptTag({ path: bundle })
+  await widePage.evaluate(() => window.initEmbedDoc('![[宽表]]\n'))
+  await widePage.locator('.vsidian-view-reading .vsidian-embed-card').first().waitFor({ timeout: 5000 })
+  const scroller = widePage.locator('.vsidian-view-reading .vsidian-embed-card-scroll').first()
+  const wideTarget = ['1. 内容', '', '   | 路径 |', '   | --- |',
+    ...Array.from({ length: 40 }, () => `   | \`${'path_'.repeat(40)}\` |`), ''].join('\n')
+  await widePage.evaluate(text => {
+    const { reqId, instanceId } = window.embedSent().find(m => m.kind === 'hover.request')
+    window.respondEmbed({ kind: 'hover.result', reqId, instanceId, ok: true,
+      target: { fsPath: 'D:\\notes\\wide-table.md', relPath: 'wide-table.md' },
+      version: 1, text, range: { start: 0, end: text.length }, scope: { kind: 'full' },
+    })
+  }, wideTarget)
+  await scroller.locator('li > table td').first().waitFor({ timeout: 5000 })
+  const wide = await scroller.evaluate(el => {
+    const cell = el.querySelector('li > table td')
+    const left = cell.getBoundingClientRect().left
+    el.scrollLeft = 80
+    return { overflowY: el.scrollHeight - el.clientHeight, top: el.scrollTop,
+      scrollX: el.scrollLeft, moved: left - cell.getBoundingClientRect().left }
+  })
+  assert.ok(wide.overflowY > 0 && wide.top === 0 && wide.scrollX === 80 && Math.abs(wide.moved - 80) < 1,
+    `卡片顶部即可横滚宽表格（实际 ${JSON.stringify(wide)}）`)
+  await widePage.close()
+  passed++
+  console.log('[正文嵌入][PASS] 宽列表表格在卡片顶部随卡片横滚')
+
   console.log(`\n[正文嵌入] 全部 ${passed} 个场景通过`)
 } finally {
   await browser.close()

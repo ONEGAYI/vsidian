@@ -4393,10 +4393,14 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 /* Markdown 表格（#12）：独立表格有块类，容器内的表格由源码锚点识别。
-   新增默认样式允许片段覆盖，不改变独立表格旧规则的优先级。 */
+   容器内补格线，不接管表格的宽度和滚动。 */
 #app .vsidian-view-reading .vsidian-reading-table table,
 :where(#app .vsidian-view-reading table[data-vsidian-table-from]) {
   border-collapse: collapse;
+}
+
+/* 独立表格沿用既有布局；容器内由主阅读视图或嵌入卡管理横滚。 */
+#app .vsidian-view-reading .vsidian-reading-table table {
   max-width: 100%;
   display: block;
   overflow-x: auto;

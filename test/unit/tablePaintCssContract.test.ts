@@ -22,6 +22,7 @@ describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
     const table = rule(`:where(${anchoredReadingTable})`)
     expect(table).toMatch(/border-collapse:\s*collapse/)
     expect(table).toContain('#app .vsidian-view-reading .vsidian-reading-table table,')
+    expect(table.split('{')[1]).not.toMatch(/(?:display|max-width|overflow-x):/)
     const cells = rule(`:where(${anchoredReadingTable} > :is(thead, tbody) > tr > :is(th, td))`)
     expect(cells).toContain('#app .vsidian-view-reading .vsidian-reading-table :is(th, td),')
     expect(cells).toMatch(/border:\s*1px solid var\(--vscode-panel-border, rgba\(128, 128, 128, 0\.45\)\)/)
