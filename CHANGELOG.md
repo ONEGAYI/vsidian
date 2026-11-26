@@ -15,9 +15,16 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 ## Unreleased - 开发中
 
+## 1.10.1 - 2026-11-26
+
+Vsidian 1.10.1 修复阅读模式下长代码块和容器内 Markdown 表格的显示问题。
+
 ### 修复
 
-- 阅读模式的长代码卡片连续显示，中途不再插入卡片间距、横边或重复的语言标题。
+**阅读模式排版**（[#716](https://github.com/ONEGAYI/vsidian/pull/716)、[#717](https://github.com/ONEGAYI/vsidian/pull/717)）
+
+- 长代码块连续显示，中途不再插入空白、横边或重复的语言标题。
+- 列表、引用等容器内的 Markdown 表格恢复格线、表头底色和分隔线。嵌入笔记中的宽表仍可横向滚动。
 
 ## 1.10.0 - 2026-11-26
 
@@ -1211,4 +1218,5 @@ Vsidian 1.0.0：附加组件系统首版落地——声明附加组件身份的�
 1.8.1: https://github.com/ONEGAYI/vsidian/compare/v1.8.0...v1.8.1
 1.9.0: https://github.com/ONEGAYI/vsidian/compare/v1.8.1...v1.9.0
 1.9.1: https://github.com/ONEGAYI/vsidian/compare/v1.9.0...v1.9.1
+1.10.1: https://github.com/ONEGAYI/vsidian/compare/v1.10.0...v1.10.1
 -->
