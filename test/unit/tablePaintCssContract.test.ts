@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest'
 import { cssRuleExact } from './cssContract'
 
 const css = readFileSync(path.resolve(process.cwd(), 'src/webview/main.css'), 'utf8')
-const readingTableCells = '#app .vsidian-view-reading :is(.vsidian-reading-table, [data-vsidian-table-from])'
+const anchoredReadingTable = '#app .vsidian-view-reading table[data-vsidian-table-from]'
+const readingTableHeader = `:where(${anchoredReadingTable} > thead > tr > th)`
 
 function rule(selector: string, declaration?: RegExp): string {
   const blocks = css.match(/[^{}]+\{[^{}]*\}/g) ?? []
@@ -18,18 +19,20 @@ function rule(selector: string, declaration?: RegExp): string {
 
 describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
   it('独立与容器内的阅读表格共用合并边框和格内留白', () => {
-    const table = rule('#app .vsidian-view-reading :is(.vsidian-reading-table table, table[data-vsidian-table-from])')
+    const table = rule(`:where(${anchoredReadingTable})`)
     expect(table).toMatch(/border-collapse:\s*collapse/)
-    const cells = cssRuleExact(css, `${readingTableCells} :is(th, td)`)
+    expect(table).toContain('#app .vsidian-view-reading .vsidian-reading-table table,')
+    const cells = rule(`:where(${anchoredReadingTable} > :is(thead, tbody) > tr > :is(th, td))`)
+    expect(cells).toContain('#app .vsidian-view-reading .vsidian-reading-table :is(th, td),')
     expect(cells).toMatch(/border:\s*1px solid var\(--vscode-panel-border, rgba\(128, 128, 128, 0\.45\)\)/)
     expect(cells).toMatch(/padding:\s*4px 12px/)
   })
 
   it('阅读表头沿用 Live 主题色与底线，表格内代码继承字色；片段仍可覆盖', () => {
-    const header = rule(`:where(${readingTableCells}) th`)
+    const header = rule(readingTableHeader, /box-shadow:/)
     expect(header).toMatch(/color:\s*var\(--vscode-symbolIcon-fieldForeground, inherit\)/)
     expect(header).toMatch(/box-shadow:\s*inset 0 -1px 0 var\(--vscode-panel-border/)
-    const code = rule(`:where(${readingTableCells} :is(th, td)) code`)
+    const code = rule(':where(#app .vsidian-view-reading) code:where(.vsidian-reading-table-code)')
     expect(code).toMatch(/color:\s*inherit/)
   })
 
@@ -172,10 +175,10 @@ describe('表格行背景透明契约（#213）', () => {
       /background:/,
     )
     expect(headerCell).toMatch(/background:\s*var\(--vsidian-table-background/)
-    const readingTh = cssRuleExact(css, `${readingTableCells} th`)
+    const readingTh = rule(readingTableHeader, /background-color:/)
     expect(readingTh).toMatch(/background-color:\s*var\(--vsidian-table-background/)
     // 阅读 td 无背景（透明）。
-    const readingTd = cssRuleExact(css, `${readingTableCells} td`)
+    const readingTd = rule(`:where(${anchoredReadingTable} > tbody > tr > td)`)
     expect(readingTd).not.toMatch(/background/)
   })
 })

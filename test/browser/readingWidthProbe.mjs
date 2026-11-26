@@ -346,7 +346,9 @@ try {
       '| 路径 | 远端 | 分支 |', '| --- | --- | --- |',
       '| `packages/core/` | `https://git.example.test/tools/core.git` | `feature/reading-table` |',
     ]
-    const source = ['1. 克隆仓库：', '', ...rows.map(row => `   ${row}`), '2. 安装 `bun`。', '', ...rows].join('\n')
+    const nativeTable = '<table><tr><th>原生表头</th></tr><tr><td><code>html</code></td></tr></table>'
+    const source = ['1. 克隆仓库：', '', ...rows.map(row => `   ${row}`), `   | HTML | ${nativeTable} | 原生 |`,
+      '2. 安装 `bun`。', '', ...rows].join('\n')
     await tablePage.evaluate(source => window.initReadingWidth(source), source)
     const live = await tablePage.locator('.vsidian-table-cell-header').first().evaluate(header => {
       const cell = document.querySelector('.vsidian-table-grid-row:not(.vsidian-table-header-line) .vsidian-inline-code')
@@ -361,7 +363,7 @@ try {
     })
     await tablePage.evaluate(() => window.setRwMode('reading'))
     await tablePage.waitForSelector('.vsidian-view-reading .vsidian-reading-list ol > li > table')
-    const styles = await tablePage.locator('.vsidian-view-reading table').evaluateAll(tables => tables.map(table => {
+    const styles = await tablePage.locator('.vsidian-view-reading table[data-vsidian-table-from]').evaluateAll(tables => tables.map(table => {
       const header = getComputedStyle(table.rows[0].cells[0])
       const cell = getComputedStyle(table.rows[1].cells[0])
       return {
@@ -382,6 +384,23 @@ try {
       .evaluate(code => getComputedStyle(code).color)
     check('表格外的阅读行内代码保留宿主原色', proseCode === 'rgb(163, 21, 21)', proseCode)
     await tablePage.locator('.vsidian-reading-list').screenshot({ path: artifactPath(root, 'reading-list-table.png') })
+    const nested = tablePage.locator('.vsidian-view-reading li > table')
+    const native = await nested.locator('table').evaluate(table => ({
+      header: getComputedStyle(table.rows[0].cells[0]).color,
+      separator: getComputedStyle(table.rows[0].cells[0]).boxShadow,
+      border: getComputedStyle(table.rows[1].cells[0]).borderRightWidth,
+      code: getComputedStyle(table.querySelector('code')).color,
+    }))
+    check('格内原生 HTML 表格不继承外层 Markdown 表格的边框、表头和代码字色',
+      native.header === 'rgb(0, 0, 0)' && native.separator === 'none' &&
+        native.border === '0px' && native.code === 'rgb(163, 21, 21)', JSON.stringify(native))
+    await tablePage.addStyleTag({ content: '.markdown-preview-view li > table td { border: none; padding: 2px; }' })
+    const overridden = await nested.locator('td').first().evaluate(cell => {
+      const style = getComputedStyle(cell)
+      return { border: style.borderRightWidth, padding: style.paddingLeft }
+    })
+    check('原有 CSS 片段仍可覆盖列表表格格线和留白',
+      overridden.border === '0px' && overridden.padding === '2px', JSON.stringify(overridden))
     await tablePage.close()
   }
 
