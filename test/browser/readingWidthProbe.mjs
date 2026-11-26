@@ -327,6 +327,89 @@ try {
     await tablePage.close()
   }
 
+  // 阅读表格（列表项内和独立块）继承同一主题下 Live 表格的色彩与线条。
+  {
+    const tablePage = await browser.newPage({ viewport: { width: 800, height: 480 } })
+    await tablePage.setContent('<!doctype html><body class="vscode-light"><div id="app"></div></body>')
+    // Light+ 主题的相关 webview 变量与宿主 code 默认规则。
+    await tablePage.addStyleTag({ content: `body {
+      --vscode-editor-foreground: #000;
+      --vscode-editor-background: #fff;
+      --vscode-panel-border: rgba(128, 128, 128, 0.35);
+      --vscode-symbolIcon-fieldForeground: #007acc;
+      --vscode-textPreformat-foreground: #a31515;
+      --vscode-textCodeBlock-background: rgba(220, 220, 220, 0.4);
+    } code { color: var(--vscode-textPreformat-foreground); }` })
+    await tablePage.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await tablePage.addScriptTag({ path: output })
+    const rows = [
+      '| 路径 | 远端 | 分支 |', '| --- | --- | --- |',
+      '| `packages/core/` | `https://git.example.test/tools/core.git` | `feature/reading-table` |',
+    ]
+    const nativeTable = '<table><tr><th>原生表头</th></tr><tr><td><code>html</code></td></tr></table>'
+    const source = ['1. 克隆仓库：', '', `   | 路径 | 远端 | ${nativeTable} |`, ...rows.slice(1).map(row => `   ${row}`),
+      '2. 安装 `bun`。', '', ...rows].join('\n')
+    await tablePage.evaluate(source => window.initReadingWidth(source), source)
+    const live = await tablePage.locator('.vsidian-table-cell-header').first().evaluate(header => {
+      const cell = document.querySelector('.vsidian-table-grid-row:not(.vsidian-table-header-line) .vsidian-inline-code')
+        .closest('.vsidian-table-grid-cell')
+      return {
+        header: getComputedStyle(header).color,
+        headerBg: getComputedStyle(header.closest('.vsidian-table-grid-cell')).backgroundColor,
+        separator: getComputedStyle(header.closest('.vsidian-table-header-line')).boxShadow,
+        border: getComputedStyle(cell).borderRight,
+        code: getComputedStyle(cell.querySelector('.vsidian-inline-code')).color,
+      }
+    })
+    await tablePage.evaluate(() => window.setRwMode('reading'))
+    await tablePage.waitForSelector('.vsidian-view-reading .vsidian-reading-list ol > li > table')
+    const styles = await tablePage.locator('.vsidian-view-reading table[data-vsidian-table-from]').evaluateAll(tables => tables.map(table => {
+      const header = getComputedStyle(table.rows[0].cells[0])
+      const cell = getComputedStyle(table.rows[1].cells[0])
+      return {
+        collapse: getComputedStyle(table).borderCollapse,
+        header: header.color,
+        headerBg: header.backgroundColor,
+        separator: header.boxShadow,
+        border: cell.borderRight,
+        code: getComputedStyle(table.rows[1].cells[0].querySelector('code')).color,
+        padding: cell.paddingLeft,
+      }
+    }))
+    check('阅读列表内和独立表格的表头、边框及代码字色同主题 Live 表格一致',
+      live.header === 'rgb(0, 122, 204)' && styles.length === 2 && styles.every(style =>
+        style.collapse === 'collapse' && style.padding === '12px' &&
+        Object.entries(live).every(([key, value]) => style[key] === value)), JSON.stringify({ live, reading: styles }))
+    const proseCode = await tablePage.locator('.vsidian-reading-list ol > li:nth-child(2) code')
+      .evaluate(code => getComputedStyle(code).color)
+    check('表格外的阅读行内代码保留宿主原色', proseCode === 'rgb(163, 21, 21)', proseCode)
+    await tablePage.locator('.vsidian-reading-list').screenshot({ path: artifactPath(root, 'reading-list-table.png') })
+    const nested = tablePage.locator('.vsidian-view-reading li > table')
+    const native = await nested.locator('table').evaluate(table => ({
+      header: getComputedStyle(table.rows[0].cells[0]).color,
+      separator: getComputedStyle(table.rows[0].cells[0]).boxShadow,
+      border: getComputedStyle(table.rows[1].cells[0]).borderRightWidth,
+      code: getComputedStyle(table.querySelector('code')).color,
+    }))
+    check('表头内原生 HTML 表格不继承外层 Markdown 表格的网格或强调色',
+      native.header === 'rgb(0, 0, 0)' && native.separator === 'none' &&
+        native.border === '0px' && native.code === 'rgb(163, 21, 21)', JSON.stringify(native))
+    const mixedSeparator = await nested.locator(':scope > thead > tr > th').last().evaluate(cell => getComputedStyle(cell).boxShadow)
+    check('含原生表格的表头仍保留外层表头下沿分隔线', mixedSeparator === live.separator, mixedSeparator)
+    await tablePage.addStyleTag({ content: `
+      .markdown-preview-view li > table { font-family: Georgia, serif; }
+      .markdown-preview-view li > table td { border: none; padding: 2px; }
+    ` })
+    const overridden = await nested.locator(':scope > tbody > tr > td').first().evaluate(cell => {
+      const style = getComputedStyle(cell)
+      return { border: style.borderRightWidth, padding: style.paddingLeft, font: style.fontFamily }
+    })
+    check('原有 CSS 片段仍可覆盖列表表格格线和留白，数据格继承表格字体',
+      overridden.border === '0px' && overridden.padding === '2px' && overridden.font === 'Georgia, serif',
+      JSON.stringify(overridden))
+    await tablePage.close()
+  }
+
   // 保持单行：读到长表中段，不滚到表底也能操作真实的水平滚动条。
   {
     const tall = await browser.newPage({ viewport: { width: 500, height: 520 } })

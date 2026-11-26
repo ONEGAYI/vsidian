@@ -408,6 +408,7 @@ try {
   console.log('[表格嵌入][PASS] 区域复制：序列化父文档引用源文（转义原文保真）')
 
   // ---- 场景 H：Reading 侧 td/th 格内卡 + 表格结构保真 ----
+  await page2.addStyleTag({ content: 'body { --vscode-editor-foreground: #000; --vscode-symbolIcon-fieldForeground: #007acc; }' })
   await page2.evaluate(() => window.setLiveEmbedMode('reading'))
   await page2.waitForTimeout(250)
   const reading = await page2.evaluate(() => {
@@ -431,6 +432,12 @@ try {
   assert.equal(reading.tds, 6, '数据行两行三列完整')
   assert.equal(reading.neighbor, true, '邻格文本可见（不挤邻格）')
   assert.equal(reading.targetLoaded, true, 'Reading 卡装载目标正文')
+  const readingHeader = page2.locator('.vsidian-view-reading table > thead')
+  const paragraphColor = await readingHeader.locator('.vsidian-reading-embed-mixed p').first()
+    .evaluate(paragraph => getComputedStyle(paragraph).color)
+  assert.equal(paragraphColor, 'rgb(0, 0, 0)', '表头内嵌入的笔记正文保留普通字色')
+  const plainHeaderColor = await readingHeader.getByText('短列头', { exact: true }).evaluate(cell => getComputedStyle(cell).color)
+  assert.equal(plainHeaderColor, 'rgb(0, 122, 204)', '相邻普通表头仍显示主题强调色')
   await page2.evaluate(() => window.setLiveEmbedMode('live'))
   await page2.waitForTimeout(200)
   assert.equal(await page2.evaluate(() => window.liveEmbedDocText()), PARENT_DOC, '模式切换源文逐字节不丢')
