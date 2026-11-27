@@ -214,6 +214,14 @@ try {
   assert.ok(await tree.evaluate(el => el.parentElement.scrollTop > 0), '快照改变了树的滚动位置')
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   assert.equal(await popup.isVisible(), true, '刷新对齐可见的同一条目时，程序滚动也不能关闭卡片')
+  await state(true, expanded, withUntitled)
+  await state(true, [entries[0], { ...folder, expanded: true }, child, ...inserted, file], withUntitled)
+  assert.equal(await anchor.evaluate(el => {
+    const scroller = el.closest('.vsidian-file-sidebar-scroll')
+    return el.getBoundingClientRect().bottom <= scroller.getBoundingClientRect().top
+  }), true, '刷新为当前文件滚动，但非当前预览锚点仍在树中')
+  await page.waitForTimeout(400)
+  assert.equal(await popup.isVisible(), true, '锚点因快照调整而滚出视口时保留卡片')
   await state(true, entries, withUntitled)
   await popup.waitFor({ state: 'detached', timeout: 2500 })
   await page.mouse.move(650, 60)

@@ -39,7 +39,7 @@ import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
-import { PDF_ZOOM_STEP } from './pdfRender'
+import { HOVER_PDF_CLASS_NAMES, PDF_ZOOM_STEP } from './pdfRender'
 import { KeybindingRouter } from './keybindingRouter'
 import {
   applyHeadingFoldOperation,
@@ -13069,12 +13069,18 @@ function collectHoverPopupPaint(): PaintProbe['hoverPopup'] {
   }
   const style = getComputedStyle(el)
   const stateEl = el.querySelector<HTMLElement>('.vsidian-hover-popup-state')
+  const nestedPdf = el.querySelector<HTMLCanvasElement>(`.${EMBED_CARD_CLASS_NAMES.card} .${HOVER_PDF_CLASS_NAMES.canvas}`)
+  const pdfInk = nestedPdf && nestedPdf.width > 0 && nestedPdf.height > 0 &&
+      hitPaintedElement(nestedPdf.closest<HTMLElement>(`.${HOVER_PDF_CLASS_NAMES.body}`))
+    ? nestedPdf.getContext('2d')?.getImageData(nestedPdf.width >> 1, nestedPdf.height >> 1, 1, 1).data
+    : undefined
   return {
     hit,
     background: style.backgroundColor,
     borderWidth: style.borderTopWidth,
     errorState: stateEl !== null && stateEl.classList.contains('vsidian-hover-popup-state-error'),
     imageWidth: Array.from(el.querySelectorAll('img')).find(img => img.naturalWidth > 0 && hitPaintedElement(img))?.naturalWidth,
+    nestedPdfPainted: pdfInk !== undefined && pdfInk[3] === 255 && Math.min(pdfInk[0]!, pdfInk[1]!, pdfInk[2]!) < 240,
   }
 }
 

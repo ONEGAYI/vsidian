@@ -21,7 +21,7 @@ function mdOutcome(fsPath: string, text: string, version = 1): RefReadOutcome {
   }
 }
 
-function setup() {
+function setup(workspacePreviewTarget?: (id: string) => Promise<string | undefined>) {
   const doc = new (class implements HostDocumentPort {
     version = 1
     getText(): string {
@@ -45,6 +45,7 @@ function setup() {
   const session = new DocumentSession(doc, { docUri: DOC_URI, rootFsPath: A_PATH, isWindowsHost: true })
   const id = session.attachPanel({
     send: (m) => out.push(m),
+    workspacePreviewTarget,
     readHoverSource: async (fsPath) => !sourceAvailable ? null : fsPath === B_PATH
       ? { version: 1, text: '# B\n' }
       : fsPath === OTHER_B_PATH
@@ -74,6 +75,21 @@ function setup() {
   const send = (msg: WebviewToHost) => session.handleWebviewMessage(msg, id)
   return { session, out, portPayloads, send, expireSources: () => { sourceAvailable = false } }
 }
+
+it('文件条目存在性与不可访问分别回报，不回退到按显示名解析', async () => {
+  for (const [reason, lookup] of [
+    ['not-found', async () => undefined],
+    ['read-failed', async () => { throw new Error('permission denied') }],
+  ] as const) {
+    const s = setup(lookup)
+    await ready(s)
+    await s.send({ kind: 'hover.request', sessionId: 'p1', docUri: DOC_URI, reqId: 8,
+      instanceId: 'hover-file', sourceStart: 0, sourceEnd: 0, target: 'note.md', workspaceFileId: 'row',
+    })
+    expect(s.portPayloads).toEqual([])
+    expect(s.out.at(-1)).toMatchObject({ kind: 'hover.result', ok: false, reason })
+  }
+})
 
 async function ready(s: ReturnType<typeof setup>): Promise<void> {
   await s.send({ kind: 'ready' })

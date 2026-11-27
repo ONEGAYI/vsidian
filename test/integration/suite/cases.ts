@@ -33,7 +33,7 @@ import { addonT12Cases } from './addonT12Cases'
 import { addonT15InputCases, addonT15RendererCases, addonT15UiCases } from './addonT15Cases'
 import { addonT16InstalledCases } from './addonT16InstalledCases'
 import { addonT17RemoteSshCases } from './addonT17RemoteSshCases'
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import * as nodeHttps from 'node:https'
@@ -6703,6 +6703,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const scratch = await mkdtemp(nodePath.join(nodePath.dirname(parent.fsPath), '../file-hover-'))
     const second = vscode.Uri.file(nodePath.join(scratch, 'workspace'))
     const markdown = vscode.Uri.joinPath(second, '草稿 % #.md')
+    const embeddedPdf = vscode.Uri.joinPath(second, '嵌入预览.md')
     const pdf = vscode.Uri.joinPath(second, '外根资料.pdf')
     const image = vscode.Uri.joinPath(second, '外根图 #.png')
     const relativeImage = vscode.Uri.joinPath(second, '笔记所用图片.png')
@@ -6721,6 +6722,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
       })
     const treeId = (uri: vscode.Uri) => `tree:${second.toString()}|${uri.toString()}`
     const dirtyReads: vscode.TextDocument[] = []
+    const imageA = Buffer.from(TINY_PNG_BASE64, 'base64')
+    const imageB = Buffer.from(REFRESH_PNG_2X2_BASE64, 'base64')
+    const imageBytes = Math.max(imageA.length, imageB.length)
+    const originalImage = Buffer.alloc(imageBytes)
+    const replacementImage = Buffer.alloc(imageBytes)
+    originalImage.set(imageA)
+    replacementImage.set(imageB)
+    const imageTime = new Date(1_700_000_000_000)
     const setDiagnostics = (enabled: boolean) => vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', enabled)
     const hoverEvents = async () => {
       const result = await vscode.commands.executeCommand<{ host: DiagnosticSnapshot }>('onegayi.vsidian._test.getDiagnostics')
@@ -6733,9 +6742,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
         writeFile(markdown.fsPath, '# 盘上只有标题'),
         writeFile(text.fsPath, '盘上只有一行'),
         writeFile(pdf.fsPath, await readFile(wsUri('资料.pdf').fsPath)),
-        writeFile(image.fsPath, Buffer.from(TINY_PNG_BASE64, 'base64')),
+        writeFile(embeddedPdf.fsPath, '![[外根资料.pdf]]\n'),
+        writeFile(image.fsPath, originalImage),
         writeFile(relativeImage.fsPath, Buffer.from(TINY_PNG_BASE64, 'base64')),
       ])
+      await utimes(image.fsPath, imageTime, imageTime)
       await openWithEditor('lf.md')
       await waitSessionReady('lf.md')
       await vscode.commands.executeCommand(CMD.postToPanel, parentId, { kind: 'view.mode.set', mode: 'live' })
@@ -6771,10 +6782,17 @@ export const cases: Array<[string, () => Promise<void>]> = [
         v.hoverPreview?.pdf?.phase === 'content' && v.hoverPreview.pdf.nonWhiteRatio > 0.5)
       assert(drawnPdf.hoverPreview?.note.endsWith('外根资料.pdf'), '浮窗读取的是第二根 PDF')
       assert(!tabExists(pdf), '未打开的 PDF 可直接预览且不会新增标签')
+      await hover('file-tree', treeId(embeddedPdf), v =>
+        v.paint?.hoverPopup?.nestedPdfPainted === true && v.hoverPreview?.note.endsWith('嵌入预览.md') === true)
 
       const firstImage = await hover('file-tree', treeId(image), v =>
         v.paint?.hoverPopup?.imageWidth === 1 && v.hoverPreview?.note.endsWith('外根图 #.png') === true)
-      await writeFile(image.fsPath, Buffer.from(REFRESH_PNG_2X2_BASE64, 'base64'))
+      const beforeReplace = await stat(image.fsPath)
+      await writeFile(image.fsPath, replacementImage)
+      await utimes(image.fsPath, imageTime, imageTime)
+      const afterReplace = await stat(image.fsPath)
+      assert(afterReplace.mtimeMs === beforeReplace.mtimeMs && afterReplace.size === beforeReplace.size,
+        '图片替换保留大小与时间戳')
       await waitViewState('lf.md', v => v.hoverPreview?.instanceId === firstImage.hoverPreview?.instanceId &&
         v.paint?.hoverPopup?.imageWidth === 2)
       const tabId = `tab:default|${text.toString()}`

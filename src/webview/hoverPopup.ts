@@ -336,6 +336,7 @@ export interface HoverPreviewContext {
 }
 
 interface HoverPopupState {
+  snapshotScroll?: { scroller: HTMLElement; top: number }
   instanceId: string
   reqId: number
   anchor: HTMLElement
@@ -1398,9 +1399,14 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     const scroller = event.target
     if (popup?.spec.workspaceFile && scroller instanceof HTMLElement &&
       popup.spec.workspaceFile.sidebar.contains(scroller) && scroller.contains(popup.anchor)) {
-      const row = popup.anchor.getBoundingClientRect()
-      const viewport = scroller.getBoundingClientRect()
-      if (row.bottom <= viewport.top || row.top >= viewport.bottom) closeHoverPopup()
+      const snapshot = popup.snapshotScroll
+      popup.snapshotScroll = undefined
+      const visible = anchorInScroller(popup.anchor, scroller)
+      if (snapshot?.scroller === scroller && snapshot.top === scroller.scrollTop) {
+        if (visible) position(popup)
+        return
+      }
+      if (!visible) closeHoverPopup()
       else position(popup)
       return
     }
@@ -1668,8 +1674,18 @@ export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
   }
 }
 
-export function repositionHoverPopupIfAnchorWithin(scope: ParentNode): void {
-  if (popup && scope.contains(popup.anchor)) position(popup)
+function anchorInScroller(anchor: HTMLElement, scroller: HTMLElement): boolean {
+  const row = anchor.getBoundingClientRect()
+  const viewport = scroller.getBoundingClientRect()
+  return row.bottom > viewport.top && row.top < viewport.bottom
+}
+
+export function repositionHoverPopupIfAnchorWithin(scope: ParentNode, scrollers: readonly HTMLElement[]): void {
+  if (!popup || !scope.contains(popup.anchor)) return
+  const scroller = scrollers.find(el => el.contains(popup!.anchor))
+  if (scroller) popup.snapshotScroll = { scroller, top: scroller.scrollTop }
+  // 快照为了对齐当前文件而滚走非当前锚点时，保留卡片原位及选择现场。
+  if (!scroller || anchorInScroller(popup.anchor, scroller)) position(popup)
 }
 
 /** #221/#224 内容应用（成功回包 / 同实例刷新共用入口）：**不重置

@@ -9,12 +9,13 @@ const mock = vi.hoisted(() => ({
   watchCreate: vi.fn(), watchDelete: vi.fn(),
   mediaProvider: vi.fn(), readFile: vi.fn(),
   extraRoots: [] as string[],
+  rootAuthority: '',
 }))
 
 vi.mock('vscode', async () => {
   const path = (await import('node:path')).posix
-  const uri = (path: string, scheme = 'file') =>
-    ({ path, fsPath: path, scheme, authority: '', toString: () => `${scheme}://${path}` })
+  const uri = (path: string, scheme = 'file', authority = scheme === 'file' ? mock.rootAuthority : '') =>
+    ({ path, fsPath: path, scheme, authority, toString: () => `${scheme}://${authority}${path}` })
   const disposable = () => ({ dispose() {} })
   class FileSystemError extends Error {
     readonly code: string
@@ -22,12 +23,13 @@ vi.mock('vscode', async () => {
     static Unavailable() { return new FileSystemError('Unavailable') }
     static FileNotFound() { return new FileSystemError('FileNotFound') }
   }
-  const folder = { uri: uri('/notes'), name: 'notes', index: 0 }
+  const folders = () => ['/notes', ...mock.extraRoots].map((path, index) => ({ name: path.slice(1), uri: uri(path), index }))
   return {
     Uri: {
       file: uri,
       from: (value: { path: string; scheme: string }) => uri(value.path, value.scheme),
-      joinPath: (base: { path: string; scheme: string }, ...parts: string[]) => uri(path.join(base.path, ...parts), base.scheme),
+      joinPath: (base: { path: string; scheme: string; authority: string }, ...parts: string[]) =>
+        uri(path.join(base.path, ...parts), base.scheme, base.authority),
     },
     FileSystemError,
     FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
@@ -37,8 +39,9 @@ vi.mock('vscode', async () => {
     TabInputText: class {},
     TabInputCustom: class {},
     workspace: {
-      get workspaceFolders() { return [folder, ...mock.extraRoots.map(path => ({ name: path, uri: uri(path) }))] },
-      getWorkspaceFolder: ({ path }: { path: string }) => path === '/notes' || path.startsWith('/notes/') ? folder : undefined,
+      get workspaceFolders() { return folders() },
+      getWorkspaceFolder: ({ path }: { path: string }) => folders().reverse().find(folder =>
+        path === folder.uri.path || path.startsWith(`${folder.uri.path}/`)),
       asRelativePath: ({ path }: { path: string }) => path.replace('/notes/', ''),
       fs: { readDirectory: mock.readDirectory, stat: mock.stat, createDirectory: mock.createDirectory, delete: mock.remove,
         readFile: mock.readFile,
@@ -61,6 +64,7 @@ vi.mock('vscode', async () => {
 
 import * as vscode from 'vscode'
 import { WorkspaceFilesSidebar } from '../../src/host/workspaceFilesSidebar'
+import { previewSourceImagePaths } from '../../src/host/previewSourceImages'
 import type { WorkspaceFilesSnapshot } from '../../src/shared/protocol'
 import { isHostToWebview, isWebviewToHost } from '../../src/shared/protocol'
 
@@ -79,6 +83,7 @@ beforeEach(() => {
   mock.textDocuments.length = 0
   mock.notebookDocuments.length = 0
   mock.extraRoots.length = 0
+  mock.rootAuthority = ''
   files.clear()
   for (const [path, type] of Object.entries({ '/notes': dirType, '/notes/start.md': fileType,
     '/notes/drafts': dirType, '/notes/drafts/old.md': fileType, '/notes/escape': dirType | vscode.FileType.SymbolicLink,
@@ -226,11 +231,12 @@ it('来源图片别名单文件读取；重定向的路径和非图片不获授�
   client.request({ kind: 'workspaceFiles.toggle' })
   const owner = await client.id('old.md')
   const uri = makeUri('/notes/drafts/src.png')
-  const root = makeUri('/notes')
+  const source = makeUri('/notes/drafts/old.md')
+  const active = () => true
   files.set('/notes/drafts/src.png', fileType)
-  expect(client.previewImageAsset(owner, makeUri('/notes/drafts/old.md'), root)).toBeUndefined()
-  expect(client.previewImageAsset(owner, makeUri('/outside/sibling.png'), root)).toBeUndefined()
-  const alias = client.previewImageAsset(owner, uri, root)!
+  expect(client.previewSourceAsset(owner, makeUri('/notes/drafts/old.md'), source, active)).toBeUndefined()
+  expect(client.previewSourceAsset(owner, makeUri('/outside/sibling.png'), source, active)).toBeUndefined()
+  const alias = client.previewSourceAsset(owner, uri, source, active)!
   sidebar.registerMediaResources()
   const provider = mock.mediaProvider.mock.calls[0]![1] as vscode.FileSystemProvider
   mock.readFile.mockResolvedValueOnce(Uint8Array.of(1))
@@ -239,6 +245,52 @@ it('来源图片别名单文件读取；重定向的路径和非图片不获授�
   files.set('/notes/drafts', dirType | vscode.FileType.SymbolicLink)
   await expect(provider.readFile(alias)).rejects.toThrow()
   expect(mock.readFile).toHaveBeenCalledTimes(1)
+})
+
+it('来源资源须仍有租约并位于当前来源根', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const owner = await client.id('start.md')
+  mock.extraRoots.push('/another')
+  files.set('/another', dirType)
+  files.set('/another/drawing.png', fileType)
+  let alive = true
+  const alias = client.previewSourceAsset(owner, makeUri('/another/drawing.png'),
+    makeUri('/another/sub/note.md'), () => alive)!
+  sidebar.registerMediaResources()
+  const provider = mock.mediaProvider.mock.calls[0]![1] as vscode.FileSystemProvider
+  expect(await provider.stat(alias)).toMatchObject({ type: fileType })
+  alive = false
+  await expect(provider.stat(alias)).rejects.toMatchObject({ code: 'FileNotFound' })
+  alive = true
+  mock.extraRoots.pop()
+  await expect(provider.stat(alias)).rejects.toMatchObject({ code: 'FileNotFound' })
+})
+
+it('源码中明确引用的相对图片才有资格取得别名', () => {
+  const text = [
+    '![相对图片](../shown.png)', '', '![引用型图片][ref]', '', '[ref]: photo.png',
+    '', '<img src="native.png" srcset="native.png 1x, large.png 2x">', '',
+    '![外站](https://example.com/foreign.png)', '',
+    '```md', '![代码示例](not-drawn.png)', '```',
+  ].join('\n')
+  expect(previewSourceImagePaths(text, '/notes/sub/note.md',
+    { rootDir: '/notes', docDir: '/notes/sub', isWindowsHost: false })).toEqual(new Set([
+    '/notes/shown.png', '/notes/sub/photo.png', '/notes/sub/native.png', '/notes/sub/large.png',
+  ]))
+})
+
+it('UNC 主机名大小写不同也能保护未保存文档', async () => {
+  mock.rootAuthority = 'SERVER'
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('drafts')
+  mock.textDocuments.push({ uri: { ...makeUri('/notes/drafts/old.md'), authority: 'server' }, isDirty: true })
+  mock.showQuickPick.mockImplementation(items => Promise.resolve(items.find((item: { label: string }) => item.label === 'workspaceFiles.trash')))
+  mock.warn.mockResolvedValue('workspaceFiles.trash')
+  client.request({ kind: 'workspaceFiles.manage', id })
+  await vi.waitFor(() => expect(mock.warn).toHaveBeenCalledTimes(2))
+  expect(mock.remove).not.toHaveBeenCalled()
 })
 
 it('折叠所有文件夹保留根目录，并清除子目录的展开状态', async () => {

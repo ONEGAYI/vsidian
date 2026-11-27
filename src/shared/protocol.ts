@@ -3011,6 +3011,7 @@ export interface PaintProbe {
     borderWidth: string | null
     errorState: boolean
     imageWidth?: number
+    nestedPdfPainted?: boolean
   }
   /** #414 T03 标题折叠 UI 绘制观测（无 Live 视图时缺省） */
   headingFold?: HeadingFoldPaintProbe

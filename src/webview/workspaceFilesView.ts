@@ -150,7 +150,10 @@ export class WorkspaceFilesView {
         else if (row.bottom > viewport.bottom) this.scroll.scrollTop += row.bottom - viewport.bottom
       }
     }
-    repositionHoverPopupIfAnchorWithin(this.element)
+    const adjusted = []
+    if (scrollTop !== this.scroll.scrollTop) adjusted.push(this.scroll)
+    if (tabsTop !== this.openedList.scrollTop) adjusted.push(this.openedList)
+    repositionHoverPopupIfAnchorWithin(this.element, adjusted)
   }
 
   currentFile(): HTMLButtonElement | null {

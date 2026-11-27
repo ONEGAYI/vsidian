@@ -74,6 +74,7 @@ vsidian/
     │   │   ├── pdfOutlineWrite.ts      # 书签写入 pdf-lib
     │   │   ├── pdfRemoteAdapter.ts     # PDF 远端会话适配器
     │   │   └── pdfRemoteTestHooks.ts   # remote e2e 钩子标记
+    │   ├── previewSourceImages.ts        # 预览图片来源验证
     │   ├── proxyAgent.ts                 # 外链抓取代理接入（CONNECT 隧道）
     │   ├── refEditPorts.ts               # 引用编辑端口绑定注册表
     │   ├── searchReveal.ts               # 搜索定位恢复纯逻辑（#318）

@@ -106,6 +106,13 @@ export interface EditAttributionRecord {
   joined?: EditOriginMeta[]
 }
 
+/** 来源租约仍在场时，才可为该文件侧栏预览签发来源资源别名。 */
+export interface FilePreviewOrigin {
+  rowId: string
+  version: number
+  active(): boolean
+}
+
 /** 面板发送通道 */
 export interface PanelPort {
   send(message: HostToWebview): void
@@ -128,6 +135,7 @@ export interface PanelPort {
       /** T05（#544）附加组件来源覆盖（会话层已核验成员资格的来源 fsPath） */
       resolvedSource?: { fsPath: string }
       verifiedWorkspaceFilePath?: string
+      filePreviewOrigin?: FilePreviewOrigin
     },
     report: (result: RefReadOutcome) => void,
   ): void
@@ -161,7 +169,7 @@ export interface PanelPort {
   /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri）。
    *  #220 起第二可选参 sourceDocUri：悬停浮层内 B 文档图片的来源上下文
    *  （vscode 层按 B 目录构造 LinkContext）；缺省 = 面板自身文档 */
-  resolveImage?(src: string, sourceDocUri?: string, workspaceFileId?: string): Promise<ImageResolution>
+  resolveImage?(src: string, sourceDocUri?: string, filePreviewOrigin?: FilePreviewOrigin): Promise<ImageResolution>
   /** #161 图片粘贴落盘（vscode 层注入：设置读取 + 目录解析 + writeFile）；
    *  report 回报成功（携插入文本）/ 目录非法 / 写入失败 */
   pasteImage?(
@@ -1347,8 +1355,15 @@ export class DocumentSession {
         const reject = (reason: HoverPreviewFailReason): void => panel.port.send({
           kind: 'hover.result', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason,
         })
-        const workspaceFilePath = message.workspaceFileId === undefined ? undefined :
-          await panel.port.workspacePreviewTarget?.(message.workspaceFileId)
+        let workspaceFilePath: string | undefined
+        if (message.workspaceFileId !== undefined) {
+          try {
+            workspaceFilePath = await panel.port.workspacePreviewTarget?.(message.workspaceFileId)
+          } catch {
+            reject('read-failed')
+            return
+          }
+        }
         if (this.disposed || this.panels.get(sessionId) !== panel || !panel.ready) return
         if (message.workspaceFileId !== undefined && workspaceFilePath === undefined) {
           reject('not-found')
@@ -1603,19 +1618,23 @@ export class DocumentSession {
         // Service）内管理——会话级 shapeKey 按目标文本形态区分，URL 微差
         // 产生不同键，合并口径以服务层归一为准。此处仅按 href scheme 预
         // 判路由（安全边界仍由 resolveHoverTargetForm 的开关/准入复核）
+        const filePreviewOrigin = parent && message.source
+          ? this.filePreviewOrigin(panel, message.source.parentInstanceId, parent) : undefined
         const payload = {
           ...message,
           ...(verifiedSource ? { verifiedSource } : {}),
           ...(addonResolvedSource ? { resolvedSource: { fsPath: addonResolvedSource.fsPath } } : {}),
           ...(workspaceFilePath !== undefined ? { verifiedWorkspaceFilePath: workspaceFilePath } : {}),
+          ...(filePreviewOrigin !== undefined ? { filePreviewOrigin } : {}),
         }
         if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
           port(payload, report)
           return Promise.resolve()
         }
         // 资源别名的权限仅属于签发它的面板与文件条目。
+        const shape = hoverShapeKeyOf(message, verifiedSource ?? addonResolvedSource)
         const shapeKey = workspaceFilePath !== undefined ? `file-row:${sessionId}:${message.workspaceFileId}` :
-          hoverShapeKeyOf(message, verifiedSource ?? addonResolvedSource)
+          filePreviewOrigin !== undefined ? `file-source:${sessionId}:${message.source!.parentInstanceId}:${shape}` : shape
         const cached = this.hoverReadCache.get(shapeKey)
         if (cached) {
           this.hoverCacheHits++
@@ -1855,10 +1874,20 @@ export class DocumentSession {
    * 时分别保留登记。广播仍按 src 无条件重取，可能同时重取其他来源的
    * 同名图，但不能漏掉仍在场的目标。解析异常收敛 read-error 回发。
    */
-  private filePreviewSource(panel: PanelEntry, sourceDocUri?: string): string | undefined {
+  private filePreviewOrigin(panel: PanelEntry, occurrence: string, grant: HoverSourceGrant): FilePreviewOrigin | undefined {
+    if (grant.workspaceFileId === undefined) return
+    return { rowId: grant.workspaceFileId, version: grant.version,
+      active: () => {
+        const live = panel.hoverParentGrants.get(occurrence)
+        return !this.disposed && panel.ready && live?.workspaceFileId === grant.workspaceFileId &&
+          live?.fsPath === grant.fsPath && live?.version === grant.version
+      } }
+  }
+
+  private filePreviewSource(panel: PanelEntry, sourceDocUri?: string): FilePreviewOrigin | undefined {
     if (sourceDocUri === undefined) return
-    for (const grant of panel.hoverParentGrants.values()) {
-      if (grant.workspaceFileId !== undefined && grant.fsPath === sourceDocUri) return grant.workspaceFileId
+    for (const [occurrence, grant] of panel.hoverParentGrants) {
+      if (grant.fsPath === sourceDocUri && grant.workspaceFileId !== undefined) return this.filePreviewOrigin(panel, occurrence, grant)
     }
   }
 

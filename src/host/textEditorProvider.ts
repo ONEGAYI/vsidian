@@ -9,7 +9,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
-import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
+import { DocumentSession, type FilePreviewOrigin, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { AddonHistoryCoordinator, type AddonHistorySnapshotData } from './addonHistoryCoordinator'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
 import { AddonHistoryProbeHub } from './addonHistoryProbe'
@@ -104,7 +104,8 @@ import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator, shouldFor
 import { selectTextWatchEvictions } from '../shared/hoverRefresh'
 import { escapeGlobFilenameLiteral } from '../shared/globLiteral'
 import { TextAppearanceService } from './textAppearance/appearanceService'
-import { ImageVersionTable } from './imageVersioning'
+import { imageFsKey, ImageVersionTable } from './imageVersioning'
+import { previewSourceImagePaths } from './previewSourceImages'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
   IMAGE_WAKE_MIN_GAP_MS,
@@ -1048,7 +1049,7 @@ export function createTextEditorProvider(
    *  重建（先拆旧）；无工作区不建（周期核验与按需 stat 兜底）。事件去抖
    *  归并（保存器写临时文件 + rename 会产生成组事件） */
   const imageWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  const scheduleImageEvent = (fsPath: string): void => {
+  const scheduleImageEvent = (fsPath: string, status: 'changed' | 'deleted' | 'stale'): void => {
     const prev = imageWatchTimers.get(fsPath)
     if (prev !== undefined) {
       clearTimeout(prev)
@@ -1057,7 +1058,7 @@ export function createTextEditorProvider(
       fsPath,
       setTimeout(() => {
         imageWatchTimers.delete(fsPath)
-        void imageRefresh.handleTargetEvent(fsPath)
+        void imageRefresh.handleTargetEvent(fsPath).then(() => hoverEvents.onDiskEvent(fsPath, status))
       }, IMAGE_EVENT_DEBOUNCE_MS),
     )
   }
@@ -1111,9 +1112,8 @@ export function createTextEditorProvider(
           return
         }
         if (isImageFileExtension(uri.fsPath)) {
-          scheduleImageEvent(uri.fsPath)
-        }
-        schedulePreviewMediaEvent(uri.fsPath, status)
+          scheduleImageEvent(uri.fsPath, status)
+        } else schedulePreviewMediaEvent(uri.fsPath, status)
       }
       watcher.onDidChange((uri) => forward(uri, 'changed'))
       watcher.onDidCreate((uri) => forward(uri, 'changed'))
@@ -1140,9 +1140,8 @@ export function createTextEditorProvider(
     const offTargetChange = vaultIndex.onTargetChange((event) => {
       diagnostics.record('hover.disk', { fsPath: event.fsPath, status: event.status })
       if (isImageFileExtension(event.fsPath)) {
-        scheduleImageEvent(event.fsPath)
-      }
-      hoverEvents.onDiskEvent(event.fsPath, event.status)
+        scheduleImageEvent(event.fsPath, event.status)
+      } else hoverEvents.onDiskEvent(event.fsPath, event.status)
     })
     context.subscriptions.push({ dispose: offTargetChange })
   }
@@ -1264,9 +1263,10 @@ export function createTextEditorProvider(
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(dirUri, escapeGlobFilenameLiteral(fileUri.path.slice(slash + 1))),
     )
-    watcher.onDidChange((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
-    watcher.onDidCreate((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
-    watcher.onDidDelete((uri) => scheduleTextDiskEvent(uri.fsPath, 'deleted'))
+    const forward = isImageFileExtension(fsPath) ? scheduleImageEvent : scheduleTextDiskEvent
+    watcher.onDidChange((uri) => forward(uri.fsPath, 'changed'))
+    watcher.onDidCreate((uri) => forward(uri.fsPath, 'changed'))
+    watcher.onDidDelete((uri) => forward(uri.fsPath, 'deleted'))
     textWatchers.set(key, { watcher })
     // #344（P3-12 收口·RB-1）淘汰选取：跳过仍有活跃订阅的目标（订阅在
     // 登记表而事件源被盲 LRU 淘汰 = 磁盘推送承诺落空的不对称修复）。
@@ -3285,6 +3285,10 @@ export function createTextEditorProvider(
       // #333（P3-01）起读取走 readRefContentTarget 类型化分派入口（成功
       // 载荷按 kind 标记；旧扁平入口保留为兼容适配）
       const fileSidebar = workspaceFiles.attach(document.uri, webviewPanel)
+      const previewImagePaths = new WeakMap<vscode.TextDocument, { version: number; root: string; paths: ReadonlySet<string> }>()
+      const sourceAsset = (origin: FilePreviewOrigin, source: vscode.TextDocument, target: vscode.Uri) =>
+        fileSidebar.previewSourceAsset(origin.rowId, target, source.uri,
+          () => origin.active() && source.version === origin.version)
       const readHoverTargetPort = (
         payload: HoverPreviewRequestPayload & {
           verifiedSource?: { fsPath: string; version: number }
@@ -3292,6 +3296,7 @@ export function createTextEditorProvider(
            *  已送达目标）的来源 fsPath——读取以该文档为解析语境（R-U02） */
           resolvedSource?: { fsPath: string }
           verifiedWorkspaceFilePath?: string
+          filePreviewOrigin?: FilePreviewOrigin
         },
         report: (result: RefReadOutcome) => void,
       ): void => {
@@ -3323,6 +3328,10 @@ export function createTextEditorProvider(
               }
             }
             const access = hoverAccessContextOf(sourceDoc)
+            const origin = payload.filePreviewOrigin
+            // 子引用已经过宿主全文版本及具体 occurrence 校验。
+            const resource = (uri: vscode.Uri) => media ??
+              (origin && access.rootFsPath !== linkCtx.rootDir ? sourceAsset(origin, sourceDoc, uri) : undefined)
             // #342（P3-10）外链抓取端口与取消注册：开关开（hover.external
             // Enabled）才提供 web 通道——关闭态解析层 unsupported，零网络
             // 请求；在途抓取登记取消句柄（hover.cancel → documentSession
@@ -3413,7 +3422,12 @@ export function createTextEditorProvider(
                   const stat = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
                   // P2-6（#556 收口）：isFile 标记目录身份（directTarget
                   // 存在性核验的文件类型口径——目录不通过）
-                  return { mtimeMs: stat.mtime, isFile: (stat.type & vscode.FileType.File) !== 0 }
+                  const isFile = (stat.type & vscode.FileType.File) !== 0
+                  const imageAlias = isFile && isImageFileExtension(fsPath) && (media !== undefined || origin !== undefined)
+                  const version = imageAlias ? imageRefresh.versions.recordObservation(fsPath, {
+                    mtimeMs: stat.mtime, size: stat.size,
+                  }).generation : stat.mtime
+                  return { mtimeMs: version, isFile }
                 } catch {
                   return null
                 }
@@ -3441,7 +3455,7 @@ export function createTextEditorProvider(
                 return {
                   kind: 'ok' as const,
                   uri: appendImageVersionStamp(
-                    webviewPanel.webview.asWebviewUri(media ?? uri).toString(),
+                    webviewPanel.webview.asWebviewUri(resource(uri) ?? uri).toString(),
                     generation,
                   ),
                   version: generation,
@@ -3470,10 +3484,13 @@ export function createTextEditorProvider(
                 ...(webAbort !== undefined ? { web: { enabled: true } } : {}),
               },
             )
-            if (media && outcome.ok && outcome.content.kind === 'image') {
-              const { version } = outcome.content
-              outcome.content = { kind: 'image', version,
-                src: appendImageVersionStamp(webviewPanel.webview.asWebviewUri(media).toString(), version) }
+            if (outcome.ok && outcome.content.kind === 'image') {
+              const alias = resource(vscode.Uri.file(outcome.fsPath))
+              if (alias) {
+                const { version } = outcome.content
+                outcome.content = { kind: 'image', version,
+                  src: appendImageVersionStamp(webviewPanel.webview.asWebviewUri(alias).toString(), version) }
+              }
             }
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
@@ -3489,22 +3506,37 @@ export function createTextEditorProvider(
       const resolveImage = async (
         src: string,
         sourceDocUri?: string,
-        workspaceFileId?: string,
+        origin?: FilePreviewOrigin,
       ): Promise<ImageResolution> => {
         // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳。
         // #220 来源化解析（悬停浮层 B 身份图片）：以 B 的目录/根边界构造
         // 上下文（同一 classifyImageTarget 白名单与 asWebviewUri 机制）；
         // 缺省 = 面板自身文档
         const sourceCtx = sourceDocUri !== undefined ? linkContextOfPath(sourceDocUri) : linkCtx
+        let imageAlias: ((uri: vscode.Uri) => vscode.Uri | undefined) | undefined
+        if (origin?.active() && sourceDocUri !== undefined && sourceCtx.rootDir !== linkCtx.rootDir &&
+            classifyLocalRefContentKind(sourceDocUri) === 'markdown') {
+          const source = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceDocUri))
+          if (source.version === origin.version && origin.active()) {
+            let cache = previewImagePaths.get(source)
+            if (!cache || cache.version !== source.version || cache.root !== sourceCtx.rootDir) {
+              const text = source.getText()
+              cache = { version: source.version, root: sourceCtx.rootDir, paths: previewSourceImagePaths(
+                new NewlineCoordinator(text).toLfText(text), source.uri.fsPath, sourceCtx) }
+              previewImagePaths.set(source, cache)
+            }
+            const allowed = cache.paths
+            imageAlias = uri => isImageFileExtension(uri.fsPath) && allowed.has(imageFsKey(uri.fsPath, isWindowsHost))
+              ? sourceAsset(origin, source, uri) : undefined
+          }
+        }
         return resolveWorkspaceImage(
           src,
           sourceCtx,
           webviewPanel.webview,
           imageRefresh.versions,
           entry.session.getImageGeneration(),
-          workspaceFileId !== undefined && sourceCtx.rootDir !== linkCtx.rootDir
-            ? uri => fileSidebar.previewImageAsset(workspaceFileId, uri, vscode.Uri.file(sourceCtx.rootDir))
-            : undefined,
+          imageAlias,
         )
       }
       const sessionId = entry.session.attachPanel({

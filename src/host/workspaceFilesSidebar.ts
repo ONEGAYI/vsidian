@@ -15,7 +15,7 @@ const parentOf = (uri: vscode.Uri): vscode.Uri => vscode.Uri.joinPath(uri, '..')
 type FileTab = vscode.Tab & { input: vscode.TabInputText | vscode.TabInputCustom }
 type TreeTarget = { kind: WorkspaceFileEntry['kind']; uri: vscode.Uri; name: string }
 type Target = TreeTarget | { kind: 'tab'; uri: vscode.Uri; editor: string }
-interface AssetAlias { owner: string; uri: vscode.Uri; root: vscode.Uri }
+interface AssetAlias { owner: string; uri: vscode.Uri; source: vscode.Uri; root: vscode.Uri; active(): boolean }
 interface Client {
   uri: vscode.Uri
   panel: vscode.WebviewPanel
@@ -38,15 +38,18 @@ function pathIdentity(uri: vscode.Uri): string {
   return ignoreCase ? path.toLowerCase() : path
 }
 
+const sameOrigin = (a: vscode.Uri, b: vscode.Uri): boolean =>
+  a.scheme === b.scheme && a.authority.toLowerCase() === b.authority.toLowerCase()
+
 function contains(parent: vscode.Uri, item: vscode.Uri): boolean {
-  if (parent.scheme !== item.scheme || parent.authority !== item.authority) return false
+  if (!sameOrigin(parent, item)) return false
   const base = pathIdentity(parent)
   const itemPath = pathIdentity(item)
   return itemPath === base || itemPath.startsWith(base.endsWith('/') ? base : `${base}/`)
 }
 
 function sameUri(a: vscode.Uri, b: vscode.Uri): boolean {
-  return a.scheme === b.scheme && a.authority === b.authority && pathIdentity(a) === pathIdentity(b) &&
+  return sameOrigin(a, b) && pathIdentity(a) === pathIdentity(b) &&
     a.query === b.query && a.fragment === b.fragment
 }
 
@@ -62,18 +65,18 @@ function isWorkspaceRoot(uri: vscode.Uri): boolean {
  * 用户明确挂载的工作区根仍可使用（包括通过符号链接加入的根）。 */
 async function verifyTreePath(uri: vscode.Uri, expected: vscode.FileType,
   root = vscode.workspace.getWorkspaceFolder(uri)?.uri): Promise<void> {
-  if (!root || !contains(root, uri)) throw vscode.FileSystemError.Unavailable(uri)
+  if (!root || !contains(root, uri)) throw vscode.FileSystemError.FileNotFound(uri)
   const chain: vscode.Uri[] = [uri]
   while (pathIdentity(chain.at(-1)!) !== pathIdentity(root)) {
     const parent = parentOf(chain.at(-1)!)
-    if (pathIdentity(parent) === pathIdentity(chain.at(-1)!)) throw vscode.FileSystemError.Unavailable(uri)
+    if (pathIdentity(parent) === pathIdentity(chain.at(-1)!)) throw vscode.FileSystemError.FileNotFound(uri)
     chain.push(parent)
   }
   for (let i = chain.length - 1; i >= 0; i--) {
     const { type } = await vscode.workspace.fs.stat(chain[i]!)
     if (!(type & (i === 0 ? expected : vscode.FileType.Directory)) ||
       (i < chain.length - 1 && (type & vscode.FileType.SymbolicLink))) {
-      throw vscode.FileSystemError.Unavailable(uri)
+      throw vscode.FileSystemError.FileNotFound(uri)
     }
   }
 }
@@ -122,8 +125,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       request: (request: WorkspaceFilesRequest): void => this.request(client, request),
       previewTarget: async (id: string): Promise<string | undefined> => (await this.verifyPreviewTarget(client, id))?.fsPath,
       previewMedia: (id: string): vscode.Uri | undefined => this.previewMedia(client, id),
-      previewImageAsset: (id: string, uri: vscode.Uri, root: vscode.Uri): vscode.Uri | undefined =>
-        this.previewImageAsset(client, id, uri, root),
+      previewSourceAsset: (id: string, uri: vscode.Uri, source: vscode.Uri, active: () => boolean): vscode.Uri | undefined =>
+        this.previewSourceAsset(client, id, uri, source, active),
       dispose: (): void => {
         if (this.clients.get(panel) !== client) return
         this.clients.delete(panel)
@@ -175,13 +178,20 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     return vscode.Uri.joinPath(client.mediaRoot, Buffer.from(id).toString('base64url') + suffix)
   }
 
-  /** 仅对已准入的来源图片生成单文件别名，不给来源文档目录授予资源权限。 */
-  private previewImageAsset(client: Client, owner: string, uri: vscode.Uri, root: vscode.Uri): vscode.Uri | undefined {
-    if (!this.previewTarget(client, owner) || previewKindOf(uri) !== 'image' || !contains(root, uri)) return
+  private sourceRoot(source: vscode.Uri): vscode.Uri {
+    return vscode.workspace.getWorkspaceFolder(source)?.uri ?? parentOf(source)
+  }
+
+  /** 调用方已核对宿主源码中的引用；这里只授权来源根内的具体附件。 */
+  private previewSourceAsset(client: Client, owner: string, uri: vscode.Uri, source: vscode.Uri,
+    active: () => boolean): vscode.Uri | undefined {
+    const root = this.sourceRoot(source)
+    const kind = previewKindOf(uri)
+    if (!this.previewTarget(client, owner) || !active() || (kind !== 'image' && kind !== 'pdf') || !contains(root, uri)) return
     const key = Buffer.from(JSON.stringify([owner, uri.toString()])).toString('base64url')
     const alias = vscode.Uri.joinPath(client.mediaRoot, 'asset', key + uri.path.slice(uri.path.lastIndexOf('.')))
     client.assets.delete(alias.path)
-    client.assets.set(alias.path, { owner, uri, root })
+    client.assets.set(alias.path, { owner, uri, source, root, active })
     if (client.assets.size > ASSET_ALIAS_LIMIT) client.assets.delete(client.assets.keys().next().value!)
     return alias
   }
@@ -192,9 +202,10 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     if (client && match && uri.scheme === MEDIA_SCHEME && uri.authority === '') {
       if (match[2]) {
         const asset = client.assets.get(uri.path)
-        if (asset && await this.verifyPreviewTarget(client, asset.owner)) {
+        const authorized = () => asset?.active() && sameUri(asset.root, this.sourceRoot(asset.source))
+        if (asset && authorized() && await this.verifyPreviewTarget(client, asset.owner)) {
           await verifyTreePath(asset.uri, vscode.FileType.File, asset.root)
-          if (client.assets.get(uri.path) === asset && this.previewTarget(client, asset.owner)) return asset.uri
+          if (client.assets.get(uri.path) === asset && authorized() && this.previewTarget(client, asset.owner)) return asset.uri
         }
       } else {
         const id = Buffer.from(match[3]!, 'base64url').toString()
@@ -316,7 +327,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     snapshot.canCreate = roots.some(root => isWritable(root.uri))
     client.loaded = true
     client.targets = targets
-    for (const [key, asset] of client.assets) if (!targets.has(asset.owner)) client.assets.delete(key)
+    for (const [key, asset] of client.assets) {
+      if (!targets.has(asset.owner) || !asset.active() || !sameUri(asset.root, this.sourceRoot(asset.source))) client.assets.delete(key)
+    }
     void client.panel.webview.postMessage(snapshot)
   }
 
@@ -391,8 +404,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     if (client.targets.get(id)?.kind === 'file') {
       try {
         await verifyTreePath(uri, vscode.FileType.File)
-      } catch {
-        return
+      } catch (error) {
+        if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return
+        throw error
       }
     }
     return this.previewTarget(client, id)
