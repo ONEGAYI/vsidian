@@ -3,7 +3,7 @@
 // resolvedSource（R-U02 解析语境）、main 空串回落常规根请求、缓存形态键
 // 按来源区分（不同来源的同名相对目标不串包）。
 import { describe, it, expect } from 'vitest'
-import { DocumentSession, type HostDocumentPort } from '../../src/host/documentSession'
+import { DocumentSession, type HostDocumentPort, type PanelPort } from '../../src/host/documentSession'
 import type { RefReadOutcome } from '../../src/host/hoverDocAccess'
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 
@@ -41,7 +41,7 @@ function setup(workspacePreviewTarget?: (id: string) => Promise<string | undefin
   const out: HostToWebview[] = []
   let sourceAvailable = true
   /** 端口收到的读取载荷（resolvedSource 断言面） */
-  const portPayloads: Array<{ target: string; resolvedSource?: { fsPath: string }; verifiedSource?: unknown }> = []
+  const portPayloads: Parameters<NonNullable<PanelPort['readHoverTarget']>>[0][] = []
   const session = new DocumentSession(doc, { docUri: DOC_URI, rootFsPath: A_PATH, isWindowsHost: true })
   const id = session.attachPanel({
     send: (m) => out.push(m),
@@ -54,7 +54,7 @@ function setup(workspacePreviewTarget?: (id: string) => Promise<string | undefin
           ? { version: 1, text: '# A\n' }
           : null,
     readHoverTarget: (payload, report) => {
-      portPayloads.push({ target: payload.target, resolvedSource: payload.resolvedSource, verifiedSource: payload.verifiedSource })
+      portPayloads.push(payload)
       // 送达请求（directTarget）按其 fsPath 回报——登记进已送达目标集合
       if (payload.directTarget !== undefined) {
         report(mdOutcome(payload.directTarget.fsPath, '# 目标\n'))
@@ -89,6 +89,21 @@ it('文件条目存在性与不可访问分别回报，不回退到按显示名�
     expect(s.portPayloads).toEqual([])
     expect(s.out.at(-1)).toMatchObject({ kind: 'hover.result', ok: false, reason })
   }
+})
+
+it('读取端口只接收协议声明与宿主授权字段', async () => {
+  const s = setup()
+  await ready(s)
+  const message = { kind: 'hover.request' as const, sessionId: 'p1', docUri: DOC_URI, reqId: 9,
+    instanceId: 'hover-projection', sourceStart: 0, sourceEnd: 0, target: 'sib.md',
+    extraMetadata: 'ignored', verifiedWorkspaceFilePath: 'untrusted', verifiedSource: 'untrusted',
+    resolvedSource: 'untrusted', filePreviewOrigin: 'untrusted',
+  }
+  await s.send(message)
+  expect(s.portPayloads).toHaveLength(1)
+  expect(s.portPayloads[0]).not.toHaveProperty('extraMetadata')
+  expect(s.portPayloads[0]).toMatchObject({ verifiedWorkspaceFilePath: undefined, verifiedSource: undefined,
+    resolvedSource: undefined, filePreviewOrigin: undefined })
 })
 
 async function ready(s: ReturnType<typeof setup>): Promise<void> {

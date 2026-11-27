@@ -113,6 +113,13 @@ export interface FilePreviewOrigin {
   active(): boolean
 }
 
+export type AuthorizedHoverRead = HoverPreviewRequestPayload & {
+  verifiedSource?: { fsPath: string; version: number }
+  resolvedSource?: { fsPath: string }
+  verifiedWorkspaceFilePath?: string
+  filePreviewOrigin?: FilePreviewOrigin
+}
+
 /** 面板发送通道 */
 export interface PanelPort {
   send(message: HostToWebview): void
@@ -130,13 +137,7 @@ export interface PanelPort {
    *  （成功携带身份/版本/全文/范围，失败为错误分态）。只读交互，不进
    *  edit.request 通道，暂停态同样放行 */
   readHoverTarget?(
-    payload: HoverPreviewRequestPayload & {
-      verifiedSource?: { fsPath: string; version: number }
-      /** T05（#544）附加组件来源覆盖（会话层已核验成员资格的来源 fsPath） */
-      resolvedSource?: { fsPath: string }
-      verifiedWorkspaceFilePath?: string
-      filePreviewOrigin?: FilePreviewOrigin
-    },
+    payload: AuthorizedHoverRead,
     report: (result: RefReadOutcome) => void,
   ): void
   /** #342（P3-10）悬停请求取消（vscode 层注入：定位在途 web 抓取消费者
@@ -1620,12 +1621,15 @@ export class DocumentSession {
         // 判路由（安全边界仍由 resolveHoverTargetForm 的开关/准入复核）
         const filePreviewOrigin = parent && message.source
           ? this.filePreviewOrigin(panel, message.source.parentInstanceId, parent) : undefined
-        const payload = {
-          ...message,
-          ...(verifiedSource ? { verifiedSource } : {}),
-          ...(addonResolvedSource ? { resolvedSource: { fsPath: addonResolvedSource.fsPath } } : {}),
-          ...(workspaceFilePath !== undefined ? { verifiedWorkspaceFilePath: workspaceFilePath } : {}),
-          ...(filePreviewOrigin !== undefined ? { filePreviewOrigin } : {}),
+        // 只投影协议字段；读取端消费的授权值全由本次宿主查验产生。
+        const payload: AuthorizedHoverRead = {
+          kind: 'hover.request', sessionId, docUri: this.docUri, reqId: message.reqId, instanceId: message.instanceId,
+          sourceStart: message.sourceStart, sourceEnd: message.sourceEnd, target: message.target,
+          occurrenceId: message.occurrenceId, source: message.source, retainSource: message.retainSource,
+          linkHref: message.linkHref, directTarget: message.directTarget, anchorOptional: message.anchorOptional,
+          workspaceFileId: message.workspaceFileId, addonSource: message.addonSource,
+          verifiedSource, resolvedSource: addonResolvedSource && { fsPath: addonResolvedSource.fsPath },
+          verifiedWorkspaceFilePath: workspaceFilePath, filePreviewOrigin,
         }
         if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
           port(payload, report)

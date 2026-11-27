@@ -9,7 +9,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
-import { DocumentSession, type FilePreviewOrigin, type HostDocumentPort, type SessionNotice } from './documentSession'
+import { DocumentSession, type AuthorizedHoverRead, type FilePreviewOrigin, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { AddonHistoryCoordinator, type AddonHistorySnapshotData } from './addonHistoryCoordinator'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
 import { AddonHistoryProbeHub } from './addonHistoryProbe'
@@ -70,7 +70,6 @@ import {
   isWebviewToHost,
   type DiagramExportPayload,
   type HostToWebview,
-  type HoverPreviewRequestPayload,
   type ImageExportPayload,
   type ImagePastePayload,
   type PdfExportEntryMode,
@@ -3290,14 +3289,7 @@ export function createTextEditorProvider(
         fileSidebar.previewSourceAsset(origin.rowId, target, source.uri,
           () => origin.active() && source.version === origin.version)
       const readHoverTargetPort = (
-        payload: HoverPreviewRequestPayload & {
-          verifiedSource?: { fsPath: string; version: number }
-          /** T05（#544）附加组件来源覆盖：会话已校验成员资格（面板文档或
-           *  已送达目标）的来源 fsPath——读取以该文档为解析语境（R-U02） */
-          resolvedSource?: { fsPath: string }
-          verifiedWorkspaceFilePath?: string
-          filePreviewOrigin?: FilePreviewOrigin
-        },
+        payload: AuthorizedHoverRead,
         report: (result: RefReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
