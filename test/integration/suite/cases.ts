@@ -6743,6 +6743,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
           await vscode.commands.executeCommand('vscode.openWith', parent, VIEW_TYPE, { viewColumn: column, preview: false })
         }
         await poll('还原窗口侧栏开合', async () => await vscode.commands.executeCommand<boolean>(toggle) || undefined)
+        // 命令只确认投递；等面板收到收起快照后才能关闭它，否则下一用例会继承展开态。
+        await waitViewState(hostFile, v => v.paint?.workspaceFiles?.panelPainted === false)
       }
       await closeFixtureTabs(parent)
       await vscode.workspace.fs.delete(notebook)
@@ -6751,9 +6753,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
   }],
 
   ['左侧文件栏：Ctrl 悬停只读、未保存文本与跨根附件绘制（#330）', async () => {
-    const toggle = 'onegayi.vsidian.ui.workspaceFilesToggle'
-    const parent = wsUri('lf.md')
+    const hostFile = '侧栏悬停测试.md'
+    const parent = wsUri(hostFile)
     const parentId = parent.toString()
+    const activeParent = () => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+      return input instanceof vscode.TabInputCustom && input.uri.toString() === parentId ? input : undefined
+    }
     const scratch = await mkdtemp(nodePath.join(nodePath.dirname(parent.fsPath), '../file-hover-'))
     const second = vscode.Uri.file(nodePath.join(scratch, 'workspace'))
     const markdown = vscode.Uri.joinPath(second, '草稿 % #.md')
@@ -6763,12 +6769,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const relativeImage = vscode.Uri.joinPath(second, '笔记所用图片.png')
     const text = vscode.Uri.file(nodePath.join(scratch, '工作区外草稿.txt'))
     const received = (message: object) => vscode.commands.executeCommand(CMD.injectWebviewReceived, parentId, message)
+    const toggle = () => received({ kind: 'workspaceFiles.toggle' })
     const pointer = (link: 'file-tree' | 'file-tab', fileId: string, action: 'enter' | 'leave' = 'enter') =>
       vscode.commands.executeCommand(CMD.postToPanel, parentId, {
         kind: 'hover.test.pointer', action, index: 0, link, fileId, ctrlKey: true,
       })
     const hover = (link: 'file-tree' | 'file-tab', fileId: string, match: (v: ViewState) => boolean) =>
-      waitViewState('lf.md', v => {
+      waitViewState(hostFile, v => {
         if (match(v)) return true
         // 第一次派发可能早于目录异步快照；同一条目的待开计时不会因重复 enter 重置。
         void pointer(link, fileId)
@@ -6793,6 +6800,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     try {
       await mkdir(second.fsPath)
       await Promise.all([
+        writeFile(parent.fsPath, '# 侧栏悬停测试\n\n正文不引用被预览的文件。\n'),
         writeFile(markdown.fsPath, '# 盘上只有标题'),
         writeFile(text.fsPath, '盘上只有一行'),
         writeFile(pdf.fsPath, await readFile(wsUri('资料.pdf').fsPath)),
@@ -6801,9 +6809,6 @@ export const cases: Array<[string, () => Promise<void>]> = [
         writeFile(relativeImage.fsPath, Buffer.from(TINY_PNG_BASE64, 'base64')),
       ])
       await utimes(image.fsPath, imageTime, imageTime)
-      await openWithEditor('lf.md')
-      await waitSessionReady('lf.md')
-      await vscode.commands.executeCommand(CMD.postToPanel, parentId, { kind: 'view.mode.set', mode: 'live' })
       assert(vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders!.length, 0, { uri: second }),
         '真实多根工作区添加附件根')
       await poll('第二根可见', async () => vscode.workspace.getWorkspaceFolder(markdown))
@@ -6816,11 +6821,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
       edit.insert(text, new vscode.Position(0, txt.lineAt(0).text.length), '\n宿主未保存第二行\n第三行')
       assert(await vscode.workspace.applyEdit(edit), '测试编辑为两个目标写入未保存内容')
       await vscode.window.showTextDocument(txt, { preview: false })
-      await openWithEditor('lf.md')
-      await waitViewState('lf.md', v => v.viewMode === 'live' && v.paint?.workspaceFiles?.panelPainted === false)
-      assert(await vscode.commands.executeCommand(toggle), '打开左侧文件栏')
+      // 最后首次打开本例面板，避免切回前序用例遗留的同 URI webview。
+      await vscode.commands.executeCommand('vscode.openWith', parent, VIEW_TYPE, { preview: false })
+      await poll('悬停测试面板已激活', async () => activeParent())
+      await waitSessionReady(hostFile)
+      await vscode.commands.executeCommand(CMD.postToPanel, parentId, { kind: 'view.mode.set', mode: 'live' })
+      await waitViewState(hostFile, v => v.viewMode === 'live' && v.paint?.workspaceFiles?.panelPainted === false)
+      assert(await toggle(), '通过工具栏消息打开左侧文件栏')
       opened = true
-      await waitViewState('lf.md', v => v.paint?.workspaceFiles?.currentFilePainted === true)
+      await waitViewState(hostFile, v => v.paint?.workspaceFiles?.currentFilePainted === true)
       assert(await received({ kind: 'workspaceFiles.activate', id: treeId(second) }), '展开第二工作区根')
       const tabExists = (uri: vscode.Uri) => vscode.window.tabGroups.activeTabGroup.tabs.some(tab =>
         (tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputCustom) &&
@@ -6847,21 +6856,20 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const afterReplace = await stat(image.fsPath)
       assert(afterReplace.mtimeMs === beforeReplace.mtimeMs && afterReplace.size === beforeReplace.size,
         '图片替换保留大小与时间戳')
-      await waitViewState('lf.md', v => v.hoverPreview?.instanceId === firstImage.hoverPreview?.instanceId &&
+      await waitViewState(hostFile, v => v.hoverPreview?.instanceId === firstImage.hoverPreview?.instanceId &&
         v.paint?.hoverPopup?.imageWidth === 2)
       const tabId = `tab:default|${text.toString()}`
       await setDiagnostics(true)
       const first = await hover('file-tab', tabId, v =>
         v.paint?.hoverPopup?.hit === true && v.hoverPreview?.text?.totalLines === 3)
-      const active = vscode.window.tabGroups.activeTabGroup.activeTab?.input
-      assert(active instanceof vscode.TabInputCustom && active.uri.toString() === parentId, '悬停不会切换当前文件')
+      assert(activeParent(), '悬停不会切换当前文件')
       await poll('工作区外文本订阅已送达', async () => (await hoverEvents()).find(event =>
         event.stage === 'host.receive.hover.watch' && event.data.instanceId === first.hoverPreview?.instanceId))
       const more = new vscode.WorkspaceEdit()
       more.insert(text, new vscode.Position(2, txt.lineAt(2).text.length), '\n宿主未保存第四行')
       assert(await vscode.workspace.applyEdit(more), '追加一行未保存文本后同一浮窗应刷新')
       // 原生 WorkspaceEdit 动作可能改变宿主命中状态；首开已取画面证据，更新钉住同一实例的四行渲染。
-      await waitViewState('lf.md', v => v.hoverPreview?.instanceId === first.hoverPreview?.instanceId &&
+      await waitViewState(hostFile, v => v.hoverPreview?.instanceId === first.hoverPreview?.instanceId &&
         v.hoverPreview?.text?.renderedLines === 4 && v.hoverPreview.text.totalLines === 4).catch(async error => {
         throw new Error(`工作区外文本未原地刷新（宿主总行数 ${txt.lineCount}，首开 ${first.hoverPreview?.instanceId}）：${String(error)}；${JSON.stringify(await hoverEvents())}`)
       })
@@ -6870,12 +6878,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } finally {
       await setDiagnostics(false)
       if (opened) {
-        await vscode.commands.executeCommand(toggle)
-        await waitViewState('lf.md', v => !v.paint?.hoverPopup && v.paint?.workspaceFiles?.panelPainted === false)
+        await toggle()
+        await waitViewState(hostFile, v => !v.paint?.hoverPopup && v.paint?.workspaceFiles?.panelPainted === false)
       }
       // 仅清理本用例临时文档与工作区根。
       for (const doc of dirtyReads) if (doc.isDirty) await doc.save()
-      const fixtureUris = new Set(dirtyReads.map(doc => doc.uri.toString()))
+      const fixtureUris = new Set([parentId, ...dirtyReads.map(doc => doc.uri.toString())])
       const fixtureTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(({ input }) =>
         (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom) && fixtureUris.has(input.uri.toString()))
       if (fixtureTabs.length) await vscode.window.tabGroups.close(fixtureTabs)
@@ -6884,6 +6892,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
         assert(vscode.workspace.updateWorkspaceFolders(index, 1), '恢复工作区的根目录集合')
         await poll('第二根已移除', async () => !vscode.workspace.getWorkspaceFolder(markdown) || undefined)
       }
+      await rm(parent.fsPath, { force: true })
       await rm(scratch, { recursive: true, force: true })
     }
   }],
