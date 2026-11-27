@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { parse } from 'yaml'
 
 const fixture = vi.hoisted(() => {
+  const cssImportRefresh = 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）'
   // 与 caseSelection.ts 的 SENSITIVE_CASES 实名单逐字对齐（T01/#621、
   // T02/#622、T03/#623、T04/#624、T05/#625、T06/#626 与 T07/#627 的 PDF
   // 导出真实浏览器用例入组；改名/增删两侧须同步——顺序逐字对齐
@@ -27,7 +28,6 @@ const fixture = vi.hoisted(() => {
     'PDF 导出（#627 T07）：单文档预览、过期刷新与导出同源（真浏览器）',
     'PDF 导出（#627 T07）：批量清单点击选中与自动加载预览（真浏览器）',
     'PDF 导出（#627 T07）：合并预览书签观测与关闭后迟到丢弃（真浏览器）',
-    'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
     '索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）',
     '附加组件 T07：调序与单项关闭即时生效、joinPrevious 并组撤回与重载恢复，#356',
     '附加组件 T15：渲染样例停用降级、故障恢复与自处理缺陷对照（#364）',
@@ -37,12 +37,12 @@ const fixture = vi.hoisted(() => {
     '普通丁', sensitive[3]!, '普通戊', sensitive[4]!, '普通己', sensitive[5]!, '普通庚', sensitive[6]!,
     '普通辛', sensitive[7]!, '普通壬', sensitive[8]!, '普通癸', sensitive[9]!, '普通子', sensitive[10]!,
     '普通丑', sensitive[11]!, '普通午', sensitive[12]!, '普通未', sensitive[13]!, '普通申', sensitive[14]!,
-    '普通寅', sensitive[15]!, '普通卯', sensitive[16]!, '普通辰', sensitive[17]!, '普通巳', sensitive[18]!,
-    '普通酉', sensitive[19]!, '普通戌', sensitive[20]!, '普通亥', sensitive[21]!,
+    '普通寅', sensitive[15]!, '普通卯', sensitive[16]!, '普通辰', sensitive[17]!, '普通巳', cssImportRefresh,
+    '普通酉', sensitive[18]!, '普通戌', sensitive[19]!, '普通亥', sensitive[20]!,
   ]
   const executed: string[] = []
   const cases: Array<[string, () => Promise<void>]> = names.map((name) => [name, async () => { executed.push(name) }])
-  return { sensitive, names, cases, executed }
+  return { cssImportRefresh, sensitive, names, cases, executed }
 })
 
 vi.mock('../integration/suite/cases', () => ({ cases: fixture.cases }))
@@ -98,10 +98,13 @@ async function runSuite(): Promise<void> {
 it('真实套件入口的 core 组排除敏感用例，普通用例仍执行', async () => {
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
   await runSuite()
-  expect(fixture.executed).toEqual(['普通甲', '普通乙', '普通丙', '普通丁', '普通戊', '普通己', '普通庚', '普通辛', '普通壬', '普通癸', '普通子', '普通丑', '普通午', '普通未', '普通申', '普通寅', '普通卯', '普通辰', '普通巳', '普通酉', '普通戌', '普通亥'])
+  expect(fixture.executed).toEqual([
+    '普通甲', '普通乙', '普通丙', '普通丁', '普通戊', '普通己', '普通庚', '普通辛', '普通壬', '普通癸', '普通子',
+    '普通丑', '普通午', '普通未', '普通申', '普通寅', '普通卯', '普通辰', '普通巳', fixture.cssImportRefresh, '普通酉', '普通戌', '普通亥',
+  ])
 })
 
-it('第五组只执行四项敏感用例，默认运行仍覆盖全部用例', async () => {
+it('第五组只执行敏感名单中的用例，默认运行仍覆盖全部用例', async () => {
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'sensitive')
   await runSuite()
   expect(fixture.executed).toEqual(fixture.sensitive)
@@ -111,24 +114,21 @@ it('第五组只执行四项敏感用例，默认运行仍覆盖全部用例', a
   expect(fixture.executed).toEqual(fixture.names)
 })
 
-it('移出敏感用例后仍按原来的位置切片，不重新分配普通用例', async () => {
+it('分组不压缩切片位置，回流用例在原分片执行', async () => {
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
   vi.stubEnv('VSIDIAN_TEST_SHARD', '1/4')
   await runSuite()
-  // T03–T07 十五条入组后敏感 22 条、普通用例 22 个：全量 44 项普通/敏感
-  // 交替排布，1/4 片取全量索引 0,4,8,...,40 → 甲/丙/戊/庚/壬/子/午/申/卯/巳/戌
-  //（普通亥在 43 落 4/4 片位；未/寅/辰/酉在 26/30/34/38 落 2/4 片位）
+  // 1/4 仍取全量索引 0、4、…、40；回流用例在索引 37，由 2/4 执行。
   expect(fixture.executed).toEqual(['普通甲', '普通丙', '普通戊', '普通庚', '普通壬', '普通子', '普通午', '普通申', '普通卯', '普通巳', '普通戌'])
   fixture.executed.length = 0
   vi.stubEnv('VSIDIAN_TEST_SHARD', '2/4')
   await runSuite()
-  expect(fixture.executed).toEqual([])
+  expect(fixture.executed).toEqual([fixture.cssImportRefresh])
 })
 
 it('明确指定的用例不属于当前组时拒绝空通过', async () => {
-  // #244 已移回 core（2026-10-08 调组），本断言改用仍在 sensitive 的 #129
   vi.stubEnv('VSIDIAN_TEST_GROUP', 'core')
-  vi.stubEnv('VSIDIAN_TEST_CASES', '#129')
+  vi.stubEnv('VSIDIAN_TEST_CASES', '#202')
   await expect(runSuite()).rejects.toThrow(/未命中.*core/)
   expect(fixture.executed).toEqual([])
 })
@@ -312,6 +312,7 @@ it('四个 core 分片与第五组无交集、无漏项，其他同领域用例�
   expect(core.filter((name) => sensitive.includes(name))).toEqual([])
   expect(selectIntegrationCases(all).selected).toEqual(all)
   expect(core).toContain('CSS 片段：@import 子目录依赖生效与共享依赖隔离（#129）')
+  expect(core).toContain(fixture.cssImportRefresh)
   expect(core).toContain('嵌入：限高设置持久化、回显与卡片热更（#222）')
   expect(core).toContain('Live 视口源锚点：Mermaid 围栏附近切标签页后中心行与光标保持')
   expect(core).toContain('搜索定位恢复（#318）：显式命令矩阵——首次/重复/多匹配/CRLF/剪贴板恢复')
