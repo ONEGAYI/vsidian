@@ -116,12 +116,6 @@ export const SENSITIVE_CASES = [
     evidence: 'docs/specs/integration-test-groups.md「PDF 导出（#621 T01）」同节（T07 沿先例）',
   },
   {
-    name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
-    issue: '#293 / #129',
-    reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',
-    evidence: 'https://github.com/ONEGAYI/vsidian/issues/293',
-  },
-  {
     name: '索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）',
     issue: '#202',
     reason: '百文件增量收敛在 CI 超时，健康运行约四秒；根因未定。',
