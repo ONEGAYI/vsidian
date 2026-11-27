@@ -13074,7 +13074,7 @@ function collectHoverPopupPaint(): PaintProbe['hoverPopup'] {
     background: style.backgroundColor,
     borderWidth: style.borderTopWidth,
     errorState: stateEl !== null && stateEl.classList.contains('vsidian-hover-popup-state-error'),
-    imagePainted: Array.from(el.querySelectorAll('img')).some(img => img.naturalWidth > 0 && hitPaintedElement(img)),
+    imageWidth: Array.from(el.querySelectorAll('img')).find(img => img.naturalWidth > 0 && hitPaintedElement(img))?.naturalWidth,
   }
 }
 

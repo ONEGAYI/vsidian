@@ -7,6 +7,8 @@ const mock = vi.hoisted(() => ({
   textDocuments: [] as Array<{ uri: unknown; isDirty: boolean }>,
   notebookDocuments: [] as Array<{ uri: unknown; isDirty: boolean }>,
   watchCreate: vi.fn(), watchDelete: vi.fn(),
+  mediaProvider: vi.fn(), readFile: vi.fn(),
+  extraRoots: [] as string[],
 }))
 
 vi.mock('vscode', async () => {
@@ -25,24 +27,27 @@ vi.mock('vscode', async () => {
     Uri: {
       file: uri,
       from: (value: { path: string; scheme: string }) => uri(value.path, value.scheme),
-      joinPath: (base: { path: string; scheme: string }, name: string) => uri(path.join(base.path, name), base.scheme),
+      joinPath: (base: { path: string; scheme: string }, ...parts: string[]) => uri(path.join(base.path, ...parts), base.scheme),
     },
     FileSystemError,
     FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
     Disposable: { from: disposable },
+    EventEmitter: class { event = disposable; dispose() {} },
     WorkspaceEdit: class { createFile = mock.createFile; renameFile = mock.renameFile },
     TabInputText: class {},
     TabInputCustom: class {},
     workspace: {
-      workspaceFolders: [folder],
+      get workspaceFolders() { return [folder, ...mock.extraRoots.map(path => ({ name: path, uri: uri(path) }))] },
       getWorkspaceFolder: ({ path }: { path: string }) => path === '/notes' || path.startsWith('/notes/') ? folder : undefined,
       asRelativePath: ({ path }: { path: string }) => path.replace('/notes/', ''),
       fs: { readDirectory: mock.readDirectory, stat: mock.stat, createDirectory: mock.createDirectory, delete: mock.remove,
+        readFile: mock.readFile,
         isWritableFileSystem: (scheme: string) => scheme === 'file' },
       applyEdit: mock.applyEdit,
       textDocuments: mock.textDocuments,
       notebookDocuments: mock.notebookDocuments,
       onDidChangeWorkspaceFolders: disposable,
+      registerFileSystemProvider: mock.mediaProvider,
       createFileSystemWatcher: () => ({ ...disposable(), onDidCreate: mock.watchCreate, onDidDelete: mock.watchDelete }),
     },
     window: {
@@ -73,6 +78,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   mock.textDocuments.length = 0
   mock.notebookDocuments.length = 0
+  mock.extraRoots.length = 0
   files.clear()
   for (const [path, type] of Object.entries({ '/notes': dirType, '/notes/start.md': fileType,
     '/notes/drafts': dirType, '/notes/drafts/old.md': fileType, '/notes/escape': dirType | vscode.FileType.SymbolicLink,
@@ -158,14 +164,14 @@ it('文件预览按面板当前快照授权，仅文件条目可读取', async (
   client.request({ kind: 'workspaceFiles.toggle' })
   const old = await client.id('old.md')
   const image = await client.id('map #.png')
-  expect(client.previewTarget(old)).toBe('/notes/drafts/old.md')
-  expect(client.previewTarget(await client.id('drafts'))).toBeUndefined()
-  expect(client.previewTarget('/notes/map #.png')).toBeUndefined()
+  expect(await client.previewTarget(old)).toBe('/notes/drafts/old.md')
+  expect(await client.previewTarget(await client.id('drafts'))).toBeUndefined()
+  expect(await client.previewTarget('/notes/map #.png')).toBeUndefined()
   expect(client.previewMedia(old)).toBeUndefined()
   expect(client.previewMedia(image)).toMatchObject({ scheme: 'vsidian-file-preview' })
   client.request({ kind: 'workspaceFiles.collapseAll' })
-  await vi.waitFor(() => expect(client.previewTarget(old)).toBeUndefined())
-  expect(client.previewTarget(image)).toBe('/notes/map #.png')
+  await vi.waitFor(async () => expect(await client.previewTarget(old)).toBeUndefined())
+  expect(await client.previewTarget(image)).toBe('/notes/map #.png')
   client.request({ kind: 'workspaceFiles.toggle' })
   expect(client.previewMedia(image)).toBeUndefined()
 })
@@ -179,6 +185,60 @@ it('文件预览消息只接受条目身份，拒绝混用带任意路径的形�
   expect(isWebviewToHost({ ...request, linkHref: 'https://example.com' })).toBe(false)
   expect(isWebviewToHost({ ...request, source: { parentInstanceId: 'parent', sourceDocUri: '/a.md' } })).toBe(false)
   expect(isWebviewToHost({ ...request, addonSource: { instanceId: 'main', sourceFsPath: '' } })).toBe(false)
+})
+
+it('目录在快照发出后变成符号链接时，拒绝读取旧文件条目', async () => {
+  const client = mount('/notes/drafts/old.md')
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('old.md')
+  files.set('/notes/drafts', dirType | vscode.FileType.SymbolicLink)
+  expect(await client.previewTarget(id)).toBeUndefined()
+})
+
+it('等待回收站确认期间目录改为符号链接时，不操作旧条目下的文件', async () => {
+  const client = mount('/notes/drafts/old.md')
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('old.md')
+  mock.showQuickPick.mockImplementation(items => Promise.resolve(items.find((item: { label: string }) => item.label === 'workspaceFiles.trash')))
+  mock.warn.mockImplementationOnce(async () => {
+    files.set('/notes/drafts', dirType | vscode.FileType.SymbolicLink)
+    return 'workspaceFiles.trash'
+  })
+  client.request({ kind: 'workspaceFiles.manage', id })
+  await vi.waitFor(() => expect(mock.error).toHaveBeenCalledTimes(1))
+  expect(mock.remove).not.toHaveBeenCalled()
+})
+
+it.runIf(process.platform === 'win32' || process.platform === 'darwin')('大小写异写的嵌套工作区根不能改名或入回收站', async () => {
+  mock.extraRoots.push('/notes/DrAfTs')
+  files.set('/notes/DrAfTs', dirType)
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = (await client.loaded()).entries.find(row => row.name === 'drafts' && row.kind === 'folder')!.id
+  client.request({ kind: 'workspaceFiles.manage', id })
+  await vi.waitFor(() => expect(mock.showQuickPick).toHaveBeenCalledTimes(1))
+  expect(mock.showQuickPick.mock.calls[0]![0].map((item: { label: string }) => item.label))
+    .toEqual(['workspaceFiles.createFile', 'workspaceFiles.createFolder'])
+})
+
+it('来源图片别名单文件读取；重定向的路径和非图片不获授权', async () => {
+  const client = mount('/notes/drafts/old.md')
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const owner = await client.id('old.md')
+  const uri = makeUri('/notes/drafts/src.png')
+  const root = makeUri('/notes')
+  files.set('/notes/drafts/src.png', fileType)
+  expect(client.previewImageAsset(owner, makeUri('/notes/drafts/old.md'), root)).toBeUndefined()
+  expect(client.previewImageAsset(owner, makeUri('/outside/sibling.png'), root)).toBeUndefined()
+  const alias = client.previewImageAsset(owner, uri, root)!
+  sidebar.registerMediaResources()
+  const provider = mock.mediaProvider.mock.calls[0]![1] as vscode.FileSystemProvider
+  mock.readFile.mockResolvedValueOnce(Uint8Array.of(1))
+  expect(await provider.readFile(alias)).toEqual(Uint8Array.of(1))
+  expect(mock.readFile).toHaveBeenCalledExactlyOnceWith(uri)
+  files.set('/notes/drafts', dirType | vscode.FileType.SymbolicLink)
+  await expect(provider.readFile(alias)).rejects.toThrow()
+  expect(mock.readFile).toHaveBeenCalledTimes(1)
 })
 
 it('折叠所有文件夹保留根目录，并清除子目录的展开状态', async () => {
@@ -217,6 +277,21 @@ it('在当前目录新建文件，名称校验拒绝路径，且不覆盖已有�
     preview: false, viewColumn: 2,
   }))
   expect(mock.createFile).toHaveBeenCalledWith(matchingUri('/notes/drafts/新笔记.md'), { overwrite: false })
+})
+
+it('折叠目录后栏顶仍在当前笔记的父目录新建', async () => {
+  files.set('/notes/drafts/deep', dirType)
+  files.set('/notes/drafts/deep/note.md', fileType)
+  const client = mount('/notes/drafts/deep/note.md')
+  client.request({ kind: 'workspaceFiles.toggle' })
+  await client.loaded()
+  client.request({ kind: 'workspaceFiles.collapseAll' })
+  await vi.waitFor(() => expect(client.snapshot()?.entries.find(row => row.name === 'deep')).toBeUndefined())
+  mock.showInputBox.mockResolvedValueOnce('旁边的新文件.md')
+  client.request({ kind: 'workspaceFiles.create', entry: 'file' })
+  await vi.waitFor(() => expect(mock.createFile).toHaveBeenCalledWith(
+    matchingUri('/notes/drafts/deep/旁边的新文件.md'), { overwrite: false },
+  ))
 })
 
 it('目录管理能在所选目录新建文件夹；文件改名走宿主 WorkspaceEdit', async () => {

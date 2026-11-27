@@ -1395,7 +1395,16 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // 等程序性滚动）与 P2-06 dirty Live 同豁免（键盘模态先例：保持浮层驻留，
   // 不重贴锚——普通条件恢复后按常规重定位）
   const onScroll = (event: Event): void => {
-    if (popup && event.target instanceof Node && !popup.container.contains(event.target) &&
+    const scroller = event.target
+    if (popup?.spec.workspaceFile && scroller instanceof HTMLElement &&
+      popup.spec.workspaceFile.sidebar.contains(scroller) && scroller.contains(popup.anchor)) {
+      const row = popup.anchor.getBoundingClientRect()
+      const viewport = scroller.getBoundingClientRect()
+      if (row.bottom <= viewport.top || row.top >= viewport.bottom) closeHoverPopup()
+      else position(popup)
+      return
+    }
+    if (popup && scroller instanceof Node && !popup.container.contains(scroller) &&
       !keyboardKeepAlive() && !editorFocusKeepAlive() && !liveKeepAlive()) {
       closeHoverPopup()
     }

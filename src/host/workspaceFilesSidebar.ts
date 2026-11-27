@@ -8,12 +8,14 @@ import { classifyLocalRefContentKind } from '../shared/refContent'
 
 const OPEN_KEY = 'vsidian.workspaceFiles.open'
 const MEDIA_SCHEME = 'vsidian-file-preview'
+const ASSET_ALIAS_LIMIT = 256
 const nameOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 const parentOf = (uri: vscode.Uri): vscode.Uri => vscode.Uri.joinPath(uri, '..')
 
 type FileTab = vscode.Tab & { input: vscode.TabInputText | vscode.TabInputCustom }
 type TreeTarget = { kind: WorkspaceFileEntry['kind']; uri: vscode.Uri; name: string }
 type Target = TreeTarget | { kind: 'tab'; uri: vscode.Uri; editor: string }
+interface AssetAlias { owner: string; uri: vscode.Uri; root: vscode.Uri }
 interface Client {
   uri: vscode.Uri
   panel: vscode.WebviewPanel
@@ -22,6 +24,7 @@ interface Client {
   loaded: boolean
   targets: Map<string, Target>
   mediaRoot: vscode.Uri
+  assets: Map<string, AssetAlias>
 }
 
 const isFileTab = (tab: vscode.Tab): tab is FileTab =>
@@ -29,16 +32,22 @@ const isFileTab = (tab: vscode.Tab): tab is FileTab =>
 const editorOf = (tab: FileTab): string => tab.input instanceof vscode.TabInputCustom ? tab.input.viewType : 'default'
 const previewKindOf = (uri: vscode.Uri) => uri.scheme === 'file' ? classifyLocalRefContentKind(uri.fsPath) : undefined
 
+function pathIdentity(uri: vscode.Uri): string {
+  const ignoreCase = uri.scheme === 'file' && (process.platform === 'win32' || process.platform === 'darwin')
+  const path = uri.path.replace(/\/+$/, '') || '/'
+  return ignoreCase ? path.toLowerCase() : path
+}
+
 function contains(parent: vscode.Uri, item: vscode.Uri): boolean {
   if (parent.scheme !== item.scheme || parent.authority !== item.authority) return false
-  const ignoreCase = process.platform === 'win32' && parent.scheme === 'file'
-  const base = ignoreCase ? parent.path.toLowerCase() : parent.path
-  const path = ignoreCase ? item.path.toLowerCase() : item.path
-  return path === base || path.startsWith(base.endsWith('/') ? base : `${base}/`)
+  const base = pathIdentity(parent)
+  const itemPath = pathIdentity(item)
+  return itemPath === base || itemPath.startsWith(base.endsWith('/') ? base : `${base}/`)
 }
 
 function sameUri(a: vscode.Uri, b: vscode.Uri): boolean {
-  return a.toString() === b.toString()
+  return a.scheme === b.scheme && a.authority === b.authority && pathIdentity(a) === pathIdentity(b) &&
+    a.query === b.query && a.fragment === b.fragment
 }
 
 function isWritable(uri: vscode.Uri): boolean {
@@ -46,7 +55,27 @@ function isWritable(uri: vscode.Uri): boolean {
 }
 
 function isWorkspaceRoot(uri: vscode.Uri): boolean {
-  return (vscode.workspace.workspaceFolders ?? []).some(folder => sameUri(folder.uri, uri))
+  return (vscode.workspace.workspaceFolders ?? []).some(folder => contains(folder.uri, uri) && contains(uri, folder.uri))
+}
+
+/** 目录快照不能授权当前磁盘状态：根以下任一层变成链接或变更类型即视为过期。
+ * 用户明确挂载的工作区根仍可使用（包括通过符号链接加入的根）。 */
+async function verifyTreePath(uri: vscode.Uri, expected: vscode.FileType,
+  root = vscode.workspace.getWorkspaceFolder(uri)?.uri): Promise<void> {
+  if (!root || !contains(root, uri)) throw vscode.FileSystemError.Unavailable(uri)
+  const chain: vscode.Uri[] = [uri]
+  while (pathIdentity(chain.at(-1)!) !== pathIdentity(root)) {
+    const parent = parentOf(chain.at(-1)!)
+    if (pathIdentity(parent) === pathIdentity(chain.at(-1)!)) throw vscode.FileSystemError.Unavailable(uri)
+    chain.push(parent)
+  }
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const { type } = await vscode.workspace.fs.stat(chain[i]!)
+    if (!(type & (i === 0 ? expected : vscode.FileType.Directory)) ||
+      (i < chain.length - 1 && (type & vscode.FileType.SymbolicLink))) {
+      throw vscode.FileSystemError.Unavailable(uri)
+    }
+  }
 }
 
 function canUseTrash(uri: vscode.Uri): boolean {
@@ -78,7 +107,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
 
   attach(uri: vscode.Uri, panel: vscode.WebviewPanel) {
     const mediaRoot = vscode.Uri.from({ scheme: MEDIA_SCHEME, path: `/${randomUUID()}` })
-    const client: Client = { uri, panel, ready: false, generation: 0, loaded: false, targets: new Map(), mediaRoot }
+    const client: Client = { uri, panel, ready: false, generation: 0, loaded: false, targets: new Map(), mediaRoot, assets: new Map() }
     this.clients.set(panel, client)
     this.mediaClients.set(mediaRoot.path, client)
     return {
@@ -86,12 +115,15 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
         client.ready = true
         client.loaded = false
         client.targets.clear()
+        client.assets.clear()
         this.viewChanged(client)
       },
       viewChanged: (): void => this.viewChanged(client),
       request: (request: WorkspaceFilesRequest): void => this.request(client, request),
-      previewTarget: (id: string): string | undefined => this.previewTarget(client, id)?.fsPath,
+      previewTarget: async (id: string): Promise<string | undefined> => (await this.verifyPreviewTarget(client, id))?.fsPath,
       previewMedia: (id: string): vscode.Uri | undefined => this.previewMedia(client, id),
+      previewImageAsset: (id: string, uri: vscode.Uri, root: vscode.Uri): vscode.Uri | undefined =>
+        this.previewImageAsset(client, id, uri, root),
       dispose: (): void => {
         if (this.clients.get(panel) !== client) return
         this.clients.delete(panel)
@@ -119,13 +151,13 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const registration = vscode.workspace.registerFileSystemProvider(MEDIA_SCHEME, {
       onDidChangeFile: changes.event,
       watch: () => ({ dispose() {} }),
-      stat: uri => vscode.workspace.fs.stat(this.mediaTarget(uri)),
+      stat: async uri => vscode.workspace.fs.stat(await this.mediaTarget(uri)),
       readFile: async uri => {
-        const target = this.mediaTarget(uri)
+        const target = await this.mediaTarget(uri)
         if (previewKindOf(target) === 'pdf' && (await vscode.workspace.fs.stat(target)).size > PDF_HOVER_MAX_BYTES) {
           throw vscode.FileSystemError.Unavailable(uri)
         }
-        return vscode.workspace.fs.readFile(this.mediaTarget(uri))
+        return vscode.workspace.fs.readFile(target)
       },
       readDirectory: uri => { throw vscode.FileSystemError.FileNotFound(uri) },
       writeFile: rejectWrite, delete: rejectWrite, createDirectory: rejectWrite, rename: rejectWrite,
@@ -143,13 +175,34 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     return vscode.Uri.joinPath(client.mediaRoot, Buffer.from(id).toString('base64url') + suffix)
   }
 
-  private mediaTarget(uri: vscode.Uri): vscode.Uri {
-    const match = /^\/(.+)\/([\w-]+)\.[^/]+$/.exec(uri.path)
+  /** 仅对已准入的来源图片生成单文件别名，不给来源文档目录授予资源权限。 */
+  private previewImageAsset(client: Client, owner: string, uri: vscode.Uri, root: vscode.Uri): vscode.Uri | undefined {
+    if (!this.previewTarget(client, owner) || previewKindOf(uri) !== 'image' || !contains(root, uri)) return
+    const key = Buffer.from(JSON.stringify([owner, uri.toString()])).toString('base64url')
+    const alias = vscode.Uri.joinPath(client.mediaRoot, 'asset', key + uri.path.slice(uri.path.lastIndexOf('.')))
+    client.assets.delete(alias.path)
+    client.assets.set(alias.path, { owner, uri, root })
+    if (client.assets.size > ASSET_ALIAS_LIMIT) client.assets.delete(client.assets.keys().next().value!)
+    return alias
+  }
+
+  private async mediaTarget(uri: vscode.Uri): Promise<vscode.Uri> {
+    const match = /^\/([^/]+)\/(asset\/)?([\w-]+)\.[^/]+$/.exec(uri.path)
     const client = match && this.mediaClients.get(`/${match[1]}`)
     if (client && match && uri.scheme === MEDIA_SCHEME && uri.authority === '') {
-      const id = Buffer.from(match[2]!, 'base64url').toString()
-      const source = this.previewTarget(client, id)
-      if (source && this.previewMedia(client, id)?.path === uri.path) return source
+      if (match[2]) {
+        const asset = client.assets.get(uri.path)
+        if (asset && await this.verifyPreviewTarget(client, asset.owner)) {
+          await verifyTreePath(asset.uri, vscode.FileType.File, asset.root)
+          if (client.assets.get(uri.path) === asset && this.previewTarget(client, asset.owner)) return asset.uri
+        }
+      } else {
+        const id = Buffer.from(match[3]!, 'base64url').toString()
+        if (this.previewMedia(client, id)?.path === uri.path) {
+          const source = await this.verifyPreviewTarget(client, id)
+          if (source) return source
+        }
+      }
     }
     throw vscode.FileSystemError.FileNotFound(uri)
   }
@@ -236,6 +289,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     if (!this.open) {
       client.loaded = false
       client.targets.clear()
+      client.assets.clear()
       void client.panel.webview.postMessage(snapshot)
       return
     }
@@ -262,6 +316,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     snapshot.canCreate = roots.some(root => isWritable(root.uri))
     client.loaded = true
     client.targets = targets
+    for (const [key, asset] of client.assets) if (!targets.has(asset.owner)) client.assets.delete(key)
     void client.panel.webview.postMessage(snapshot)
   }
 
@@ -298,7 +353,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const key = uri.toString()
     let children = this.listings.get(key)
     if (!children) {
-      children = Promise.resolve(vscode.workspace.fs.readDirectory(uri)).then(entries => entries
+      children = verifyTreePath(uri, vscode.FileType.Directory).then(() => vscode.workspace.fs.readDirectory(uri)).then(entries => entries
         .filter(([name, type]) => name.toLowerCase() !== '.git' &&
           (type === vscode.FileType.Directory || type === vscode.FileType.File))
         .sort(([a, ta], [b, tb]) => tb - ta || nameOrder.compare(a, b)))
@@ -328,6 +383,19 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const allowed = target.kind === 'tab' ? this.findTab(client, target) !== undefined :
       target.kind === 'file' && vscode.workspace.getWorkspaceFolder(target.uri) !== undefined
     if (allowed) return target.uri
+  }
+
+  private async verifyPreviewTarget(client: Client, id: string): Promise<vscode.Uri | undefined> {
+    const uri = this.previewTarget(client, id)
+    if (!uri) return
+    if (client.targets.get(id)?.kind === 'file') {
+      try {
+        await verifyTreePath(uri, vscode.FileType.File)
+      } catch {
+        return
+      }
+    }
+    return this.previewTarget(client, id)
   }
 
   private request(client: Client, request: WorkspaceFilesRequest): void {
@@ -387,6 +455,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     if (request.kind === 'workspaceFiles.manage') {
       if (isWritable(target.uri)) await this.manage(client, target)
     } else if (target.kind === 'file') {
+      await verifyTreePath(target.uri, vscode.FileType.File)
       const tabs = this.groupOf(client)?.tabs.filter(isFileTab) ?? []
       const existing = tabs.find(tab => tab.isActive && sameUri(tab.input.uri, target.uri)) ??
         tabs.find(tab => sameUri(tab.input.uri, target.uri))
@@ -418,8 +487,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
 
   private async defaultDirectory(client: Client): Promise<vscode.Uri | undefined> {
     const dir = parentOf(client.uri)
-    if (isWritable(dir) && [...client.targets.values()].some(target =>
-      target.kind !== 'tab' && target.kind !== 'file' && sameUri(dir, target.uri))) return dir
+    if (isWritable(dir)) return dir
     const roots = (vscode.workspace.workspaceFolders ?? []).filter(folder => isWritable(folder.uri))
     if (roots.length <= 1) return roots[0]?.uri
     const chosen = await vscode.window.showQuickPick(roots.map(root => ({ label: root.name, uri: root.uri })),
@@ -463,10 +531,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const name = await this.promptName(dir, entry === 'file' ? 'workspaceFiles.createFile' : 'workspaceFiles.createFolder',
       entry === 'file' ? 'workspaceFiles.filePrompt' : 'workspaceFiles.folderPrompt')
     if (!name || !isFileName(name) || !isWritable(dir)) return
-    const { type } = await vscode.workspace.fs.stat(dir)
-    if (type !== vscode.FileType.Directory && !(isWorkspaceRoot(dir) && (type & vscode.FileType.Directory))) return
     const uri = vscode.Uri.joinPath(dir, name)
     await this.requireMissing(uri, name)
+    await verifyTreePath(dir, vscode.FileType.Directory)
     if (entry === 'folder') {
       await vscode.workspace.fs.createDirectory(uri)
     } else {
@@ -488,6 +555,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const uri = vscode.Uri.joinPath(dir, name)
     // 大小写改名交由宿主判定；仍不允许覆盖其他文件。
     if (name.toLowerCase() !== target.name.toLowerCase()) await this.requireMissing(uri, name)
+    await verifyTreePath(target.uri, target.kind === 'file' ? vscode.FileType.File : vscode.FileType.Directory)
+    if (isWorkspaceRoot(target.uri)) return
     const edit = new vscode.WorkspaceEdit()
     edit.renameFile(target.uri, uri, { overwrite: false })
     if (!await vscode.workspace.applyEdit(edit)) throw vscode.FileSystemError.Unavailable(target.uri)
@@ -502,6 +571,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const answer = await vscode.window.showWarningMessage(t(target.kind === 'file'
       ? 'workspaceFiles.trashFilePrompt' : 'workspaceFiles.trashFolderPrompt', { name }), { modal: true }, trash)
     if (answer !== trash || !isWritable(uri) || isWorkspaceRoot(uri)) return
+    await verifyTreePath(uri, target.kind === 'file' ? vscode.FileType.File : vscode.FileType.Directory)
+    if (isWorkspaceRoot(uri)) return
     const hasChanges = (doc: { isDirty: boolean; uri: vscode.Uri }): boolean => doc.isDirty && contains(uri, doc.uri)
     const dirty = vscode.workspace.textDocuments.some(hasChanges) || vscode.workspace.notebookDocuments.some(hasChanges) ||
       vscode.window.tabGroups.all.some(group => group.tabs.some(tab =>

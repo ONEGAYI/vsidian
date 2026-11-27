@@ -109,7 +109,7 @@ export interface EditAttributionRecord {
 /** 面板发送通道 */
 export interface PanelPort {
   send(message: HostToWebview): void
-  workspacePreviewTarget?(id: string): string | undefined
+  workspacePreviewTarget?(id: string): Promise<string | undefined>
   /** #10 链接跳转执行（vscode 层注入：URI 解析白名单 + openExternal/
    *  showTextDocument/用户反馈）；只读交互，暂停态同样放行。#220 起 intent
    *  可携 sourceDocUri（悬停浮层内链接以 B 文档为来源解析执行） */
@@ -161,7 +161,7 @@ export interface PanelPort {
   /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri）。
    *  #220 起第二可选参 sourceDocUri：悬停浮层内 B 文档图片的来源上下文
    *  （vscode 层按 B 目录构造 LinkContext）；缺省 = 面板自身文档 */
-  resolveImage?(src: string, sourceDocUri?: string): Promise<ImageResolution>
+  resolveImage?(src: string, sourceDocUri?: string, workspaceFileId?: string): Promise<ImageResolution>
   /** #161 图片粘贴落盘（vscode 层注入：设置读取 + 目录解析 + writeFile）；
    *  report 回报成功（携插入文本）/ 目录非法 / 写入失败 */
   pasteImage?(
@@ -367,6 +367,7 @@ interface PanelEntry {
 interface HoverSourceGrant {
   fsPath: string
   version: number
+  workspaceFileId?: string
   /** P2-03（#280）：初始定位区间参考（锚点命中的锚定区间；宽容重载为全文
    *  区间）——子引用准入已不以它为界（validChildSource 按来源全文校验），
    *  仅随租约保留定位语义。#337 起 pdf 载荷为零区间占位（PDF 无 LF
@@ -1256,11 +1257,7 @@ export class DocumentSession {
         if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
           return Promise.resolve() // 来源守卫：静默丢弃
         }
-        const resolver = panel.port.resolveImage
-        const resolution = resolver
-          ? await resolver(message.url, message.sourceDocUri)
-              .catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
-          : ({ ok: false, reason: 'read-error' } as ImageResolution)
+        const resolution = await this.resolvePanelImage(panel, message.url, message.sourceDocUri)
         if (resolution.fsPath) {
           this.registerImageSrcTarget(message.url, resolution.fsPath)
         }
@@ -1351,7 +1348,8 @@ export class DocumentSession {
           kind: 'hover.result', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason,
         })
         const workspaceFilePath = message.workspaceFileId === undefined ? undefined :
-          panel.port.workspacePreviewTarget?.(message.workspaceFileId)
+          await panel.port.workspacePreviewTarget?.(message.workspaceFileId)
+        if (this.disposed || this.panels.get(sessionId) !== panel || !panel.ready) return
         if (message.workspaceFileId !== undefined && workspaceFilePath === undefined) {
           reject('not-found')
           return
@@ -1498,6 +1496,7 @@ export class DocumentSession {
               panel.hoverSourceLeases.set(sourceLeaseId, outcome.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
                 fsPath: outcome.fsPath, version: outcome.content.version,
+                workspaceFileId: message.workspaceFileId ?? parent?.workspaceFileId,
                 // #336：图片载荷无定位区间与 Markdown 选择器——租约只保留
                 // 身份语义（range/scope 退化中性值；图片无锚点定位语义）；
                 // #337：pdf 载荷无 LF 区间语义——零区间占位（定位由 pdf
@@ -1608,7 +1607,7 @@ export class DocumentSession {
           ...message,
           ...(verifiedSource ? { verifiedSource } : {}),
           ...(addonResolvedSource ? { resolvedSource: { fsPath: addonResolvedSource.fsPath } } : {}),
-          verifiedWorkspaceFilePath: workspaceFilePath,
+          ...(workspaceFilePath !== undefined ? { verifiedWorkspaceFilePath: workspaceFilePath } : {}),
         }
         if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
           port(payload, report)
@@ -1856,6 +1855,24 @@ export class DocumentSession {
    * 时分别保留登记。广播仍按 src 无条件重取，可能同时重取其他来源的
    * 同名图，但不能漏掉仍在场的目标。解析异常收敛 read-error 回发。
    */
+  private filePreviewSource(panel: PanelEntry, sourceDocUri?: string): string | undefined {
+    if (sourceDocUri === undefined) return
+    for (const grant of panel.hoverParentGrants.values()) {
+      if (grant.workspaceFileId !== undefined && grant.fsPath === sourceDocUri) return grant.workspaceFileId
+    }
+  }
+
+  private async resolvePanelImage(panel: PanelEntry, src: string, sourceDocUri?: string): Promise<ImageResolution> {
+    const resolve = panel.port.resolveImage
+    if (!resolve) return { ok: false, reason: 'read-error' }
+    const row = this.filePreviewSource(panel, sourceDocUri)
+    try {
+      return await (row === undefined ? resolve(src, sourceDocUri) : resolve(src, sourceDocUri, row))
+    } catch {
+      return { ok: false, reason: 'read-error' }
+    }
+  }
+
   private async resolveSourcedImageRequest(
     panel: PanelEntry,
     reqId: number,
@@ -1865,10 +1882,7 @@ export class DocumentSession {
     if (!panel.hoverSourceFsPaths.has(sourceDocUri)) {
       return // 来源守卫：非本面板读取过的悬停/嵌入目标，静默丢弃（不信任前端任意 URI）
     }
-    const resolver = panel.port.resolveImage
-    const resolution = resolver
-      ? await resolver(src, sourceDocUri).catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
-      : { ok: false, reason: 'read-error' } as ImageResolution
+    const resolution = await this.resolvePanelImage(panel, src, sourceDocUri)
     if (resolution.fsPath) {
       this.registerImageSrcTarget(src, resolution.fsPath)
     }
