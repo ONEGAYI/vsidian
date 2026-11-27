@@ -6690,10 +6690,64 @@ export const cases: Array<[string, () => Promise<void>]> = [
         v.paint.workspaceFiles.currentFilePainted)
       const after = (await vscode.commands.executeCommand(CMD.sessionState, first.toString())) as SessionState
       assert(after.version === before.version && after.appliedEdits === before.appliedEdits, '开合及切换不能写入笔记')
+
     } finally {
       await vscode.commands.executeCommand(toggle)
     }
     await waitViewState('lf.md', v => v.paint?.workspaceFiles?.panelPainted === false)
+  }],
+
+  ['左侧文件栏：切回同组 Notebook 并保留编辑器类型', async () => {
+    const toggle = 'onegayi.vsidian.ui.workspaceFilesToggle'
+    const notebook = wsUri('文件侧栏测试.ipynb')
+    const hostFile = '侧栏切换 Notebook.md'
+    const parent = wsUri(hostFile)
+    const column = vscode.window.tabGroups.activeTabGroup.viewColumn
+    await vscode.workspace.fs.writeFile(notebook, Buffer.from(JSON.stringify({
+      cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5,
+    })))
+    await vscode.workspace.fs.writeFile(parent, Buffer.from('# 此面板首次打开，以 Notebook 为已有标签'))
+    const closeFixtureTabs = async (target: vscode.Uri): Promise<void> => {
+      const tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(({ input }) =>
+        (input instanceof vscode.TabInputNotebook || input instanceof vscode.TabInputCustom) &&
+          normFsPath(input.uri.fsPath) === normFsPath(target.fsPath))
+      if (tabs.length) await vscode.window.tabGroups.close(tabs)
+    }
+    let opened = false
+    try {
+      const doc = await vscode.workspace.openNotebookDocument(notebook)
+      await vscode.window.showNotebookDocument(doc, { viewColumn: column, preview: false })
+      const original = await poll('测试 Notebook 活动标签', async () => {
+        const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+        return input instanceof vscode.TabInputNotebook ? input : undefined
+      })
+      await vscode.commands.executeCommand('vscode.openWith', parent, VIEW_TYPE, { viewColumn: column, preview: false })
+      await waitSessionReady(hostFile)
+      assert(await vscode.commands.executeCommand(toggle), '打开专用测试面板的文件栏')
+      opened = true
+      await waitViewState(hostFile, v => v.paint?.workspaceFiles?.panelPainted === true)
+      const id = `tab:notebook:${original.notebookType}|${original.uri.toString()}`
+      assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, parent.toString(), {
+        kind: 'workspaceFiles.activate', id,
+      }), '使用 Notebook 条目的真实点击入口')
+      await poll('从文件栏切回原 Notebook', async () => {
+        const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+        return input instanceof vscode.TabInputNotebook && input.notebookType === original.notebookType &&
+          input.uri.toString() === original.uri.toString() ? input : undefined
+      })
+    } finally {
+      await closeFixtureTabs(notebook)
+      if (opened) {
+        const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+        if (!(input instanceof vscode.TabInputCustom) || normFsPath(input.uri.fsPath) !== normFsPath(parent.fsPath)) {
+          await vscode.commands.executeCommand('vscode.openWith', parent, VIEW_TYPE, { viewColumn: column, preview: false })
+        }
+        await poll('还原窗口侧栏开合', async () => await vscode.commands.executeCommand<boolean>(toggle) || undefined)
+      }
+      await closeFixtureTabs(parent)
+      await vscode.workspace.fs.delete(notebook)
+      await vscode.workspace.fs.delete(parent)
+    }
   }],
 
   ['左侧文件栏：Ctrl 悬停只读、未保存文本与跨根附件绘制（#330）', async () => {

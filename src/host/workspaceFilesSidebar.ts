@@ -12,7 +12,7 @@ const ASSET_ALIAS_LIMIT = 256
 const nameOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 const parentOf = (uri: vscode.Uri): vscode.Uri => vscode.Uri.joinPath(uri, '..')
 
-type FileTab = vscode.Tab & { input: vscode.TabInputText | vscode.TabInputCustom }
+type FileTab = vscode.Tab & { input: vscode.TabInputText | vscode.TabInputCustom | vscode.TabInputNotebook }
 type TreeTarget = { kind: WorkspaceFileEntry['kind']; uri: vscode.Uri; name: string }
 type Target = TreeTarget | { kind: 'tab'; uri: vscode.Uri; editor: string }
 interface AssetAlias { owner: string; uri: vscode.Uri; source: vscode.Uri; root: vscode.Uri; active(): boolean }
@@ -28,8 +28,12 @@ interface Client {
 }
 
 const isFileTab = (tab: vscode.Tab): tab is FileTab =>
-  tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputCustom
-const editorOf = (tab: FileTab): string => tab.input instanceof vscode.TabInputCustom ? tab.input.viewType : 'default'
+  tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputCustom || tab.input instanceof vscode.TabInputNotebook
+function editorOf(tab: FileTab): string {
+  if (tab.input instanceof vscode.TabInputCustom) return tab.input.viewType
+  if (tab.input instanceof vscode.TabInputNotebook) return `notebook:${tab.input.notebookType}`
+  return 'default'
+}
 const previewKindOf = (uri: vscode.Uri) => uri.scheme === 'file' ? classifyLocalRefContentKind(uri.fsPath) : undefined
 
 function pathIdentity(uri: vscode.Uri): string {
@@ -490,6 +494,11 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const options = { viewColumn: client.panel.viewColumn, preview: tab.isPreview }
     if (tab.input instanceof vscode.TabInputCustom) {
       await vscode.commands.executeCommand('vscode.openWith', tab.input.uri, tab.input.viewType, options)
+    } else if (tab.input instanceof vscode.TabInputNotebook) {
+      const input = tab.input
+      const model = vscode.workspace.notebookDocuments.find(doc => doc.notebookType === input.notebookType && sameUri(doc.uri, input.uri))
+      if (model) await vscode.window.showNotebookDocument(model, options)
+      else await vscode.commands.executeCommand('vscode.openWith', input.uri, input.notebookType, options)
     } else {
       await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(tab.input.uri), options)
     }

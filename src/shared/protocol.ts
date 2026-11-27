@@ -2008,6 +2008,8 @@ export type WebviewToHost =
       reqId: number
       src: string
       fileName: string
+      /** 文件栏图片的显示 URL 不参与文件定位，宿主复核此条目后按真实文件另存。 */
+      workspaceFileId?: string
       /** P2-11（#288）来源文档（嵌入内部 Live 的图片弹窗导出）：宿主按 B
        *  目录/根边界定位导出文件；与已送达来源比对，不匹配即丢弃（不回落
        *  面板自身目录——B 内图片按 A 目录导出是错误文件）。缺省 = 面板自身 */
@@ -5139,6 +5141,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         typeof v.fileName === 'string' &&
         v.fileName.length > 0 &&
         v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars &&
+        (v.workspaceFileId === undefined || (typeof v.workspaceFileId === 'string' && v.workspaceFileId.length > 0 &&
+          v.sourceDocUri === undefined)) &&
         (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'image.request':

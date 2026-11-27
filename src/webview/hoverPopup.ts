@@ -1911,7 +1911,10 @@ function applyHoverImageContent(
   frame.appendChild(img)
   const popupSrc = loaded.src
   frame.appendChild(buildImageChrome(frame, {
-    onPopup: () => { openImagePopup(popupSrc, '') },
+    onPopup: () => {
+      const file = state.spec.workspaceFile
+      openImagePopup(popupSrc, '', undefined, file ? { id: file.id, name: state.target } : undefined)
+    },
   }))
   // 挂 scrollEl 层（contentEl 由虚拟视图全权重建——updateNow 会清外来
   // 子节点；空 Reading 容器零高度不干扰布局）

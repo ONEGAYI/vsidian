@@ -3678,6 +3678,7 @@ export function createTextEditorProvider(
             payload.sourceDocUri !== undefined ? linkContextOfPath(payload.sourceDocUri) : linkCtx,
             document.uri.toString(),
             report,
+            fileSidebar.previewTarget,
           )
         },
         // #161 图片粘贴落盘端口：读设置快照 → 目录解析（URI path 空间）→

@@ -242,6 +242,31 @@ try {
   assert.deepEqual(await page.evaluate(start => window.messages.slice(start).filter(m =>
     m.kind === 'workspaceFiles.activate' || m.kind === 'refEdit.bind' || m.kind === 'edit.request'), previews), [])
   console.log('[PASS] 两类条目 Ctrl 悬停复用只读卡片，刷新保留、折叠与 Esc 关闭')
+
+  const picture = { id: 'picture', name: '原图 #.png', kind: 'file', level: 1, previewKind: 'image', manageable: false }
+  const display = 'https://local-resource.example/preview.png'
+  await page.route(display, route => route.fulfill({ contentType: 'image/png', path: path.join(root, 'media', 'vsidian-icon.png') }))
+  await state(true, [...entries, picture], withUntitled)
+  await page.keyboard.down(modifier)
+  await tree.getByRole('button', { name: picture.name, exact: true }).hover({ position: { x: 60, y: 12 } })
+  await popup.waitFor({ state: 'visible', timeout: 2500 })
+  await page.keyboard.up(modifier)
+  const { reqId, instanceId, workspaceFileId } = (await requests()).at(-1)
+  assert.equal(workspaceFileId, picture.id)
+  await send({ kind: 'hover.result', reqId, instanceId, ok: true, contentKind: 'image', imageSrc: display,
+    target: { fsPath: '/notes/原图 #.png', relPath: picture.name }, text: '', version: 1,
+    range: { start: 0, end: 0 }, scope: { kind: 'plain' } })
+  await popup.locator('img[data-vsidian-img-state="loaded"]').waitFor({ state: 'visible', timeout: 2500 })
+  await popup.locator('.vsidian-graphic-frame').hover({ position: { x: 30, y: 30 }, timeout: 2500 })
+  await popup.locator('.vsidian-graphic-chrome-popup').click({ timeout: 2500 })
+  const exportOriginal = page.locator('.vsidian-diagram-export-image')
+  assert.equal(await exportOriginal.isEnabled(), true, '本地图片的显示别名不能禁用另存')
+  await exportOriginal.click()
+  const exportRequest = await page.evaluate(() => window.messages.find(m => m.kind === 'image.export'))
+  assert.equal(exportRequest.workspaceFileId, picture.id)
+  assert.equal(exportRequest.fileName, picture.name)
+  await page.keyboard.press('Escape')
+  console.log('[PASS] 侧栏本地图复用放大与另存，并以条目身份发起导出')
 } finally {
   await browser.close()
 }

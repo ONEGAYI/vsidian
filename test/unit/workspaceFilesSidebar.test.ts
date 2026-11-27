@@ -10,6 +10,8 @@ const mock = vi.hoisted(() => ({
   mediaProvider: vi.fn(), readFile: vi.fn(),
   extraRoots: [] as string[],
   rootAuthority: '',
+  tabGroups: [] as unknown[],
+  showNotebook: vi.fn(),
 }))
 
 vi.mock('vscode', async () => {
@@ -38,6 +40,7 @@ vi.mock('vscode', async () => {
     WorkspaceEdit: class { createFile = mock.createFile; renameFile = mock.renameFile },
     TabInputText: class {},
     TabInputCustom: class {},
+    TabInputNotebook: class { constructor(readonly uri: unknown, readonly notebookType: string) {} },
     workspace: {
       get workspaceFolders() { return folders() },
       getWorkspaceFolder: ({ path }: { path: string }) => folders().reverse().find(folder =>
@@ -54,7 +57,8 @@ vi.mock('vscode', async () => {
       createFileSystemWatcher: () => ({ ...disposable(), onDidCreate: mock.watchCreate, onDidDelete: mock.watchDelete }),
     },
     window: {
-      tabGroups: { all: [], onDidChangeTabGroups: disposable, onDidChangeTabs: disposable },
+      tabGroups: { all: mock.tabGroups, onDidChangeTabGroups: disposable, onDidChangeTabs: disposable },
+      showNotebookDocument: mock.showNotebook,
       showInputBox: mock.showInputBox, showQuickPick: mock.showQuickPick,
       showWarningMessage: mock.warn, showErrorMessage: mock.error,
     },
@@ -84,6 +88,7 @@ beforeEach(() => {
   mock.notebookDocuments.length = 0
   mock.extraRoots.length = 0
   mock.rootAuthority = ''
+  mock.tabGroups.length = 0
   files.clear()
   for (const [path, type] of Object.entries({ '/notes': dirType, '/notes/start.md': fileType,
     '/notes/drafts': dirType, '/notes/drafts/old.md': fileType, '/notes/escape': dirType | vscode.FileType.SymbolicLink,
@@ -344,6 +349,21 @@ it('折叠目录后栏顶仍在当前笔记的父目录新建', async () => {
   await vi.waitFor(() => expect(mock.createFile).toHaveBeenCalledWith(
     matchingUri('/notes/drafts/deep/旁边的新文件.md'), { overwrite: false },
   ))
+})
+
+it('文件型 Notebook 出现在同组标签，并切回已打开的原编辑器模型', async () => {
+  const uri = makeUri('/notes/research.ipynb')
+  const model = { uri, notebookType: 'jupyter-notebook', isDirty: true }
+  mock.notebookDocuments.push(model)
+  mock.tabGroups.push({ viewColumn: 2, tabs: [{
+    label: 'research.ipynb', isActive: false, isPreview: false, input: new vscode.TabInputNotebook(uri, model.notebookType),
+  }] })
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const row = (await client.loaded()).tabs.find(tab => tab.name === 'research.ipynb')!
+  expect(row.id).toBe(`tab:notebook:jupyter-notebook|${uri.toString()}`)
+  client.request({ kind: 'workspaceFiles.activate', id: row.id })
+  await vi.waitFor(() => expect(mock.showNotebook).toHaveBeenCalledExactlyOnceWith(model, { viewColumn: 2, preview: false }))
 })
 
 it('目录管理能在所选目录新建文件夹；文件改名走宿主 WorkspaceEdit', async () => {

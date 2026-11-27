@@ -1921,6 +1921,7 @@ export class WebviewSyncController {
           reqId: req.reqId,
           src: req.src,
           fileName: req.fileName,
+          ...(req.workspaceFileId !== undefined ? { workspaceFileId: req.workspaceFileId } : {}),
         })
       },
     })
