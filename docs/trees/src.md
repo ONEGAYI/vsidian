@@ -100,7 +100,8 @@ vsidian/
     │   ├── wikilinkBlockIdCoordinator.ts # 块 ID 撤回协调器
     │   ├── wikilinkBlockSource.ts        # 块联想宿主查询编排
     │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
-    │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
+    │   ├── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
+    │   └── workspaceFilesSidebar.ts      # 左栏文件管理宿主
     ├── pdfExecutor/ # PDF 本机执行端扩展
     │   ├── extension.ts     # PDF 执行端扩展入口
     │   ├── package.json     # PDF 执行端清单模板
@@ -386,6 +387,7 @@ vsidian/
         ├── wikilinkSuggest.css           # 联想候选浮层样式
         ├── wikilinkSuggest.ts            # 双链联想候选会话（含转阶段）
         ├── wordMotion.ts                 # 词级移动命令与引擎配置
-        └── wordSegmentSettings.ts        # 设置页中文分词分页
+        ├── wordSegmentSettings.ts        # 设置页中文分词分页
+        └── workspaceFilesView.ts         # 左栏文件与标签视图
 <!-- file-tree:tree^id=src:end -->
 ```

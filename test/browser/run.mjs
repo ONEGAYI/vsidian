@@ -116,7 +116,7 @@ const names = ['textHover', 'tableCaret', 'tableInput', 'blockquoteTablePaint', 
   'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'codeCardClickOffset', 'liveImageLayout', 'imageSize', 'imageResize', 'imageEmbedParity', 'imageRefresh', 'imagePopup', 'hoverPreview', 'webLinkCard', 'webPageView', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite',
   // #495 多光标 IME 定稿：紧随多光标族（CDP imeSetComposition 真实组合序列）
   'multicursorIme',
-  'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor',
+  'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'workspaceFiles',
   // 2026-10 修复合入列：dropCursorPaint（拖放落点光标——拖动选中文本悬停
   // 期间 .cm-dropCursor 真实画出/定位、落位后撤下、文本真实落位）紧随
   // multicursor 族（同选区/光标绘制层）

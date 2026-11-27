@@ -134,6 +134,7 @@ import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/l
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
 import type { FindOptionsStore } from './findOptionsStore'
+import { WorkspaceFilesSidebar } from './workspaceFilesSidebar'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
@@ -439,6 +440,8 @@ export function createTextEditorProvider(
   capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
 } {
   const sessions = new Map<string, SessionEntry>()
+  const workspaceFiles = new WorkspaceFilesSidebar(context.workspaceState)
+  context.subscriptions.push(workspaceFiles, workspaceFiles.registerMediaResources())
   const trackNativeDiff = createNativeDiffFallback(context)
   // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
   // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
@@ -469,6 +472,7 @@ export function createTextEditorProvider(
                 enableScripts: true,
                 localResourceRoots: [
                   ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
+                  ...workspaceFiles.mediaRoots(panel),
                   ...grantedAddonRoots,
                   // #556 T3：装配点授予的绝对资源目录一并拼回（否则扩根
                   // 重赋会丢弃已授面——外部图片/PDF 加载回退 401）
@@ -3288,12 +3292,14 @@ export function createTextEditorProvider(
       // 外部网页 webview 已预滤、宿主复核兜底）> target（双链原文）。
       // #333（P3-01）起读取走 readRefContentTarget 类型化分派入口（成功
       // 载荷按 kind 标记；旧扁平入口保留为兼容适配）
+      const fileSidebar = workspaceFiles.attach(document.uri, webviewPanel)
       const readHoverTargetPort = (
         payload: HoverPreviewRequestPayload & {
           verifiedSource?: { fsPath: string; version: number }
           /** T05（#544）附加组件来源覆盖：会话已校验成员资格（面板文档或
            *  已送达目标）的来源 fsPath——读取以该文档为解析语境（R-U02） */
           resolvedSource?: { fsPath: string }
+          verifiedWorkspaceFilePath?: string
         },
         report: (result: RefReadOutcome) => void,
       ): void => {
@@ -3302,6 +3308,7 @@ export function createTextEditorProvider(
           // 在途抓取登记键（try 外声明：finally 清理与 try 内注册共用）
           const webFetchKey = `${document.uri.toString()}#${payload.instanceId}:${payload.reqId}`
           try {
+            const media = payload.workspaceFileId !== undefined ? fileSidebar.previewMedia(payload.workspaceFileId) : undefined
             let sourceDoc = document
             if (payload.source !== undefined) {
               if (!payload.verifiedSource || payload.verifiedSource.fsPath !== payload.source.sourceDocUri) {
@@ -3328,7 +3335,7 @@ export function createTextEditorProvider(
             // Enabled）才提供 web 通道——关闭态解析层 unsupported，零网络
             // 请求；在途抓取登记取消句柄（hover.cancel → documentSession
             // 路由 → abort——同 URL 合并的最后消费者离开即断开底层连接）
-            const webEnabled = externalHoverEnabled()
+            const webEnabled = payload.verifiedWorkspaceFilePath === undefined && externalHoverEnabled()
             const webAbort = webEnabled ? new AbortController() : undefined
             if (webAbort !== undefined) {
               pendingWebFetches.set(webFetchKey, webAbort)
@@ -3442,7 +3449,7 @@ export function createTextEditorProvider(
                 return {
                   kind: 'ok' as const,
                   uri: appendImageVersionStamp(
-                    webviewPanel.webview.asWebviewUri(uri).toString(),
+                    webviewPanel.webview.asWebviewUri(media ?? uri).toString(),
                     generation,
                   ),
                   version: generation,
@@ -3457,7 +3464,7 @@ export function createTextEditorProvider(
             // ——附件载荷由三期后续票登记）。
             // 旧三入口保留为兼容适配（测试与既有调用等价使用）
             outcome = await readRefContentTarget(
-              {
+              payload.verifiedWorkspaceFilePath !== undefined ? { directTarget: { fsPath: payload.verifiedWorkspaceFilePath } } : {
                 ...(payload.directTarget !== undefined ? { directTarget: payload.directTarget } : {}),
                 ...(payload.linkHref !== undefined ? { linkHref: payload.linkHref } : {}),
                 ...(payload.directTarget === undefined && payload.linkHref === undefined
@@ -3471,6 +3478,11 @@ export function createTextEditorProvider(
                 ...(webAbort !== undefined ? { web: { enabled: true } } : {}),
               },
             )
+            if (media && outcome.ok && outcome.content.kind === 'image') {
+              const { version } = outcome.content
+              outcome.content = { kind: 'image', version,
+                src: appendImageVersionStamp(webviewPanel.webview.asWebviewUri(media).toString(), version) }
+            }
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           } finally {
@@ -3503,6 +3515,7 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
+        workspacePreviewTarget: fileSidebar.previewTarget,
         // #342（P3-10）悬停请求取消路由：webview hover.cancel → 在途 web
         // 抓取消费者中止（markdown 读取不可中止——迟到回包由既有配对守卫
         // 丢弃，行为不变）；key 与 readHoverTargetPort 的登记同构
@@ -3682,7 +3695,22 @@ export function createTextEditorProvider(
       }
       const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
-        if (isWebviewToHost(message) && message.kind === 'ready') cancelDocNavRequests()
+        if (isWebviewToHost(message)) {
+          switch (message.kind) {
+            case 'ready':
+              cancelDocNavRequests()
+              fileSidebar.ready()
+              break
+            case 'workspaceFiles.toggle':
+            case 'workspaceFiles.refresh':
+            case 'workspaceFiles.collapseAll':
+            case 'workspaceFiles.activate':
+            case 'workspaceFiles.manage':
+            case 'workspaceFiles.create':
+              fileSidebar.request(message)
+              return
+          }
+        }
         // T02（#622）PDF 导出样式快照回包：面板级只读交互——provider 层拦截
         //（不进文档会话消息管线），分发给固定输入捕获的等待者
         if (isWebviewToHost(message) && message.kind === 'pdfExport.styleSnapshot.report') {
@@ -4372,12 +4400,14 @@ export function createTextEditorProvider(
         maybeShowSearchRevealHint(document.uri)
       }
       const viewStateSub = webviewPanel.onDidChangeViewState((e) => {
+        fileSidebar.viewChanged()
         if (e.webviewPanel.active) {
           refreshActiveModeContext()
           maybeShowSearchRevealHint(document.uri)
         }
       })
       const closeSub = webviewPanel.onDidDispose(() => {
+        fileSidebar.dispose()
         cancelDocNavRequests()
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
@@ -4419,6 +4449,7 @@ export function createTextEditorProvider(
         enableScripts: true,
         localResourceRoots: [
           ...editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+          ...workspaceFiles.mediaRoots(webviewPanel),
           ...addons?.editorResourceRoots() ?? [],
           ...entry.extraResourceRoots,
         ],
@@ -4785,6 +4816,7 @@ export function createTextEditorProvider(
                 enableScripts: true,
                 localResourceRoots: [
                   ...editorResourceRoots(context, entry.doc, state.directory),
+                  ...workspaceFiles.mediaRoots(panel),
                   ...grantedAddonRoots,
                   // #556 T3：与 refreshAddonPanels 同口径拼回绝对资源目录
                   ...entry.extraResourceRoots,

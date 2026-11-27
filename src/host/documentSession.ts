@@ -109,6 +109,7 @@ export interface EditAttributionRecord {
 /** 面板发送通道 */
 export interface PanelPort {
   send(message: HostToWebview): void
+  workspacePreviewTarget?(id: string): string | undefined
   /** #10 链接跳转执行（vscode 层注入：URI 解析白名单 + openExternal/
    *  showTextDocument/用户反馈）；只读交互，暂停态同样放行。#220 起 intent
    *  可携 sourceDocUri（悬停浮层内链接以 B 文档为来源解析执行） */
@@ -126,6 +127,7 @@ export interface PanelPort {
       verifiedSource?: { fsPath: string; version: number }
       /** T05（#544）附加组件来源覆盖（会话层已核验成员资格的来源 fsPath） */
       resolvedSource?: { fsPath: string }
+      verifiedWorkspaceFilePath?: string
     },
     report: (result: RefReadOutcome) => void,
   ): void
@@ -1348,6 +1350,12 @@ export class DocumentSession {
         const reject = (reason: HoverPreviewFailReason): void => panel.port.send({
           kind: 'hover.result', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason,
         })
+        const workspaceFilePath = message.workspaceFileId === undefined ? undefined :
+          panel.port.workspacePreviewTarget?.(message.workspaceFileId)
+        if (message.workspaceFileId !== undefined && workspaceFilePath === undefined) {
+          reject('not-found')
+          return
+        }
         let parent: HoverSourceGrant | undefined
         let verifiedSource: { fsPath: string; version: number } | undefined
         if (message.source !== undefined) {
@@ -1596,16 +1604,19 @@ export class DocumentSession {
         // Service）内管理——会话级 shapeKey 按目标文本形态区分，URL 微差
         // 产生不同键，合并口径以服务层归一为准。此处仅按 href scheme 预
         // 判路由（安全边界仍由 resolveHoverTargetForm 的开关/准入复核）
-        const addonPortPayload = {
+        const payload = {
           ...message,
           ...(verifiedSource ? { verifiedSource } : {}),
           ...(addonResolvedSource ? { resolvedSource: { fsPath: addonResolvedSource.fsPath } } : {}),
+          verifiedWorkspaceFilePath: workspaceFilePath,
         }
         if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
-          port(addonPortPayload, report)
+          port(payload, report)
           return Promise.resolve()
         }
-        const shapeKey = hoverShapeKeyOf(message, verifiedSource ?? addonResolvedSource)
+        // 资源别名的权限仅属于签发它的面板与文件条目。
+        const shapeKey = workspaceFilePath !== undefined ? `file-row:${sessionId}:${message.workspaceFileId}` :
+          hoverShapeKeyOf(message, verifiedSource ?? addonResolvedSource)
         const cached = this.hoverReadCache.get(shapeKey)
         if (cached) {
           this.hoverCacheHits++
@@ -1622,7 +1633,7 @@ export class DocumentSession {
           const epoch = this.hoverEpochs.get(shapeKey) ?? 0
           const requestClock = this.hoverClock
           pending = new Promise<RefReadOutcome>((resolve) => {
-            port(addonPortPayload, resolve)
+            port(payload, resolve)
           })
           this.hoverReadInFlight.set(shapeKey, pending)
           void pending.then((outcome) => {

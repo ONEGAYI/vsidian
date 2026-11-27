@@ -49,10 +49,11 @@ function toolbarButtons(parent: HTMLElement): HTMLElement[] {
 }
 
 describe('工具栏双态视图切换按钮（#141）', () => {
-  it('DOM 序：齿轮、快速操作、刷新、PDF 导出、双态切换、侧栏（刷新紧邻导出左侧）', () => {
+  it('DOM 序：左侧栏、齿轮、快速操作、刷新、PDF 导出、双态切换、右侧栏', () => {
     const { c, parent } = setup()
     const buttons = toolbarButtons(parent).map((b) => b.className)
     expect(buttons).toEqual([
+      'vsidian-file-sidebar-toggle',
       'vsidian-settings-toggle',
       'vsidian-quick-toggle',
       'vsidian-refresh-toggle',

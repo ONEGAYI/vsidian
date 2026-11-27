@@ -13,6 +13,18 @@ const VIEWPORT = { width: 1200, height: 800 }
 const SIZE = { width: HOVER_POPUP_DEFAULT_WIDTH, height: HOVER_POPUP_MAX_HEIGHT }
 
 describe('planHoverPopupPlacement：默认侧与对齐', () => {
+  it('侧栏优先向栏外放置，宽度不足时回到原有上下避让', () => {
+    const input = {
+      anchor: { left: 20, top: 690, right: 252, bottom: 714 }, size: SIZE, rightOf: 280,
+    }
+    expect(planHoverPopupPlacement({ ...input, viewport: VIEWPORT })).toEqual({
+      left: 286, top: 392, width: 480, height: 400,
+    })
+    const narrow = { width: 560, height: 800 }
+    expect(planHoverPopupPlacement({ ...input, viewport: narrow })).toEqual(
+      planHoverPopupPlacement({ ...input, rightOf: undefined, viewport: narrow }),
+    )
+  })
   it('锚点居中时置于下方、左对齐锚点（首选摆放）', () => {
     const out = planHoverPopupPlacement({
       anchor: { left: 400, top: 300, right: 520, bottom: 320 },

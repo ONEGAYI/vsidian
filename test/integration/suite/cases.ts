@@ -39,7 +39,8 @@ import { execFileSync } from 'node:child_process'
 import * as nodeHttps from 'node:https'
 import * as nodePath from 'node:path'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
-import type { HoverPreviewPdfProbe, ReadingEmbedPdfProbe } from '../../../src/shared/protocol'
+import type { HoverPreviewPdfProbe, PaintProbe, ReadingEmbedPdfProbe } from '../../../src/shared/protocol'
+import type { DiagnosticSnapshot } from '../../../src/shared/testDiagnostics'
 import { ADDON_API_VERSION } from '../../../src/shared/addonIdentity'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
@@ -822,6 +823,7 @@ interface ViewState {
   }
   /** 绘制层探针（P0 回归）：正文可见性 / CM6 注入样式存活 / 行号禁选 / 明暗声明与光标实值 */
   paint?: {
+    workspaceFiles?: PaintProbe['workspaceFiles']
     textVisible: boolean
     liveEnd?: { lineTopPx: number; endGapPx: number; textPainted: boolean; blankBelow: boolean }
     scrollerDisplay: string | null
@@ -833,7 +835,7 @@ interface ViewState {
     toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
     /** T05（#544）悬停引用浮窗绘制观测（无浮窗时缺省）：elementFromPoint
      *  命中 + computed 背景/边框——#577 大纲悬停的绘制层断言面 */
-    hoverPopup?: { hit: boolean; background: string | null; borderWidth: string | null; errorState: boolean }
+    hoverPopup?: { hit: boolean; background: string | null; borderWidth: string | null; errorState: boolean; imagePainted?: boolean }
     /** #237 绘制光标 .cm-cursor 的 borderLeftColor（多光标开时在场；不在场为 null） */
     drawnCursorColor?: string | null
     readingFindSource?: { visible: boolean; text: string; current: string; background: string | null }
@@ -1508,6 +1510,8 @@ async function waitViewState(
         graphic: paint?.['graphic'],
         html: paint?.['html'],
         docStyle: paint?.['docStyle'],
+        workspaceFiles: paint?.['workspaceFiles'],
+        hoverPopupPaint: paint?.['hoverPopup'],
         table: paint?.['table'],
         tableGrid: s['tableGrid'],
         // #423 起补块级观测（br 计数诊断宽松换行谓词卡点）
@@ -1516,7 +1520,7 @@ async function waitViewState(
         readingBrCount: s['readingBrCount'],
         hoverPreview: hover === undefined ? undefined : {
           open: hover['open'], state: hover['state'], note: hover['note'],
-          pdf: hover['pdf'],
+          instanceId: hover['instanceId'], reqId: hover['reqId'], text: hover['text'], pdf: hover['pdf'],
         },
       })}`)
     }
@@ -6648,6 +6652,160 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 还原默认开启，避免影响后续用例（与 #34 既有用例同款跨用例状态清理）
     await vscode.commands.executeCommand(CMD.setSettings, { 'editor.lineNumbers': true })
     await waitViewState('linenumbers.md', (v) => v.lineGutter?.on === true)
+  }],
+
+  ['左侧文件栏：宿主打开工作区文件、切回标签并保持绘制', async () => {
+    const toggle = 'onegayi.vsidian.ui.workspaceFilesToggle'
+    const first = wsUri('lf.md')
+    const second = wsUri('crlf.md')
+    const root = vscode.workspace.getWorkspaceFolder(first)!.uri
+    await vscode.commands.executeCommand('vscode.openWith', first, VIEW_TYPE, { preview: false })
+    const before = await waitSessionReady('lf.md')
+    const initial = await waitViewState('lf.md', v => v.paint?.workspaceFiles?.togglePainted === true)
+    assert(!initial.paint?.workspaceFiles?.panelPainted, '左侧栏缺省收起')
+    assert(await vscode.commands.executeCommand(toggle), '左侧栏命令应注册到活动编辑器')
+    try {
+      await waitViewState('lf.md', v => v.paint?.workspaceFiles?.panelPainted === true &&
+        v.paint.workspaceFiles.treeActionsPainted === true && v.paint.workspaceFiles.currentFilePainted && v.paint.textVisible)
+      assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, first.toString(), {
+        kind: 'workspaceFiles.activate', id: `tree:${root.toString()}|${second.toString()}`,
+      }), '工作区文件行应走实际 webview 消息入口')
+      await waitSessionReady('crlf.md')
+      await waitViewState('crlf.md', v => v.paint?.workspaceFiles?.panelPainted === true &&
+        v.paint.workspaceFiles.currentFilePainted)
+      const group = vscode.window.tabGroups.activeTabGroup
+      assert(group.activeTab?.input instanceof vscode.TabInputCustom &&
+        group.activeTab.input.uri.toString() === second.toString(), '工作区笔记在当前组打开')
+      assert(group.tabs.some(tab => tab.input instanceof vscode.TabInputCustom &&
+        tab.input.uri.toString() === first.toString()), '原标签应仍在同一编辑器组')
+
+      assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, second.toString(), {
+        kind: 'workspaceFiles.activate', id: `tab:${VIEW_TYPE}|${first.toString()}`,
+      }), '已打开标签行应走实际 webview 消息入口')
+      await poll('已打开列表切回原 Vsidian 标签', async () => {
+        const active = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+        return active instanceof vscode.TabInputCustom && active.uri.toString() === first.toString() ? active : undefined
+      })
+      await waitViewState('lf.md', v => v.paint?.workspaceFiles?.panelPainted === true &&
+        v.paint.workspaceFiles.currentFilePainted)
+      const after = (await vscode.commands.executeCommand(CMD.sessionState, first.toString())) as SessionState
+      assert(after.version === before.version && after.appliedEdits === before.appliedEdits, '开合及切换不能写入笔记')
+    } finally {
+      await vscode.commands.executeCommand(toggle)
+    }
+    await waitViewState('lf.md', v => v.paint?.workspaceFiles?.panelPainted === false)
+  }],
+
+  ['左侧文件栏：Ctrl 悬停只读、未保存文本与跨根附件绘制（#330）', async () => {
+    const toggle = 'onegayi.vsidian.ui.workspaceFilesToggle'
+    const parent = wsUri('lf.md')
+    const parentId = parent.toString()
+    const scratch = await mkdtemp(nodePath.join(nodePath.dirname(parent.fsPath), '../file-hover-'))
+    const second = vscode.Uri.file(nodePath.join(scratch, 'workspace'))
+    const markdown = vscode.Uri.joinPath(second, '草稿 % #.md')
+    const pdf = vscode.Uri.joinPath(second, '外根资料.pdf')
+    const image = vscode.Uri.joinPath(second, '外根图 #.png')
+    const text = vscode.Uri.file(nodePath.join(scratch, '工作区外草稿.txt'))
+    const received = (message: object) => vscode.commands.executeCommand(CMD.injectWebviewReceived, parentId, message)
+    const pointer = (link: 'file-tree' | 'file-tab', fileId: string, action: 'enter' | 'leave' = 'enter') =>
+      vscode.commands.executeCommand(CMD.postToPanel, parentId, {
+        kind: 'hover.test.pointer', action, index: 0, link, fileId, ctrlKey: true,
+      })
+    const hover = (link: 'file-tree' | 'file-tab', fileId: string, match: (v: ViewState) => boolean) =>
+      waitViewState('lf.md', v => {
+        if (match(v)) return true
+        // 第一次派发可能早于目录异步快照；同一条目的待开计时不会因重复 enter 重置。
+        void pointer(link, fileId)
+        return false
+      })
+    const treeId = (uri: vscode.Uri) => `tree:${second.toString()}|${uri.toString()}`
+    const dirtyReads: vscode.TextDocument[] = []
+    const setDiagnostics = (enabled: boolean) => vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', enabled)
+    const hoverEvents = async () => {
+      const result = await vscode.commands.executeCommand<{ host: DiagnosticSnapshot }>('onegayi.vsidian._test.getDiagnostics')
+      return result?.host.events.filter(event => /hover\.(?:request|result|watch|invalidat)|document\.changed/.test(event.stage)) ?? []
+    }
+    let opened = false
+    try {
+      await mkdir(second.fsPath)
+      await Promise.all([
+        writeFile(markdown.fsPath, '# 盘上只有标题'),
+        writeFile(text.fsPath, '盘上只有一行'),
+        writeFile(pdf.fsPath, await readFile(wsUri('资料.pdf').fsPath)),
+        writeFile(image.fsPath, Buffer.from(TINY_PNG_BASE64, 'base64')),
+      ])
+      await openWithEditor('lf.md')
+      await waitSessionReady('lf.md')
+      await vscode.commands.executeCommand(CMD.postToPanel, parentId, { kind: 'view.mode.set', mode: 'live' })
+      assert(vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders!.length, 0, { uri: second }),
+        '真实多根工作区添加附件根')
+      await poll('第二根可见', async () => vscode.workspace.getWorkspaceFolder(markdown))
+      const md = await vscode.workspace.openTextDocument(markdown)
+      const txt = await vscode.workspace.openTextDocument(text)
+      dirtyReads.push(md, txt)
+      const edit = new vscode.WorkspaceEdit()
+      edit.insert(markdown, new vscode.Position(0, md.lineAt(0).text.length), '\n\n宿主未保存的段落。\n\n- [ ] 禁止改动')
+      edit.insert(text, new vscode.Position(0, txt.lineAt(0).text.length), '\n宿主未保存第二行\n第三行')
+      assert(await vscode.workspace.applyEdit(edit))
+      await vscode.window.showTextDocument(txt, { preview: false })
+      await openWithEditor('lf.md')
+      await waitViewState('lf.md', v => v.viewMode === 'live' && v.paint?.workspaceFiles?.panelPainted === false)
+      assert(await vscode.commands.executeCommand(toggle))
+      opened = true
+      await waitViewState('lf.md', v => v.paint?.workspaceFiles?.currentFilePainted === true)
+      assert(await received({ kind: 'workspaceFiles.activate', id: treeId(second) }))
+      const tabExists = (uri: vscode.Uri) => vscode.window.tabGroups.activeTabGroup.tabs.some(tab =>
+        (tab.input instanceof vscode.TabInputText || tab.input instanceof vscode.TabInputCustom) &&
+        tab.input.uri.toString() === uri.toString())
+      const hadMarkdownTab = tabExists(markdown) // VS Code 可能为修改过的模型补出编辑器标签。
+      const painted = await hover('file-tree', treeId(markdown), v => v.hoverPreview?.blocks === 3 &&
+        v.paint?.hoverPopup?.hit === true && v.hoverPreview.note.endsWith('草稿 % #.md'))
+      assert(painted.hoverPreview?.internalMode === 'reading' && painted.hoverPreview.liveBound === false,
+        'Live 正文中的浮窗读取未保存 Markdown，但不绑定编辑端口')
+      assert(tabExists(markdown) === hadMarkdownTab, '预览不改变 Markdown 的打开状态')
+      assert(!tabExists(pdf), 'PDF 未打开')
+      const drawnPdf = await hover('file-tree', treeId(pdf), v => v.paint?.hoverPopup?.hit === true &&
+        v.hoverPreview?.pdf?.phase === 'content' && v.hoverPreview.pdf.nonWhiteRatio > 0.5)
+      assert(drawnPdf.hoverPreview?.note.endsWith('外根资料.pdf'))
+      assert(!tabExists(pdf), '未打开的 PDF 可直接预览且不会新增标签')
+
+      await hover('file-tree', treeId(image), v =>
+        v.paint?.hoverPopup?.imagePainted === true && v.hoverPreview?.note.endsWith('外根图 #.png') === true)
+      const tabId = `tab:default|${text.toString()}`
+      await setDiagnostics(true)
+      const first = await hover('file-tab', tabId, v =>
+        v.paint?.hoverPopup?.hit === true && v.hoverPreview?.text?.totalLines === 3)
+      await poll('工作区外文本订阅已送达', async () => (await hoverEvents()).find(event =>
+        event.stage === 'host.receive.hover.watch' && event.data.instanceId === first.hoverPreview?.instanceId))
+      const more = new vscode.WorkspaceEdit()
+      more.insert(text, new vscode.Position(2, txt.lineAt(2).text.length), '\n宿主未保存第四行')
+      assert(await vscode.workspace.applyEdit(more))
+      await waitViewState('lf.md', v => v.hoverPreview?.instanceId === first.hoverPreview?.instanceId &&
+        v.hoverPreview?.text?.totalLines === 4 && v.paint?.hoverPopup?.hit === true).catch(async error => {
+        throw new Error(`工作区外文本未原地刷新（宿主总行数 ${txt.lineCount}，首开 ${first.hoverPreview?.instanceId}）：${String(error)}；${JSON.stringify(await hoverEvents())}`)
+      })
+      const active = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+      assert(active instanceof vscode.TabInputCustom && active.uri.toString() === parentId, '悬停不会切换当前文件')
+      assert(md.isDirty && txt.isDirty && (await readFile(text.fsPath, 'utf8')) === '盘上只有一行')
+    } finally {
+      await setDiagnostics(false)
+      if (opened) {
+        await vscode.commands.executeCommand(toggle)
+        await waitViewState('lf.md', v => !v.paint?.hoverPopup && v.paint?.workspaceFiles?.panelPainted === false)
+      }
+      // 仅清理本用例临时文档与工作区根。
+      for (const doc of dirtyReads) if (doc.isDirty) await doc.save()
+      const fixtureUris = new Set(dirtyReads.map(doc => doc.uri.toString()))
+      const fixtureTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(({ input }) =>
+        (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom) && fixtureUris.has(input.uri.toString()))
+      if (fixtureTabs.length) await vscode.window.tabGroups.close(fixtureTabs)
+      const index = vscode.workspace.workspaceFolders?.findIndex(folder => folder.uri.toString() === second.toString()) ?? -1
+      if (index >= 0) {
+        assert(vscode.workspace.updateWorkspaceFolders(index, 1))
+        await poll('第二根已移除', async () => !vscode.workspace.getWorkspaceFolder(markdown) || undefined)
+      }
+      await rm(scratch, { recursive: true, force: true })
+    }
   }],
 
   // ---- #53 顶栏图标化与右侧栏布局 ----

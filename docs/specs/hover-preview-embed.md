@@ -1,6 +1,6 @@
 # 悬停预览与文档嵌入
 
-状态：**一期、1.5 期与二期已实施；三期正式规格已确认，12 张票 #333–#344 已发布，尚未实施**。二期 #227 已于 2026-10-03 关闭，实施与自动化记录见[二期票据索引](hover-embed-phase2-tickets/README.md)；三期入口见「三期正式规格」与[三期票据索引](hover-embed-phase3-tickets/README.md)。原生资源管理器小浮窗已移四期 [#330](https://github.com/ONEGAYI/vsidian/issues/330)，不阻塞三期。本文是本功能的单一规格入口，历史交付与人工待验项保留，自动化通过不等于用户验收。架构方向见 [ADR-0009](../adr/0009-referenced-document-views.md)、[ADR-0010](../adr/0010-reference-edit-target-session.md) 和 [ADR-0011](../adr/0011-reference-full-document-navigation.md)。
+状态：**一期、1.5 期与二期已实施；四期 [#330](https://github.com/ONEGAYI/vsidian/issues/330) 已确认改由 Vsidian 文件侧栏承接，待实施**。二期 #227 已于 2026-10-03 关闭，实施与自动化记录见[二期票据索引](hover-embed-phase2-tickets/README.md)；三期见「三期正式规格」、「三期收口落档」与[三期票据索引](hover-embed-phase3-tickets/README.md)。本文是本功能的单一规格入口，历史交付与人工待验项保留，自动化通过不等于用户验收。架构方向见 [ADR-0009](../adr/0009-referenced-document-views.md)、[ADR-0010](../adr/0010-reference-edit-target-session.md) 和 [ADR-0011](../adr/0011-reference-full-document-navigation.md)。
 
 一期工作树记录：`C:/Users/64487/.codex/worktrees/hover-preview-embed/vscode-obsidian-like-editor`；分支：`codex/hover-preview-embed`。
 
@@ -18,13 +18,25 @@
 | 1.5 期 | 递归，以及表格单元格、文字混排、列表／引用容器内的嵌入 |
 | 二期 | 悬停与嵌入内部的 Live 编辑，修改归属目标文档 |
 | 三期 | PDF 基础阅读、图片与普链同源嵌入、可读文本原生文字外观、默认关闭且形态可选的外链预览 |
-| 四期 | 原生 Explorer 右键独立小浮窗预览；先验证载体，跟踪票 #330 |
+| 四期 | [Vsidian 文件侧栏 Ctrl 悬停预览](#四期文件悬停预览)，替代 #330 原拟的原生资源管理器入口 |
 
 父文档 Live／Reading 是展示环境，引用内容 Reading／Live 是内部视图模式，两者独立。一期父文档为 Live 时，嵌入内部仍是 Reading，不能称为“只读 Live”。
 
 一期不包含：引用内容写入、递归展开、多层悬停浮窗、固定／拖动浮窗、PDF、其他附件新渲染器及混排嵌入。现有 Markdown 内容里的图片、公式、代码和图表仍复用既有阅读能力；不由本规格扩展它们的语法范围。
 
 原生资源管理器文件悬停（2026-09-30 验收提问调研结论）：VSCode 公开 API 不支持——扩展进程无工作台 UI DOM 访问，原生 Explorer 文件树没有悬停扩展点；`TreeItem.tooltip` 只作用于扩展自建 TreeView，且是声明式 MarkdownString（宿主渲染、无悬停事件回调、无法感知 Ctrl/Cmd 修饰位），既做不到「必须 Ctrl」门控也承载不了完整 Reading 预览。后续若引入非 Markdown 类型（PDF/PNG）：目标装载链路的扩展点在 `hover.result` 回包加类型分派字段（缺省 markdown 向后兼容）+ webview 渲染侧按类型分派渲染器，`HoverPopupTargetSpec` 的目标身份抽象（target/linkHref/directFsPath）无需变动。
+
+## 四期文件悬停预览
+
+2026-11-28 用户确认并据此实施。
+
+- **载体**：在已打开的 Vsidian 编辑器内复用小浮窗，目标文件不必先打开，单击条目仍照常打开文件。该入口替代 [#330](https://github.com/ONEGAYI/vsidian/issues/330) 原拟的原生资源管理器右键浮窗；无需在没有 Vsidian 编辑器时独立启动。
+- **与现有预览卡片对齐**：以现有悬停预览卡片对本地文件的支持范围、渲染、资源限制与失败状态为准，不另设格式清单或渲染器。Markdown 和可读文本显示宿主已收到的未保存内容；浮窗始终只读，正文处于 Live 也不改变这条约束。文件条目不走外链预览通道。
+- **目标条目**：文件树和「已打开」都能触发，后者包括已经打开的工作区外文件。目录、未命名标签与「…」管理按钮不触发。
+- **触发与关闭**：先按 Ctrl 再移入、先悬停再按 Ctrl 均可触发。松开 Ctrl 不关窗，移入浮窗后可滚动、选择、复制；离开条目和浮窗后延迟关闭，Esc 或点击外部也可关闭。
+- **刷新**：刷新文件树时，同一条目仍在原入口就保留浮窗；锚定条目消失时关闭。文件内容刷新、迟到结果丢弃和资源释放沿用现有卡片机制。
+
+实现以宿主当前面板的条目 ID 读取真实路径；浮窗及其嵌入不绑定可写编辑会话。直接预览图片或 PDF 时，资源 URL 按面板和文件条目授权，不新增外部目录许可。浮窗优先放在左栏右侧，空间不足时沿用原卡片的上下避让，避免在宽窗口中盖住下一行。
 
 ## 一期交互契约
 

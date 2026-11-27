@@ -557,6 +557,222 @@ body.vscode-light #app {
   flex-direction: column;
 }
 
+/* 文件侧栏：与右栏共享 280px 默认档和顶栏高度，不改右栏的变量或结构。 */
+#app .vsidian-file-sidebar {
+  --_vsidian-file-sidebar-width: 280px;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 0;
+  overflow: hidden;
+  visibility: hidden;
+  color: var(--vscode-sideBar-foreground, var(--vscode-editor-foreground));
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  transition: width 0.15s ease-out;
+}
+
+#app .vsidian-file-sidebar-open .vsidian-file-sidebar {
+  width: var(--_vsidian-file-sidebar-width);
+  visibility: visible;
+  border-inline-end: 1px solid var(--vscode-panel-border);
+}
+
+/* 像右栏一样只裁开合动画的外壳。行宽若随外壳暂时压成零，行尾按钮会
+   折到下一行，首帧按这份高度定位会在动画结束后滚过当前文件。 */
+#app .vsidian-file-sidebar > * {
+  box-sizing: border-box;
+  width: calc(var(--_vsidian-file-sidebar-width) - 1px);
+}
+
+/* 两栏同开时先保留主工具栏的位置，单开右栏保持其原有拖宽契约。 */
+#app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar {
+  max-width: calc(100% - 280px - 224px);
+}
+
+#app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar > :is(
+  .vsidian-sidebar-toolbar, .vsidian-sidebar-panel, .vsidian-outline-toolbar, .vsidian-outline-slider
+) {
+  max-width: 100%;
+}
+
+@media (max-width: 700px) {
+  #app .vsidian-file-sidebar {
+    --_vsidian-file-sidebar-width: min(280px, 85vw);
+    position: absolute;
+    inset-block: var(--vsidian-toolbar-height, 30px) 0;
+    inset-inline-start: 0;
+    z-index: 1;
+  }
+
+  #app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar {
+    max-width: max(0px, calc(100% - 224px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app .vsidian-file-sidebar { transition: none; }
+}
+
+.vsidian-file-sidebar-header {
+  display: flex;
+  flex: 0 0 var(--vsidian-toolbar-height, 30px);
+  align-items: center;
+  gap: 2px;
+  padding-inline: 12px 8px;
+  box-shadow: inset 0 -1px var(--vscode-panel-border);
+}
+
+.vsidian-file-sidebar-header > span {
+  flex: 1;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.vsidian-file-sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.vsidian-file-sidebar ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vsidian-file-opened {
+  flex: 0 0 auto;
+  padding: 6px;
+  border-block-end: 1px solid var(--vscode-panel-border);
+}
+
+.vsidian-file-opened ul {
+  max-height: min(144px, 24vh);
+  overflow: auto;
+}
+
+.vsidian-file-opened h2 {
+  margin: 4px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+}
+
+.vsidian-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.vsidian-file-action,
+.vsidian-file-entry {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.vsidian-file-action {
+  flex: 0 0 26px;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+}
+
+.vsidian-file-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.vsidian-file-entry {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 24px;
+  gap: 5px;
+  padding-inline: 6px;
+  font-size: 13px;
+  text-align: start;
+}
+
+.vsidian-file-root { font-weight: 600; }
+
+.vsidian-file-entry:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-list-hoverForeground, inherit);
+}
+
+.vsidian-file-entry[aria-current='page'] {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.vsidian-file-action:not(:disabled):hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.vsidian-file-action:focus-visible,
+.vsidian-file-entry:focus-visible,
+.vsidian-toolbar .vsidian-file-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
+}
+
+.vsidian-file-row .vsidian-file-action {
+  flex-basis: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.vsidian-file-row:is(:hover, :focus-within) .vsidian-file-action {
+  opacity: 1;
+}
+
+.vsidian-file-sidebar svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.vsidian-file-sidebar .vsidian-file-chevron { width: 12px; height: 12px; }
+.vsidian-file-entry[aria-expanded='true'] .vsidian-file-chevron { transform: rotate(90deg); }
+.vsidian-file-chevron-spacer { visibility: hidden; }
+
+.vsidian-file-name,
+.vsidian-file-detail {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vsidian-file-detail {
+  max-width: 55%;
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.vsidian-file-status {
+  padding: 8px 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.vsidian-file-row-status { flex-basis: 100%; }
+
 #app .vsidian-sidebar {
   display: flex;
   flex: 0 0 auto;
@@ -673,7 +889,7 @@ body.vscode-light #app {
   cursor: col-resize;
 }
 
-/* 主编辑区顶栏（#53 图标化）：左端齿轮设置入口 + 右端侧栏切换按钮，
+/* 主编辑区顶栏：左端文件侧栏切换按钮 + 齿轮设置入口，右端侧栏切换按钮，
    高度与侧栏顶栏共用同一变量（对齐）。position:relative 作 PDF 导出下拉
    菜单的定位基准（菜单是工具栏的绝对定位子元素） */
 #app .vsidian-toolbar {
@@ -1048,6 +1264,14 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 #app .vsidian-body.vsidian-sidebar-open .vsidian-toolbar .vsidian-sidebar-toggle .vsidian-sidebar-icon-bar {
+  stroke-width: 3px;
+}
+
+.vsidian-file-sidebar-toggle :is(.vsidian-file-sidebar-icon-frame, .vsidian-file-sidebar-icon-bar) {
+  stroke-width: 1.5px;
+}
+
+.vsidian-file-sidebar-toggle[aria-expanded='true'] .vsidian-file-sidebar-icon-bar {
   stroke-width: 3px;
 }
 
