@@ -89,6 +89,20 @@ async function waitFor(fn, label, timeout = 8000) {
   }
 }
 
+/** CM6 重新量测会整批重建把手。在同一次页面执行中读取两端坐标，避免
+ * Locator 解析出的旧节点在跨协议测量时已脱离；起点必须能接收真实指针。 */
+function dragHandleBoxes(page, axis, source, destination, label) {
+  return waitFor(() => page.evaluate(({ axis, source, destination }) => {
+    const handles = document.querySelectorAll(`.vsidian-table-${axis}-handle`)
+    const start = handles[source]
+    const from = start?.getBoundingClientRect()
+    const to = handles[destination]?.getBoundingClientRect()
+    if (!from?.width || !from.height || !to?.width || !to.height) return null
+    const hit = document.elementFromPoint(from.x + from.width / 2, from.y + from.height / 2)
+    return start.contains(hit) ? [from.toJSON(), to.toJSON()] : null
+  }, { axis, source, destination }), label)
+}
+
 try {
   // ============ page1：长文（载荷/绘制/键盘/滚轮） ============
   const { page, errors } = await setupPage()
@@ -573,9 +587,7 @@ try {
   // S4 拖排行：数据行 1（嵌入行）拖到顶部升表头
   {
     const { page, errors } = await setupPage(STRUCT_DOC)
-    const from = await page.locator('.vsidian-table-row-handle').nth(1).boundingBox()
-    const top = await page.locator('.vsidian-table-row-handle').nth(0).boundingBox()
-    assert.ok(from && top, 'S4 行把手在场')
+    const [from, top] = await dragHandleBoxes(page, 'row', 1, 0, 'S4 行把手可拖动')
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
     await page.mouse.down()
     await page.mouse.move(from.x + from.width / 2, top.y + 2, { steps: 8 })
@@ -597,9 +609,7 @@ try {
   // S5 拖排列：列 1（嵌入列）拖到列 2 位置
   {
     const { page, errors } = await setupPage(STRUCT_DOC)
-    const from = await page.locator('.vsidian-table-column-handle').nth(0).boundingBox()
-    const to = await page.locator('.vsidian-table-column-handle').nth(1).boundingBox()
-    assert.ok(from && to, 'S5 列把手在场')
+    const [from, to] = await dragHandleBoxes(page, 'column', 0, 1, 'S5 列把手可拖动')
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
     await page.mouse.down()
     await page.mouse.move(to.x + to.width + 6, from.y + from.height / 2, { steps: 8 })
@@ -908,8 +918,7 @@ try {
       document.querySelectorAll('.vsidian-live-embed .vsidian-embed-card').length)
     assert.equal(loaded, 2, `V2 装载两枚卡（实际 ${loaded}）`)
     // 拖排行：数据行 1（嵌入行）升表头
-    const from = await page.locator('.vsidian-table-row-handle').nth(1).boundingBox()
-    const top = await page.locator('.vsidian-table-row-handle').nth(0).boundingBox()
+    const [from, top] = await dragHandleBoxes(page, 'row', 1, 0, 'V2 装载后的行把手可拖动')
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
     await page.mouse.down()
     await page.mouse.move(from.x + from.width / 2, top.y + 2, { steps: 8 })
@@ -934,8 +943,7 @@ try {
     assert.ok(reqsAfterRow - reqsBefore <= 4,
       `V2 行移动无请求风暴（新请求 ${reqsAfterRow - reqsBefore} 枚）`)
     // 拖排列：列 1（嵌入列）→ 列 2 位置
-    const fromC = await page.locator('.vsidian-table-column-handle').nth(0).boundingBox()
-    const toC = await page.locator('.vsidian-table-column-handle').nth(1).boundingBox()
+    const [fromC, toC] = await dragHandleBoxes(page, 'column', 0, 1, 'V2 行移动后的列把手可拖动')
     await page.mouse.move(fromC.x + fromC.width / 2, fromC.y + fromC.height / 2)
     await page.mouse.down()
     await page.mouse.move(toC.x + toC.width + 6, fromC.y + fromC.height / 2, { steps: 8 })

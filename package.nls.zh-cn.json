@@ -71,6 +71,7 @@
   "command.searchReveal.locate.title": "定位到搜索选中结果",
   "command.gotoLine.title": "跳转到行",
   "command.ui.sidebarToggle.title": "展开或收起右侧栏",
+  "command.ui.workspaceFilesToggle.title": "展开或收起左侧栏",
   "command.ui.outlineToggle.title": "显示或隐藏大纲",
   "command.ui.outlineSearch.title": "搜索大纲标题",
   "command.ui.outlineJumpBottom.title": "跳转到笔记末尾",

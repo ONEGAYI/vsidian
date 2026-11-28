@@ -9,7 +9,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
-import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
+import { DocumentSession, type AuthorizedHoverRead, type FilePreviewOrigin, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { AddonHistoryCoordinator, type AddonHistorySnapshotData } from './addonHistoryCoordinator'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
 import { AddonHistoryProbeHub } from './addonHistoryProbe'
@@ -70,7 +70,6 @@ import {
   isWebviewToHost,
   type DiagramExportPayload,
   type HostToWebview,
-  type HoverPreviewRequestPayload,
   type ImageExportPayload,
   type ImagePastePayload,
   type PdfExportEntryMode,
@@ -104,7 +103,8 @@ import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator, shouldFor
 import { selectTextWatchEvictions } from '../shared/hoverRefresh'
 import { escapeGlobFilenameLiteral } from '../shared/globLiteral'
 import { TextAppearanceService } from './textAppearance/appearanceService'
-import { ImageVersionTable } from './imageVersioning'
+import { imageFsKey, ImageVersionTable } from './imageVersioning'
+import { previewSourceImagePaths } from './previewSourceImages'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
   IMAGE_WAKE_MIN_GAP_MS,
@@ -134,6 +134,7 @@ import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/l
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
 import type { FindOptionsStore } from './findOptionsStore'
+import { WorkspaceFilesSidebar } from './workspaceFilesSidebar'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
@@ -439,6 +440,8 @@ export function createTextEditorProvider(
   capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
 } {
   const sessions = new Map<string, SessionEntry>()
+  const workspaceFiles = new WorkspaceFilesSidebar(context.workspaceState, context.extension.extensionKind)
+  context.subscriptions.push(workspaceFiles, workspaceFiles.registerMediaResources())
   const trackNativeDiff = createNativeDiffFallback(context)
   // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）
   // → 已开面板的资源许可面（localResourceRoots 只在集合变化时重赋——
@@ -469,6 +472,7 @@ export function createTextEditorProvider(
                 enableScripts: true,
                 localResourceRoots: [
                   ...editorResourceRoots(context, entry.doc, snippets?.getState().directory ?? null),
+                  ...workspaceFiles.mediaRoots(panel),
                   ...grantedAddonRoots,
                   // #556 T3：装配点授予的绝对资源目录一并拼回（否则扩根
                   // 重赋会丢弃已授面——外部图片/PDF 加载回退 401）
@@ -1044,7 +1048,7 @@ export function createTextEditorProvider(
    *  重建（先拆旧）；无工作区不建（周期核验与按需 stat 兜底）。事件去抖
    *  归并（保存器写临时文件 + rename 会产生成组事件） */
   const imageWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  const scheduleImageEvent = (fsPath: string): void => {
+  const scheduleImageEvent = (fsPath: string, status: 'changed' | 'deleted' | 'stale'): void => {
     const prev = imageWatchTimers.get(fsPath)
     if (prev !== undefined) {
       clearTimeout(prev)
@@ -1053,27 +1057,22 @@ export function createTextEditorProvider(
       fsPath,
       setTimeout(() => {
         imageWatchTimers.delete(fsPath)
-        void imageRefresh.handleTargetEvent(fsPath)
+        void imageRefresh.handleTargetEvent(fsPath).then(() => hoverEvents.onDiskEvent(fsPath, status))
       }, IMAGE_EVENT_DEBOUNCE_MS),
     )
   }
   let imageWatchers: vscode.FileSystemWatcher[] = []
-  /** #338 PDF 磁盘事件去抖计时器（与图片同窗——保存器 rename 成组归并） */
-  const pdfWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  /** #338 PDF 目标磁盘事件分流：索引域 watcher 只盯 *.md、图片自建管线
-   *  只覆盖图片扩展——PDF 的 changed/deleted 在此自建去抖后送 #224 刷新
-   *  协调器（hover.invalidated 推送的事件源；闭包晚绑定 hoverEvents——
-   *  事件触发恒晚于其声明，与 md 域接线同款前提）。stale 的周期核验挂
-   *  图片管线，PDF 事件驱动为一期边界（装载时 stat 三态已覆盖 inaccessible） */
-  const schedulePdfEvent = (fsPath: string, status: 'changed' | 'deleted'): void => {
-    const prev = pdfWatchTimers.get(fsPath)
+  /** 直接预览的 PDF 和图片均按原文件身份失效；行媒体别名不经过 image.request。 */
+  const previewMediaWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const schedulePreviewMediaEvent = (fsPath: string, status: 'changed' | 'deleted'): void => {
+    const prev = previewMediaWatchTimers.get(fsPath)
     if (prev !== undefined) {
       clearTimeout(prev)
     }
-    pdfWatchTimers.set(
+    previewMediaWatchTimers.set(
       fsPath,
       setTimeout(() => {
-        pdfWatchTimers.delete(fsPath)
+        previewMediaWatchTimers.delete(fsPath)
         hoverEvents.onDiskEvent(fsPath, status)
       }, IMAGE_EVENT_DEBOUNCE_MS),
     )
@@ -1089,10 +1088,10 @@ export function createTextEditorProvider(
       clearTimeout(timer)
     }
     imageWatchTimers.clear()
-    for (const timer of pdfWatchTimers.values()) {
+    for (const timer of previewMediaWatchTimers.values()) {
       clearTimeout(timer)
     }
-    pdfWatchTimers.clear()
+    previewMediaWatchTimers.clear()
   }
   const setupImageWatchers = (): void => {
     teardownImageWatchers()
@@ -1107,17 +1106,13 @@ export function createTextEditorProvider(
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(folder.uri, glob),
       )
-      const forward = (uri: vscode.Uri | undefined, pdfStatus: 'changed' | 'deleted'): void => {
+      const forward = (uri: vscode.Uri | undefined, status: 'changed' | 'deleted'): void => {
         if (!uri) {
           return
         }
         if (isImageFileExtension(uri.fsPath)) {
-          scheduleImageEvent(uri.fsPath)
-          return
-        }
-        if (classifyLocalRefContentKind(uri.fsPath) === 'pdf') {
-          schedulePdfEvent(uri.fsPath, pdfStatus)
-        }
+          scheduleImageEvent(uri.fsPath, status)
+        } else schedulePreviewMediaEvent(uri.fsPath, status)
       }
       watcher.onDidChange((uri) => forward(uri, 'changed'))
       watcher.onDidCreate((uri) => forward(uri, 'changed'))
@@ -1144,9 +1139,8 @@ export function createTextEditorProvider(
     const offTargetChange = vaultIndex.onTargetChange((event) => {
       diagnostics.record('hover.disk', { fsPath: event.fsPath, status: event.status })
       if (isImageFileExtension(event.fsPath)) {
-        scheduleImageEvent(event.fsPath)
-      }
-      hoverEvents.onDiskEvent(event.fsPath, event.status)
+        scheduleImageEvent(event.fsPath, event.status)
+      } else hoverEvents.onDiskEvent(event.fsPath, event.status)
     })
     context.subscriptions.push({ dispose: offTargetChange })
   }
@@ -1250,10 +1244,11 @@ export function createTextEditorProvider(
       }, IMAGE_EVENT_DEBOUNCE_MS),
     )
   }
-  /** watch 登记成功后调用：text 目标建 per-file watcher（幂等，LRU 触达） */
-  const ensureTextWatch = (fsPath: string): void => {
-    if (classifyLocalRefContentKind(fsPath) !== 'text') {
-      return // md 域走索引 watcher、pdf/image 走自建分流——各有事件源
+  /** watch 登记成功后，为工作区批量监听未覆盖的目标补单文件监听。 */
+  const ensureReferenceFileWatch = (fsPath: string): void => {
+    const fileUri = vscode.Uri.file(fsPath)
+    if (classifyLocalRefContentKind(fsPath) !== 'text' && vscode.workspace.getWorkspaceFolder(fileUri)) {
+      return // 根内 md 走索引，根内 pdf/image 走媒体 watcher。
     }
     const key = textWatchKeyOf(fsPath)
     const prev = textWatchers.get(key)
@@ -1262,15 +1257,15 @@ export function createTextEditorProvider(
       textWatchers.set(key, prev)
       return
     }
-    const fileUri = vscode.Uri.file(fsPath)
     const slash = fileUri.path.lastIndexOf('/')
     const dirUri = fileUri.with({ path: slash > 0 ? fileUri.path.slice(0, slash) : '/' })
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(dirUri, escapeGlobFilenameLiteral(fileUri.path.slice(slash + 1))),
     )
-    watcher.onDidChange((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
-    watcher.onDidCreate((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
-    watcher.onDidDelete((uri) => scheduleTextDiskEvent(uri.fsPath, 'deleted'))
+    const forward = isImageFileExtension(fsPath) ? scheduleImageEvent : scheduleTextDiskEvent
+    watcher.onDidChange((uri) => forward(uri.fsPath, 'changed'))
+    watcher.onDidCreate((uri) => forward(uri.fsPath, 'changed'))
+    watcher.onDidDelete((uri) => forward(uri.fsPath, 'deleted'))
     textWatchers.set(key, { watcher })
     // #344（P3-12 收口·RB-1）淘汰选取：跳过仍有活跃订阅的目标（订阅在
     // 登记表而事件源被盲 LRU 淘汰 = 磁盘推送承诺落空的不对称修复）。
@@ -3288,13 +3283,13 @@ export function createTextEditorProvider(
       // 外部网页 webview 已预滤、宿主复核兜底）> target（双链原文）。
       // #333（P3-01）起读取走 readRefContentTarget 类型化分派入口（成功
       // 载荷按 kind 标记；旧扁平入口保留为兼容适配）
+      const fileSidebar = workspaceFiles.attach(document.uri, webviewPanel)
+      const previewImagePaths = new WeakMap<vscode.TextDocument, { version: number; root: string; paths: ReadonlySet<string> }>()
+      const sourceAsset = (origin: FilePreviewOrigin, source: vscode.TextDocument, target: vscode.Uri) =>
+        fileSidebar.previewSourceAsset(origin.rowId, target, source.uri,
+          () => origin.active() && source.version === origin.version)
       const readHoverTargetPort = (
-        payload: HoverPreviewRequestPayload & {
-          verifiedSource?: { fsPath: string; version: number }
-          /** T05（#544）附加组件来源覆盖：会话已校验成员资格（面板文档或
-           *  已送达目标）的来源 fsPath——读取以该文档为解析语境（R-U02） */
-          resolvedSource?: { fsPath: string }
-        },
+        payload: AuthorizedHoverRead,
         report: (result: RefReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
@@ -3302,6 +3297,7 @@ export function createTextEditorProvider(
           // 在途抓取登记键（try 外声明：finally 清理与 try 内注册共用）
           const webFetchKey = `${document.uri.toString()}#${payload.instanceId}:${payload.reqId}`
           try {
+            const media = payload.workspaceFileId !== undefined ? fileSidebar.previewMedia(payload.workspaceFileId) : undefined
             let sourceDoc = document
             if (payload.source !== undefined) {
               if (!payload.verifiedSource || payload.verifiedSource.fsPath !== payload.source.sourceDocUri) {
@@ -3324,11 +3320,15 @@ export function createTextEditorProvider(
               }
             }
             const access = hoverAccessContextOf(sourceDoc)
+            const origin = payload.filePreviewOrigin
+            // 子引用已经过宿主全文版本及具体 occurrence 校验。
+            const resource = (uri: vscode.Uri) => media ??
+              (origin && access.rootFsPath !== linkCtx.rootDir ? sourceAsset(origin, sourceDoc, uri) : undefined)
             // #342（P3-10）外链抓取端口与取消注册：开关开（hover.external
             // Enabled）才提供 web 通道——关闭态解析层 unsupported，零网络
             // 请求；在途抓取登记取消句柄（hover.cancel → documentSession
             // 路由 → abort——同 URL 合并的最后消费者离开即断开底层连接）
-            const webEnabled = externalHoverEnabled()
+            const webEnabled = payload.verifiedWorkspaceFilePath === undefined && externalHoverEnabled()
             const webAbort = webEnabled ? new AbortController() : undefined
             if (webAbort !== undefined) {
               pendingWebFetches.set(webFetchKey, webAbort)
@@ -3414,7 +3414,12 @@ export function createTextEditorProvider(
                   const stat = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
                   // P2-6（#556 收口）：isFile 标记目录身份（directTarget
                   // 存在性核验的文件类型口径——目录不通过）
-                  return { mtimeMs: stat.mtime, isFile: (stat.type & vscode.FileType.File) !== 0 }
+                  const isFile = (stat.type & vscode.FileType.File) !== 0
+                  const imageAlias = isFile && isImageFileExtension(fsPath) && (media !== undefined || origin !== undefined)
+                  const version = imageAlias ? imageRefresh.versions.recordObservation(fsPath, {
+                    mtimeMs: stat.mtime, size: stat.size,
+                  }).generation : stat.mtime
+                  return { mtimeMs: version, isFile }
                 } catch {
                   return null
                 }
@@ -3442,7 +3447,7 @@ export function createTextEditorProvider(
                 return {
                   kind: 'ok' as const,
                   uri: appendImageVersionStamp(
-                    webviewPanel.webview.asWebviewUri(uri).toString(),
+                    webviewPanel.webview.asWebviewUri(resource(uri) ?? uri).toString(),
                     generation,
                   ),
                   version: generation,
@@ -3457,7 +3462,7 @@ export function createTextEditorProvider(
             // ——附件载荷由三期后续票登记）。
             // 旧三入口保留为兼容适配（测试与既有调用等价使用）
             outcome = await readRefContentTarget(
-              {
+              payload.verifiedWorkspaceFilePath !== undefined ? { directTarget: { fsPath: payload.verifiedWorkspaceFilePath } } : {
                 ...(payload.directTarget !== undefined ? { directTarget: payload.directTarget } : {}),
                 ...(payload.linkHref !== undefined ? { linkHref: payload.linkHref } : {}),
                 ...(payload.directTarget === undefined && payload.linkHref === undefined
@@ -3471,6 +3476,14 @@ export function createTextEditorProvider(
                 ...(webAbort !== undefined ? { web: { enabled: true } } : {}),
               },
             )
+            if (outcome.ok && outcome.content.kind === 'image') {
+              const alias = resource(vscode.Uri.file(outcome.fsPath))
+              if (alias) {
+                const { version } = outcome.content
+                outcome.content = { kind: 'image', version,
+                  src: appendImageVersionStamp(webviewPanel.webview.asWebviewUri(alias).toString(), version) }
+              }
+            }
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           } finally {
@@ -3485,17 +3498,37 @@ export function createTextEditorProvider(
       const resolveImage = async (
         src: string,
         sourceDocUri?: string,
+        origin?: FilePreviewOrigin,
       ): Promise<ImageResolution> => {
         // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳。
         // #220 来源化解析（悬停浮层 B 身份图片）：以 B 的目录/根边界构造
         // 上下文（同一 classifyImageTarget 白名单与 asWebviewUri 机制）；
         // 缺省 = 面板自身文档
+        const sourceCtx = sourceDocUri !== undefined ? linkContextOfPath(sourceDocUri) : linkCtx
+        let imageAlias: ((uri: vscode.Uri) => vscode.Uri | undefined) | undefined
+        if (origin?.active() && sourceDocUri !== undefined && sourceCtx.rootDir !== linkCtx.rootDir &&
+            classifyLocalRefContentKind(sourceDocUri) === 'markdown') {
+          const source = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceDocUri))
+          if (source.version === origin.version && origin.active()) {
+            let cache = previewImagePaths.get(source)
+            if (!cache || cache.version !== source.version || cache.root !== sourceCtx.rootDir) {
+              const text = source.getText()
+              cache = { version: source.version, root: sourceCtx.rootDir, paths: previewSourceImagePaths(
+                new NewlineCoordinator(text).toLfText(text), source.uri.fsPath, sourceCtx) }
+              previewImagePaths.set(source, cache)
+            }
+            const allowed = cache.paths
+            imageAlias = uri => isImageFileExtension(uri.fsPath) && allowed.has(imageFsKey(uri.fsPath, isWindowsHost))
+              ? sourceAsset(origin, source, uri) : undefined
+          }
+        }
         return resolveWorkspaceImage(
           src,
-          sourceDocUri !== undefined ? linkContextOfPath(sourceDocUri) : linkCtx,
+          sourceCtx,
           webviewPanel.webview,
           imageRefresh.versions,
           entry.session.getImageGeneration(),
+          imageAlias,
         )
       }
       const sessionId = entry.session.attachPanel({
@@ -3503,6 +3536,7 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
+        workspacePreviewTarget: fileSidebar.previewTarget,
         // #342（P3-10）悬停请求取消路由：webview hover.cancel → 在途 web
         // 抓取消费者中止（markdown 读取不可中止——迟到回包由既有配对守卫
         // 丢弃，行为不变）；key 与 readHoverTargetPort 的登记同构
@@ -3644,6 +3678,7 @@ export function createTextEditorProvider(
             payload.sourceDocUri !== undefined ? linkContextOfPath(payload.sourceDocUri) : linkCtx,
             document.uri.toString(),
             report,
+            fileSidebar.previewTarget,
           )
         },
         // #161 图片粘贴落盘端口：读设置快照 → 目录解析（URI path 空间）→
@@ -3682,7 +3717,26 @@ export function createTextEditorProvider(
       }
       const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
-        if (isWebviewToHost(message) && message.kind === 'ready') cancelDocNavRequests()
+        if (isWebviewToHost(message)) {
+          switch (message.kind) {
+            case 'ready':
+              cancelDocNavRequests()
+              fileSidebar.ready()
+              break
+            case 'workspaceFiles.toggle':
+            case 'workspaceFiles.refresh':
+            case 'workspaceFiles.collapseAll':
+            case 'workspaceFiles.resize':
+            case 'workspaceFiles.activate':
+            case 'workspaceFiles.closeTab':
+            case 'workspaceFiles.move':
+            case 'workspaceFiles.manage':
+            case 'workspaceFiles.action':
+            case 'workspaceFiles.create':
+              fileSidebar.request(message)
+              return
+          }
+        }
         // T02（#622）PDF 导出样式快照回包：面板级只读交互——provider 层拦截
         //（不进文档会话消息管线），分发给固定输入捕获的等待者
         if (isWebviewToHost(message) && message.kind === 'pdfExport.styleSnapshot.report') {
@@ -3910,9 +3964,8 @@ export function createTextEditorProvider(
                 `累计 ${hoverWatchRejected} 次`,
               )
             } else {
-              // B-1：text 目标的磁盘事件源按登记驱动建立（md/pdf/image
-              // 各有事件源，内部按扩展分类空操作）
-              ensureTextWatch(message.fsPath)
+              // 为工作区批量监听未覆盖的引用目标补单文件事件源。
+              ensureReferenceFileWatch(message.fsPath)
             }
           } else {
             void entry.session.handleWebviewMessage(message, sessionId)
@@ -4372,12 +4425,14 @@ export function createTextEditorProvider(
         maybeShowSearchRevealHint(document.uri)
       }
       const viewStateSub = webviewPanel.onDidChangeViewState((e) => {
+        fileSidebar.viewChanged()
         if (e.webviewPanel.active) {
           refreshActiveModeContext()
           maybeShowSearchRevealHint(document.uri)
         }
       })
       const closeSub = webviewPanel.onDidDispose(() => {
+        fileSidebar.dispose()
         cancelDocNavRequests()
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
@@ -4419,6 +4474,7 @@ export function createTextEditorProvider(
         enableScripts: true,
         localResourceRoots: [
           ...editorResourceRoots(context, document, snippets?.getState().directory ?? null),
+          ...workspaceFiles.mediaRoots(webviewPanel),
           ...addons?.editorResourceRoots() ?? [],
           ...entry.extraResourceRoots,
         ],
@@ -4785,6 +4841,7 @@ export function createTextEditorProvider(
                 enableScripts: true,
                 localResourceRoots: [
                   ...editorResourceRoots(context, entry.doc, state.directory),
+                  ...workspaceFiles.mediaRoots(panel),
                   ...grantedAddonRoots,
                   // #556 T3：与 refreshAddonPanels 同口径拼回绝对资源目录
                   ...entry.extraResourceRoots,
@@ -6487,6 +6544,7 @@ async function resolveWorkspaceImage(
   webview: vscode.Webview,
   versions: ImageVersionTable,
   generation: number,
+  sourceImageAlias?: (uri: vscode.Uri) => vscode.Uri | undefined,
 ): Promise<ImageResolution> {
   const target = classifyImageTarget(src, ctx)
   if (target.kind === 'blocked') {
@@ -6522,7 +6580,7 @@ async function resolveWorkspaceImage(
     // 戳 = 版本表观测代次 + 会话代次（两个单调失效源之和）：自动观测与
     // 手动刷新任一推进，和必增大——URI 换新即击穿 webview 资源缓存
     src: appendImageVersionStamp(
-      webview.asWebviewUri(uri).toString(),
+      webview.asWebviewUri((target.kind === 'workspace' && sourceImageAlias?.(uri)) || uri).toString(),
       observed + generation,
     ),
     fsPath: target.fsPath,

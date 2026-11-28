@@ -39,9 +39,9 @@ try {
     await page.addScriptTag({ path: output })
     await page.evaluate(() => window.initDoc('# 标题\n\n正文段。'))
 
-    // ---- DOM 序：齿轮、✎、附加组件槽（#360 T11，常驻空槽）、刷新嵌入资源、
-    //      PDF 导出、双态切换、侧栏、导出菜单浮层（隐藏态，恒为最后子元素）----
+    // ---- 双侧栏开关分居首尾，原有工具栏按钮相对顺序不变 ----
     assert.deepEqual(await page.evaluate(() => window.toolbarOrder()), [
+      'vsidian-file-sidebar-toggle',
       'vsidian-settings-toggle',
       'vsidian-quick-toggle',
       'vsidian-addon-toolbar-slot',
@@ -50,7 +50,7 @@ try {
       'vsidian-view-toggle',
       'vsidian-sidebar-toggle',
       'vsidian-pdf-export-menu',
-    ], '按钮序应为 齿轮、快速操作、附加组件槽、刷新嵌入资源、PDF 导出、双态切换、侧栏（+导出菜单浮层）')
+    ], '按钮序应为 左侧栏、齿轮、快速操作、附加组件槽、刷新、PDF 导出、双态切换、右侧栏（+导出菜单浮层）')
 
     // ---- PDF 导出菜单绘制层：默认不占位，点击后真实展开于工具栏内、右缘
     //      不越出工具栏，四个菜单项均可命中（样式注入失效时此断言失败）----

@@ -5,9 +5,11 @@
 // 清洗、载荷校验、保存过滤器）与 vscode API 解耦，node 单测直驱；执行壳
 // 由集成路径覆盖（先例 diagramExportHost / diagramExportValidate 分工）。
 import * as vscode from 'vscode'
+import { stat as localStat } from 'node:fs/promises'
 
 import { t } from '../shared/i18n'
 import { IMAGE_PASTE_LIMITS, type ImageExportFailReason, type ImageExportPayload } from '../shared/protocol'
+import { isImageFileExtension } from '../shared/imageRefresh'
 import { classifyImageTarget, type LinkContext } from './linkTarget'
 
 export interface ImageExportOutcome {
@@ -45,7 +47,9 @@ export function validateImageExportPayload(payload: ImageExportPayload): boolean
     payload.src.length > 0 &&
     typeof payload.fileName === 'string' &&
     payload.fileName.length > 0 &&
-    payload.fileName.length <= IMAGE_EXPORT_LIMITS.fileNameMaxChars
+    payload.fileName.length <= IMAGE_EXPORT_LIMITS.fileNameMaxChars &&
+    (payload.workspaceFileId === undefined || (typeof payload.workspaceFileId === 'string' &&
+      payload.workspaceFileId.length > 0 && payload.sourceDocUri === undefined))
   )
 }
 
@@ -71,6 +75,7 @@ export async function runImageExport(
   linkCtx: LinkContext,
   docUriStr: string,
   report: (outcome: ImageExportOutcome) => void,
+  resolveWorkspaceFile?: (id: string) => Promise<string | undefined>,
 ): Promise<void> {
   const finish = (outcome: ImageExportOutcome): void => {
     if (!outcome.ok && outcome.reason && outcome.reason !== 'cancelled') {
@@ -85,13 +90,29 @@ export async function runImageExport(
   // payload.src 与 image.request 同口径（webview 侧 normalizeImgSrc 解码
   // 一次后的身份，宿主不再 decode——否则双重解码与显示通道分叉，见
   // review-loops 轮 1）
-  const target = classifyImageTarget(payload.src, linkCtx)
-  if (target.kind !== 'workspace') {
-    // 外链/逃逸/空目标：webview 侧已禁用外链按钮，到达即异常载荷
-    finish({ ok: false, reason: 'invalid' })
-    return
+  let source: vscode.Uri
+  if (payload.workspaceFileId !== undefined) {
+    let fsPath: string | undefined
+    try {
+      fsPath = await resolveWorkspaceFile?.(payload.workspaceFileId)
+    } catch {
+      finish({ ok: false, reason: 'read-failed' })
+      return
+    }
+    if (!fsPath || !isImageFileExtension(fsPath)) {
+      finish({ ok: false, reason: 'not-found' })
+      return
+    }
+    source = vscode.Uri.file(fsPath)
+  } else {
+    const target = classifyImageTarget(payload.src, linkCtx)
+    if (target.kind !== 'workspace') {
+      // 外链/逃逸/空目标：webview 侧已禁用外链按钮，到达即异常载荷。
+      finish({ ok: false, reason: 'invalid' })
+      return
+    }
+    source = vscode.Uri.file(target.fsPath)
   }
-  const source = vscode.Uri.file(target.fsPath)
   let stat: vscode.FileStat
   try {
     stat = await vscode.workspace.fs.stat(source)
@@ -112,7 +133,8 @@ export async function runImageExport(
     finish({ ok: false, reason: 'read-failed' })
     return
   }
-  const fileName = sanitizeImageExportFileName(payload.fileName)
+  const fileName = sanitizeImageExportFileName(payload.workspaceFileId === undefined
+    ? payload.fileName : source.path.slice(source.path.lastIndexOf('/') + 1))
   const docUri = vscode.Uri.parse(docUriStr)
   const dir = documentDirPath(docUri.path)
   const defaultUri =
@@ -127,11 +149,28 @@ export async function runImageExport(
     finish({ ok: false, reason: 'cancelled' })
     return
   }
+  if (payload.workspaceFileId !== undefined && await sameLocalFile(source, target2)) {
+    finish({ ok: false, reason: 'invalid' })
+    return
+  }
   try {
     await vscode.workspace.fs.writeFile(target2, data)
     finish({ ok: true })
   } catch {
     finish({ ok: false, reason: 'writeFailed' })
+  }
+}
+
+/** 文件栏预览只允许另存副本；大小写、符号链接和硬链接不应绕过原图保护。 */
+async function sameLocalFile(source: vscode.Uri, destination: vscode.Uri): Promise<boolean> {
+  if (destination.scheme !== 'file') return false
+  const key = (p: string) => process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p
+  if (key(source.fsPath) === key(destination.fsPath)) return true
+  try {
+    const [a, b] = await Promise.all([localStat(source.fsPath, { bigint: true }), localStat(destination.fsPath, { bigint: true })])
+    return a.ino !== 0n && a.ino === b.ino && a.dev === b.dev
+  } catch {
+    return false
   }
 }
 

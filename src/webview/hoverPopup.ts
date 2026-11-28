@@ -58,7 +58,7 @@ import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './ima
 import { GRAPHIC_CHROME_CLASS_NAMES, buildImageChrome } from './graphicBlockChrome'
 import { openImagePopup } from './imagePopup'
 import { isImageFileExtension } from '../shared/imageRefresh'
-import { classifyLocalRefContentKind, refEmbedTargetIsImage } from '../shared/refContent'
+import { classifyLocalRefContentKind, refEmbedTargetIsImage, type LocalRefContentKind } from '../shared/refContent'
 import {
   RefContentInstance,
   isRefLoadedMarkdown,
@@ -195,6 +195,7 @@ function anchorIsWikilink(anchor: HTMLElement): boolean {
  *  即类型）。锚点（`#` 后段）与普通链接 fragment 均不参与判定；预判
  *  失手（回包 contentKind 与形态不符）按「不可应用的回包」防御处理 */
 export function hoverSpecIsPdfTarget(spec: HoverPopupTargetSpec): boolean {
+  if (spec.workspaceFile) return spec.workspaceFile.kind === 'pdf'
   const raw = spec.directFsPath !== undefined
     ? spec.directFsPath
     : spec.linkHref !== undefined
@@ -221,6 +222,8 @@ export interface HoverPopupTargetSpec {
   directFsPath?: string
   /** 面板直接目标锚点（标题原文或 ^块id；缺省/空串 = 全文） */
   directAnchor?: string
+  /** 文件侧栏：ID 交由宿主解析，kind 只用于预选现有渲染器。该入口始终只读。 */
+  workspaceFile?: { id: string; kind: LocalRefContentKind; sidebar: HTMLElement }
   /** 父文档内引用区间（LF 偏移；面板反链条目的引用区间在来源文档而非
    *  当前文档，给 0/0 中性值） */
   sourceStart: number
@@ -284,6 +287,7 @@ export function hoverPopupSpecOfAnchor(
  * 授权的类型依据——权威类型是宿主回包 contentKind。
  */
 function isTextHoverTarget(spec: HoverPopupTargetSpec): boolean {
+  if (spec.workspaceFile) return spec.workspaceFile.kind === 'text'
   const raw = spec.directFsPath ?? spec.linkHref ?? spec.target
   if (raw === '') {
     return false
@@ -332,6 +336,7 @@ export interface HoverPreviewContext {
 }
 
 interface HoverPopupState {
+  snapshotScroll?: { scroller: HTMLElement; top: number }
   instanceId: string
   reqId: number
   anchor: HTMLElement
@@ -860,6 +865,7 @@ function position(state: HoverPopupState): void {
     },
     viewport: { width: window.innerWidth, height: window.innerHeight },
     size: { width, height },
+    rightOf: state.spec.workspaceFile?.sidebar.getBoundingClientRect().right,
   })
   state.container.style.left = `${placement.left}px`
   state.container.style.top = `${placement.top}px`
@@ -923,6 +929,7 @@ interface HoverPopupOpenOptions {
  * 根会话（无内部模式切换语义），以纯 Reading 形态开浮层）。
  */
 function hoverSpecTargetsImage(spec: HoverPopupTargetSpec): boolean {
+  if (spec.workspaceFile) return spec.workspaceFile.kind === 'image'
   if (spec.directFsPath !== undefined) {
     // 空串 fsPath = 断链条目（not-found 分态照常走文档通道）
     return spec.directFsPath !== '' && isImageFileExtension(spec.directFsPath)
@@ -1039,13 +1046,14 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // 否则 instanceId（纯 Reading 形态）；闭包晚绑定——mountPopupRoot 结果
   // 出来后赋值
   let embedParentIdentity = instanceId
+  const readOnly = spec.workspaceFile !== undefined || options?.addon !== undefined
   const mountOptions = {
     contentEl, scrollEl, strategy: 'virtual' as const,
     session: () => ctx.session(),
     send: (message: WebviewToHost) => ctx.send(message),
     codeHighlight: () => ctx.codeHighlight?.() ?? true,
     onEmbedBlockMounted: (block: HTMLElement, target: RefLoadedContent) =>
-      ctx.mountEmbedChild?.(embedParentIdentity, block, target, options?.addon !== undefined),
+      ctx.mountEmbedChild?.(embedParentIdentity, block, target, readOnly),
     onEmbedBlockUnmounted: (block: HTMLElement) => ctx.unmountEmbedChild?.(block),
   }
   // #340（P3-08）text 目标预判（扩展名本地分类）：非权威——权威类型由
@@ -1062,8 +1070,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // #337（P3-05）PDF 形态同样恒不接入（只读内容无编辑语义）
   const targetsImage = hoverSpecTargetsImage(spec)
   const rootKey = hoverRootKey(spec)
-  // API 引用不接可写根会话，不能继承父 Live 或驻留模式覆盖。
-  const mounted = options?.addon !== undefined || targetsImage || pdfForm || textTarget
+  // 文件条目和 API 引用都不接可写根会话，不能继承父 Live 或驻留模式覆盖。
+  const mounted = readOnly || targetsImage || pdfForm || textTarget
     ? null
     : ctx.mountPopupRoot?.({
       key: rootKey,
@@ -1388,7 +1396,21 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // 等程序性滚动）与 P2-06 dirty Live 同豁免（键盘模态先例：保持浮层驻留，
   // 不重贴锚——普通条件恢复后按常规重定位）
   const onScroll = (event: Event): void => {
-    if (popup && event.target instanceof Node && !popup.container.contains(event.target) &&
+    const scroller = event.target
+    if (popup?.spec.workspaceFile && scroller instanceof HTMLElement &&
+      popup.spec.workspaceFile.sidebar.contains(scroller) && scroller.contains(popup.anchor)) {
+      const snapshot = popup.snapshotScroll
+      popup.snapshotScroll = undefined
+      const visible = anchorInScroller(popup.anchor, scroller)
+      if (snapshot?.scroller === scroller && snapshot.top === scroller.scrollTop) {
+        if (visible) position(popup)
+        return
+      }
+      if (!visible) closeHoverPopup()
+      else position(popup)
+      return
+    }
+    if (popup && scroller instanceof Node && !popup.container.contains(scroller) &&
       !keyboardKeepAlive() && !editorFocusKeepAlive() && !liveKeepAlive()) {
       closeHoverPopup()
     }
@@ -1460,15 +1482,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     sourceEnd: spec.sourceEnd,
     target: spec.target,
     ...(state.addon !== null ? { addonSource: state.addon.source } : {}),
-    ...(spec.linkHref !== undefined ? { linkHref: spec.linkHref } : {}),
-    ...(spec.directFsPath !== undefined
-      ? {
-          directTarget: {
-            fsPath: spec.directFsPath,
-            ...(spec.directAnchor ? { anchor: spec.directAnchor } : {}),
-          },
-        }
-      : {}),
+    ...hoverRequestTargetOf(spec),
   })
   return instanceId
 }
@@ -1658,6 +1672,20 @@ export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
   if (popup && scope.contains(popup.anchor)) {
     closeHoverPopup()
   }
+}
+
+function anchorInScroller(anchor: HTMLElement, scroller: HTMLElement): boolean {
+  const row = anchor.getBoundingClientRect()
+  const viewport = scroller.getBoundingClientRect()
+  return row.bottom > viewport.top && row.top < viewport.bottom
+}
+
+export function repositionHoverPopupIfAnchorWithin(scope: ParentNode, scrollers: readonly HTMLElement[]): void {
+  if (!popup || !scope.contains(popup.anchor)) return
+  const scroller = scrollers.find(el => el.contains(popup!.anchor))
+  if (scroller) popup.snapshotScroll = { scroller, top: scroller.scrollTop }
+  // 快照为了对齐当前文件而滚走非当前锚点时，保留卡片原位及选择现场。
+  if (!scroller || anchorInScroller(popup.anchor, scroller)) position(popup)
 }
 
 /** #221/#224 内容应用（成功回包 / 同实例刷新共用入口）：**不重置
@@ -1883,7 +1911,10 @@ function applyHoverImageContent(
   frame.appendChild(img)
   const popupSrc = loaded.src
   frame.appendChild(buildImageChrome(frame, {
-    onPopup: () => { openImagePopup(popupSrc, '') },
+    onPopup: () => {
+      const file = state.spec.workspaceFile
+      openImagePopup(popupSrc, '', undefined, file ? { id: file.id, name: state.target } : undefined)
+    },
   }))
   // 挂 scrollEl 层（contentEl 由虚拟视图全权重建——updateNow 会清外来
   // 子节点；空 Reading 容器零高度不干扰布局）
@@ -1940,16 +1971,16 @@ function requestReload(state: HoverPopupState, silent: boolean): void {
     sourceEnd: state.spec.sourceEnd,
     target: state.spec.target,
     ...(state.addon !== null ? { addonSource: state.addon.source } : {}),
-    ...(state.spec.linkHref !== undefined ? { linkHref: state.spec.linkHref } : {}),
-    ...(state.spec.directFsPath !== undefined
-      ? {
-          directTarget: {
-            fsPath: state.spec.directFsPath,
-            ...(state.spec.directAnchor ? { anchor: state.spec.directAnchor } : {}),
-          },
-        }
-      : {}),
+    ...hoverRequestTargetOf(state.spec),
   })
+}
+
+function hoverRequestTargetOf(spec: HoverPopupTargetSpec) {
+  if (spec.workspaceFile) return { workspaceFileId: spec.workspaceFile.id }
+  if (spec.directFsPath !== undefined) {
+    return { directTarget: { fsPath: spec.directFsPath, ...(spec.directAnchor ? { anchor: spec.directAnchor } : {}) } }
+  }
+  return spec.linkHref !== undefined ? { linkHref: spec.linkHref } : {}
 }
 
 /** #224 登记目标订阅（成功装载后；目标身份变化先释放旧订阅）。P2-06：

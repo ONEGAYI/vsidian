@@ -33,6 +33,8 @@ export interface HoverPopupPlacementInput {
   viewport: { width: number; height: number }
   /** 期望尺寸（自然尺寸或上限；实际可能收缩） */
   size: { width: number; height: number }
+  /** 侧栏入口优先放在栏边之外，以便连续扫过相邻条目。 */
+  rightOf?: number
 }
 
 /** 摆放结果（取整后的 px 坐标与最终尺寸） */
@@ -52,6 +54,14 @@ export function planHoverPopupPlacement(input: HoverPopupPlacementInput): HoverP
   const width = Math.max(1, Math.min(input.size.width, viewport.width - 2 * margin))
   // 垂直：期望高度先钳到可用视口高，再按上下空间翻转/收缩
   const desiredHeight = Math.min(input.size.height, viewport.height - 2 * margin)
+  if (input.rightOf !== undefined && input.rightOf + gap + width <= viewport.width - margin) {
+    return {
+      left: Math.round(input.rightOf + gap),
+      top: Math.round(Math.max(margin, Math.min(anchor.top, viewport.height - margin - desiredHeight))),
+      width: Math.round(width),
+      height: Math.round(desiredHeight),
+    }
+  }
   const belowTop = anchor.bottom + gap
   const aboveTop = anchor.top - gap - desiredHeight
   const fitsBelow = belowTop + desiredHeight <= viewport.height - margin

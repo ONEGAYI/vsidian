@@ -74,6 +74,7 @@ vsidian/
     │   │   ├── pdfOutlineWrite.ts      # 书签写入 pdf-lib
     │   │   ├── pdfRemoteAdapter.ts     # PDF 远端会话适配器
     │   │   └── pdfRemoteTestHooks.ts   # remote e2e 钩子标记
+    │   ├── previewSourceImages.ts        # 预览图片来源验证
     │   ├── proxyAgent.ts                 # 外链抓取代理接入（CONNECT 隧道）
     │   ├── refEditPorts.ts               # 引用编辑端口绑定注册表
     │   ├── searchReveal.ts               # 搜索定位恢复纯逻辑（#318）
@@ -100,7 +101,8 @@ vsidian/
     │   ├── wikilinkBlockIdCoordinator.ts # 块 ID 撤回协调器
     │   ├── wikilinkBlockSource.ts        # 块联想宿主查询编排
     │   ├── wikilinkHeadingSource.ts      # 标题联想宿主查询编排
-    │   └── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
+    │   ├── wikilinkTarget.ts             # 宿主侧双链目标解析纯逻辑（#11）
+    │   └── workspaceFilesSidebar.ts      # 左栏文件管理宿主
     ├── pdfExecutor/ # PDF 本机执行端扩展
     │   ├── extension.ts     # PDF 执行端扩展入口
     │   ├── package.json     # PDF 执行端清单模板
@@ -386,6 +388,8 @@ vsidian/
         ├── wikilinkSuggest.css           # 联想候选浮层样式
         ├── wikilinkSuggest.ts            # 双链联想候选会话（含转阶段）
         ├── wordMotion.ts                 # 词级移动命令与引擎配置
-        └── wordSegmentSettings.ts        # 设置页中文分词分页
+        ├── wordSegmentSettings.ts        # 设置页中文分词分页
+        ├── workspaceFilesLayout.ts       # 文件侧栏宽高分隔条
+        └── workspaceFilesView.ts         # 左栏文件与标签视图
 <!-- file-tree:tree^id=src:end -->
 ```

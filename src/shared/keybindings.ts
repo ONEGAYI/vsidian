@@ -120,6 +120,7 @@ export const UI_OPERATIONS = [
   // 次归一，非规范序（此前的 meta+shift+v）永不匹配 keyStep 事件派生串
   { id: 'pastePlain', command: 'onegayi.vsidian.clipboard.pastePlain', titleKey: 'command.clipboard.pastePlain.title', mode: 'live', writes: true, defaults: ['ctrl+shift+v', 'shift+meta+v'] },
   { id: 'sidebarToggle', command: 'onegayi.vsidian.ui.sidebarToggle', titleKey: 'command.ui.sidebarToggle.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'workspaceFilesToggle', command: 'onegayi.vsidian.ui.workspaceFilesToggle', titleKey: 'command.ui.workspaceFilesToggle.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineToggle', command: 'onegayi.vsidian.ui.outlineToggle', titleKey: 'command.ui.outlineToggle.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineSearch', command: 'onegayi.vsidian.ui.outlineSearch', titleKey: 'command.ui.outlineSearch.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineJumpBottom', command: 'onegayi.vsidian.ui.outlineJumpBottom', titleKey: 'command.ui.outlineJumpBottom.title', mode: 'both', writes: false, defaults: [] },

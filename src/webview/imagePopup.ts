@@ -13,12 +13,13 @@
 //   承担（正文已装载的地址直接复用，不重新请求字节）。
 // - 工具条五钮：缩放（−/标签/+）/ 重置 / 刷新 / 导出 / 关闭。「刷新」按
 //   当前文档重定位该图（rawSrc 仍在文档中才算定位到）后走 image.invalidate
-//   单源失效重取；定位不到（图被删/改写）维持快照。导出经宿主字节级拷贝
+//   单源失效重取；定位不到（图被删/改写）维持快照。侧栏图片直接重读文件别名。
+//   导出经宿主字节级拷贝
 //   （image.export 消息对），外链图禁用 + 悬停提示。
 //
 // 零写回：点击/hover/开关弹窗/刷新/导出均不触碰文档与撤销栈。
 import { t } from '../shared/i18n'
-import { IMAGE_PASTE_LIMITS } from '../shared/protocol'
+import { IMAGE_PASTE_LIMITS, type ImageExportPayload } from '../shared/protocol'
 import { isDirectImageSrc, normalizeImgSrc, type ImageResourceManager } from './imageResource'
 import { closeDiagramPopup, DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
 import { claimPopup, releasePopup } from './popupMutex'
@@ -38,6 +39,8 @@ import {
 export const IMAGE_POPUP_EXPORT_CLASS = 'vsidian-diagram-export-image'
 
 /** 装配上下文（syncController.mount 注入，dispose 清空） */
+type ImagePopupExportRequest = Pick<ImageExportPayload, 'reqId' | 'src' | 'fileName' | 'workspaceFileId'>
+
 export interface ImagePopupContext {
   images: ImageResourceManager
   /** 当前文档全文（刷新的重定位数据源；live CM6 state 是文本权威） */
@@ -45,7 +48,7 @@ export interface ImagePopupContext {
   /** 外链判定（与 ImageResourceManager.isDirectSrc 同源正则） */
   isDirectSrc: (src: string) => boolean
   /** 导出出站（宿主侧补 sessionId/docUri 后走 image.export） */
-  sendExport: (req: { reqId: number; src: string; fileName: string }) => void
+  sendExport: (req: ImagePopupExportRequest) => void
 }
 
 /** P2-11（#288）图片弹窗实例上下文（打开时捕获的调用实例资源身份）：
@@ -56,7 +59,7 @@ export interface ImagePopupContext {
 export interface ImagePopupSource {
   images: ImageResourceManager
   docSource: () => string | null
-  sendExport: (req: { reqId: number; src: string; fileName: string }) => void
+  sendExport: (req: ImagePopupExportRequest) => void
 }
 
 let context: ImagePopupContext | null = null
@@ -156,6 +159,7 @@ export function locateImageOccurrence(doc: string, rawSrc: string): boolean {
 
 /** 导出请求序号（会话面板内自增；sessionId/docUri 由装配层补齐） */
 let exportReqSeq = 0
+let workspaceImageRefreshSeq = 0
 
 interface ImagePopupState {
   overlay: HTMLElement
@@ -169,6 +173,7 @@ interface ImagePopupState {
    *  全局 context 变化不影响已开弹窗，关闭 detach 用同一管理器） */
   ctx: ImagePopupContext
   rawSrc: string
+  workspaceImage: boolean
   intrinsic: { w: number; h: number }
   transform: PopupTransform
   prevFocus: HTMLElement | null
@@ -233,6 +238,15 @@ function fitToStage(p: ImagePopupState): void {
  *  docSource（嵌入内部 Live 按 B 全文，不读主正文） */
 function refreshImage(p: ImagePopupState): void {
   const ctx = p.ctx
+  if (p.workspaceImage && ctx.isDirectSrc(p.rawSrc)) {
+    // 只刷新宿主已签发的文件别名（授权按 URI 路径重验），不用正文找图。
+    // 查询串换代绕过 Webview 缓存，原 URI 路径与导出的文件身份保持不变。
+    const url = new URL(p.rawSrc)
+    url.searchParams.set('vsidianFileRefresh', `${Date.now()}-${++workspaceImageRefreshSeq}`)
+    ctx.images.detach(p.img)
+    ctx.images.attach(p.img, url.href)
+    return
+  }
   const doc = ctx.docSource()
   if (doc === null || !locateImageOccurrence(doc, p.rawSrc)) {
     return
@@ -289,7 +303,8 @@ function wrapExportHint(btn: HTMLButtonElement): HTMLElement {
  *  定位与导出消息共用同一身份。
  *  P2-11：source 为打开时捕获的实例上下文（嵌入内部 Live 的弹窗按 B 身份
  *  装载/刷新/导出）；缺省回落全局 context（主正文/阅读侧不变） */
-export function openImagePopup(rawSrc: string, alt: string, source?: ImagePopupSource): void {
+export function openImagePopup(rawSrc: string, alt: string, source?: ImagePopupSource,
+  workspaceFile?: { id: string; name: string }): void {
   const global = context
   if (!global && !source) {
     return
@@ -347,6 +362,7 @@ export function openImagePopup(rawSrc: string, alt: string, source?: ImagePopupS
     img,
     ctx,
     rawSrc,
+    workspaceImage: workspaceFile !== undefined,
     intrinsic: POPUP_FALLBACK_SIZE,
     transform: { scale: 1, panX: 0, panY: 0 },
     prevFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,
@@ -356,6 +372,7 @@ export function openImagePopup(rawSrc: string, alt: string, source?: ImagePopupS
   // 导出钮：外链（http/https 直连）禁用——无宿主可寻址的工作区文件，不做
   // 网络下载（规格明确排除）。disabled 按钮不派发鼠标事件（悬停 title 无
   // 从显示），外层 span 承担悬停提示（规格「禁用 + 悬停提示」）
+  const external = workspaceFile === undefined && ctx.isDirectSrc(rawSrc)
   const exportBtn = toolbarButton(
     IMAGE_POPUP_EXPORT_CLASS,
     t('graphic.popupExportImage'),
@@ -364,12 +381,14 @@ export function openImagePopup(rawSrc: string, alt: string, source?: ImagePopupS
       ctx.sendExport({
         reqId: ++exportReqSeq,
         src: rawSrc,
-        fileName: suggestImageExportFileName(rawSrc),
+        fileName: workspaceFile && workspaceFile.name.length <= IMAGE_EXPORT_FILE_NAME_MAX
+          ? workspaceFile.name : suggestImageExportFileName(rawSrc),
+        ...(workspaceFile !== undefined ? { workspaceFileId: workspaceFile.id } : {}),
       })
     },
-    ctx.isDirectSrc(rawSrc),
+    external,
   )
-  const exportHost = ctx.isDirectSrc(rawSrc) ? wrapExportHint(exportBtn) : exportBtn
+  const exportHost = external ? wrapExportHint(exportBtn) : exportBtn
   toolbar.append(
     toolbarButton(DIAGRAM_POPUP_CLASS_NAMES.zoomOut, t('graphic.popupZoomOut'), TB_ICON.minus, () =>
       zoomBy(state, 1 / POPUP_ZOOM_STEP)),

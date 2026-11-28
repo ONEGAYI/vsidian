@@ -58,7 +58,7 @@ const PAYLOAD = {
 } as const
 type Outcome = { ok: boolean; reason?: string }
 
-async function run(payload: unknown = PAYLOAD): Promise<Outcome> {
+async function run(payload: unknown = PAYLOAD, resolveFile?: (id: string) => Promise<string | undefined>): Promise<Outcome> {
   const outcomes: Outcome[] = []
   await runImageExport(
     payload as never,
@@ -67,6 +67,7 @@ async function run(payload: unknown = PAYLOAD): Promise<Outcome> {
     (o) => {
       outcomes.push(o)
     },
+    resolveFile,
   )
   expect(outcomes).toHaveLength(1)
   return outcomes[0]!
@@ -115,6 +116,34 @@ describe('imageExportFilters', () => {
 })
 
 describe('runImageExport 分支矩阵', () => {
+  it('以文件栏条目定位本地原图，而不是使用 HTTPS 显示 URL', async () => {
+    const original = 'D:/other/image #.png'
+    const copy = { scheme: 'file', fsPath: 'D:/copy.png' }
+    const bytes = Uint8Array.of(1, 2, 3)
+    const resolve = vi.fn().mockResolvedValue(original)
+    statMock.mockResolvedValue({ type: 1, size: bytes.length })
+    readFileMock.mockResolvedValue(bytes)
+    showSaveDialogMock.mockResolvedValue(copy)
+    const msg = { ...PAYLOAD, workspaceFileId: 'picture-row', src: 'https://local-resource.example/display.png' }
+    expect(await run(msg, resolve)).toEqual({ ok: true })
+    expect(resolve).toHaveBeenCalledWith('picture-row')
+    expect(readFileMock).toHaveBeenCalledWith(expect.objectContaining({ fsPath: original }))
+    expect(showSaveDialogMock.mock.calls[0]![0].defaultUri.path).toMatch(/image #\.png$/)
+    expect(writeFileMock).toHaveBeenCalledExactlyOnceWith(copy, bytes)
+    writeFileMock.mockClear()
+    showSaveDialogMock.mockResolvedValue({ scheme: 'file', fsPath: original })
+    expect(await run(msg, resolve)).toEqual({ ok: false, reason: 'invalid' })
+    expect(writeFileMock).not.toHaveBeenCalled()
+  })
+
+  it('失效或非图片条目不能用显示 URL 回退导出', async () => {
+    const msg = { ...PAYLOAD, workspaceFileId: 'missing-row' }
+    expect(await run(msg, async () => undefined)).toEqual({ ok: false, reason: 'not-found' })
+    expect(await run(msg, async () => '/notes/not-image.md')).toEqual({ ok: false, reason: 'not-found' })
+    expect(readFileMock).not.toHaveBeenCalled()
+    expect(showSaveDialogMock).not.toHaveBeenCalled()
+  })
+
   it('非法载荷 → invalid', async () => {
     expect(await run({ src: '', fileName: 'x.png', reqId: 1 })).toEqual({ ok: false, reason: 'invalid' })
     expect(errorMessageMock).toHaveBeenCalledTimes(1)

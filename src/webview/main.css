@@ -545,6 +545,7 @@ body.vscode-light #app {
    公开变量入口（外部片段可覆盖）：--vsidian-sidebar-width（侧栏宽）/
    --vsidian-toolbar-height（两侧顶栏高度，取同一值保证对齐）。 */
 #app .vsidian-body {
+  --_vsidian-file-sidebar-available: max(0px, calc(100vw - var(--_vsidian-file-sidebar-reserved, 224px)));
   display: flex;
   height: 100%;
   min-width: 0;
@@ -556,6 +557,322 @@ body.vscode-light #app {
   display: flex;
   flex-direction: column;
 }
+
+/* 两侧使用同一左栏占宽；窄窗覆盖模式只覆盖左栏自身的上限。 */
+#app .vsidian-body > :is(.vsidian-file-sidebar, .vsidian-sidebar) {
+  --_vsidian-file-sidebar-width: min(var(--_vsidian-file-sidebar-requested-width, 280px), var(--_vsidian-file-sidebar-available));
+}
+
+/* 文件侧栏：与右栏共享 280px 默认档和顶栏高度，不改右栏的变量或结构。 */
+#app .vsidian-file-sidebar {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 0;
+  max-width: var(--_vsidian-file-sidebar-available);
+  overflow: hidden;
+  visibility: hidden;
+  color: var(--vscode-sideBar-foreground, var(--vscode-editor-foreground));
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  transition: width 0.15s ease-out;
+}
+
+#app .vsidian-file-sidebar-open .vsidian-file-sidebar {
+  width: var(--_vsidian-file-sidebar-width);
+  visibility: visible;
+  border-inline-end: 1px solid var(--vscode-panel-border);
+}
+
+/* 像右栏一样只裁开合动画的外壳。行宽若随外壳暂时压成零，行尾按钮会
+   折到下一行，首帧按这份高度定位会在动画结束后滚过当前文件。 */
+#app .vsidian-file-sidebar > :not(.vsidian-file-resizer-width) {
+  box-sizing: border-box;
+  width: calc(var(--_vsidian-file-sidebar-width) - 1px);
+}
+
+/* 两栏同开时先保留主工具栏的位置，单开右栏保持其原有拖宽契约。 */
+#app .vsidian-file-sidebar-open.vsidian-sidebar-open {
+  --_vsidian-file-sidebar-reserved: 404px; /* 主区 224px + 右栏至少 180px */
+}
+
+#app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar {
+  max-width: max(0px, calc(100% - var(--_vsidian-file-sidebar-width) - 224px));
+}
+
+#app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar > :is(
+  .vsidian-sidebar-toolbar, .vsidian-sidebar-panel, .vsidian-outline-toolbar, .vsidian-outline-slider
+) {
+  max-width: 100%;
+}
+
+@media (max-width: 700px) {
+  #app .vsidian-file-sidebar {
+    --_vsidian-file-sidebar-available: 85vw;
+    position: absolute;
+    inset-block: var(--vsidian-toolbar-height, 30px) 0;
+    inset-inline-start: 0;
+    z-index: 1;
+  }
+
+  #app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar {
+    max-width: max(0px, calc(100% - 224px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app .vsidian-file-sidebar { transition: none; }
+}
+
+#app .vsidian-file-sidebar.vsidian-file-sidebar-resizing {
+  transition: none;
+}
+
+.vsidian-file-resizer {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+}
+
+.vsidian-file-resizer-width {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 6px;
+  z-index: 1;
+  cursor: col-resize;
+}
+
+.vsidian-file-resizer-height {
+  flex: 0 0 7px;
+  cursor: row-resize;
+}
+
+.vsidian-file-resizer::before {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+
+.vsidian-file-resizer-width::before {
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 2px;
+}
+
+.vsidian-file-resizer-height::before {
+  inset-inline: 0;
+  inset-block-start: 3px;
+  height: 1px;
+  background: var(--vscode-panel-border);
+}
+
+.vsidian-file-resizer:is(:hover, :focus-visible, .vsidian-file-resizer-active)::before {
+  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+.vsidian-file-resizer:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.vsidian-file-resizer-height:is(:hover, :focus-visible, .vsidian-file-resizer-active)::before {
+  height: 2px;
+}
+
+.vsidian-file-sidebar-header {
+  display: flex;
+  flex: 0 0 var(--vsidian-toolbar-height, 30px);
+  align-items: center;
+  gap: 2px;
+  padding-inline: 12px 8px;
+  box-shadow: inset 0 -1px var(--vscode-panel-border);
+}
+
+.vsidian-file-sidebar-header > span {
+  flex: 1;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.vsidian-file-sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.vsidian-file-sidebar ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vsidian-file-opened {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 62vh;
+  padding: 6px;
+}
+
+.vsidian-file-opened[hidden] { display: none; }
+
+.vsidian-file-opened ul {
+  height: var(--_vsidian-file-opened-height, auto);
+  max-height: var(--_vsidian-file-opened-height, min(144px, 24vh));
+  min-height: 0;
+  overflow: auto;
+}
+
+.vsidian-file-opened h2 {
+  flex: none;
+  margin: 4px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+}
+
+.vsidian-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.vsidian-file-action,
+.vsidian-file-entry {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.vsidian-file-action {
+  flex: 0 0 26px;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+}
+
+.vsidian-file-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.vsidian-file-entry {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 24px;
+  gap: 5px;
+  padding-inline: 6px;
+  font-size: 13px;
+  text-align: start;
+}
+
+.vsidian-file-root { font-weight: 600; }
+
+.vsidian-file-entry:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-list-hoverForeground, inherit);
+}
+
+.vsidian-file-entry[aria-current='page'] {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.vsidian-file-tree .vsidian-file-entry.vsidian-file-drop-target {
+  background: var(--vscode-list-dropBackground, var(--vscode-list-activeSelectionBackground));
+}
+
+.vsidian-file-opened .vsidian-file-row { position: relative; }
+
+.vsidian-file-opened .vsidian-file-entry { padding-inline-end: 28px; }
+
+.vsidian-file-opened .vsidian-file-preview-tab .vsidian-file-name { font-style: italic; }
+
+.vsidian-file-opened .vsidian-file-row .vsidian-file-close {
+  position: absolute;
+  inset-block-start: 1px;
+  inset-inline-end: 0;
+  width: 22px;
+  pointer-events: none;
+}
+
+.vsidian-file-opened .vsidian-file-row:is(:hover, :focus-within) .vsidian-file-close {
+  pointer-events: auto;
+}
+
+.vsidian-file-opened .vsidian-file-row:has(.vsidian-file-entry[aria-current='page']) .vsidian-file-close {
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.vsidian-file-action:not(:disabled):hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.vsidian-file-action:focus-visible,
+.vsidian-file-entry:focus-visible,
+.vsidian-toolbar .vsidian-file-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
+}
+
+.vsidian-file-row .vsidian-file-action {
+  flex-basis: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.vsidian-file-row:is(:hover, :focus-within) .vsidian-file-action {
+  opacity: 1;
+}
+
+.vsidian-file-sidebar svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.vsidian-file-sidebar .vsidian-file-chevron { width: 12px; height: 12px; }
+.vsidian-file-entry[aria-expanded='true'] .vsidian-file-chevron { transform: rotate(90deg); }
+.vsidian-file-chevron-spacer { visibility: hidden; }
+
+.vsidian-file-name,
+.vsidian-file-detail {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vsidian-file-detail {
+  max-width: 55%;
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.vsidian-file-status {
+  padding: 8px 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.vsidian-file-row-status { flex-basis: 100%; }
 
 #app .vsidian-sidebar {
   display: flex;
@@ -673,7 +990,7 @@ body.vscode-light #app {
   cursor: col-resize;
 }
 
-/* 主编辑区顶栏（#53 图标化）：左端齿轮设置入口 + 右端侧栏切换按钮，
+/* 主编辑区顶栏：左端文件侧栏切换按钮 + 齿轮设置入口，右端侧栏切换按钮，
    高度与侧栏顶栏共用同一变量（对齐）。position:relative 作 PDF 导出下拉
    菜单的定位基准（菜单是工具栏的绝对定位子元素） */
 #app .vsidian-toolbar {
@@ -1048,6 +1365,14 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 #app .vsidian-body.vsidian-sidebar-open .vsidian-toolbar .vsidian-sidebar-toggle .vsidian-sidebar-icon-bar {
+  stroke-width: 3px;
+}
+
+.vsidian-file-sidebar-toggle :is(.vsidian-file-sidebar-icon-frame, .vsidian-file-sidebar-icon-bar) {
+  stroke-width: 1.5px;
+}
+
+.vsidian-file-sidebar-toggle[aria-expanded='true'] .vsidian-file-sidebar-icon-bar {
   stroke-width: 3px;
 }
 

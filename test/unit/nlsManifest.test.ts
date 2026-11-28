@@ -68,8 +68,9 @@ describe('manifest NLS：package.json 引用契约', () => {
     // + #638 跳转到行 + #655 切换当前 callout 折叠（Callout T04）
     // + #656 Callout 源文操作两命令（插入/转换、修改当前类型——Callout T05）
     // + VSCode 编辑器操作六命令（按行滚动上下 / 上下插入空行 / 上下移动当前行）
+    // + #330 左侧文件栏开关一命令
     //  ——新增/删减命令须同步本断言）
-    expect(commands.length).toBe(120)
+    expect(commands.length).toBe(121)
     const literal = commands.filter((c) => !/^%.+%$/.test(c.title))
     expect(
       literal.map((c) => `${c.command}: ${c.title}`),

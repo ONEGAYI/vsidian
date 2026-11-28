@@ -399,6 +399,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.ui.workspaceFilesToggle",
+        "title": "%command.ui.workspaceFilesToggle.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.outlineToggle",
         "title": "%command.ui.outlineToggle.title%",
         "category": "Vsidian"

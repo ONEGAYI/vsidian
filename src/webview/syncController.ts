@@ -39,7 +39,7 @@ import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
-import { PDF_ZOOM_STEP } from './pdfRender'
+import { HOVER_PDF_CLASS_NAMES, PDF_ZOOM_STEP } from './pdfRender'
 import { KeybindingRouter } from './keybindingRouter'
 import {
   applyHeadingFoldOperation,
@@ -113,6 +113,7 @@ import {
   type OutlinkItemPayload,
   type OutlinksProbe,
   type PaintProbe,
+  type WorkspaceFileEntry,
   type ReadingSyntaxProbe,
   type SidebarProbe,
   type TypographyInheritSample,
@@ -149,6 +150,7 @@ import {
 import { onLocaleChanged, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
 import { bindLocale, bindLocaleAttrs, bindLocaleFn, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
+import { buildWorkspaceFileMenu, WorkspaceFilesView } from './workspaceFilesView'
 import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
@@ -831,6 +833,9 @@ export class WebviewSyncController {
   private sidebarEl: HTMLElement | undefined
   /** 主编辑区顶栏的侧栏切换按钮（可访问名称随状态变化） */
   private sidebarToggleBtn: HTMLButtonElement | undefined
+  private workspaceFilesView: WorkspaceFilesView | undefined
+  private workspaceFilesMenuEntry: WorkspaceFileEntry | undefined
+  private workspaceFilesToggleBtn: HTMLButtonElement | undefined
   /** 侧栏是纯 webview 视图状态（与 viewMode 同类）：切换零写回、
    *  不入撤销栈、不触发出站消息；经 bridge state 持久化（重载恢复） */
   private sidebarOpen: boolean
@@ -1659,8 +1664,8 @@ export class WebviewSyncController {
       }
       this.leaveHoverAndTip(anchor, related)
     })
-    // #53 布局骨架：#app > body(水平) > main(主编辑区：顶栏+横幅+双视图)
-    // + sidebar(右侧栏)；findPanel 浮层直接挂 #app（以 #app 为定位包含块；
+    // #app > body(水平) > 文件侧栏 + main(顶栏+横幅+双视图) + 右侧栏；
+    // findPanel 浮层直接挂 #app（以 #app 为定位包含块；
     // 2026-10 锚点跟随：right 由控制器按正文列右缘测算写内联）
     this.sidebarEl = this.buildSidebar()
     // 拖宽恢复：把构造期恢复的宽度落到侧栏（默认值不写变量，见 applySidebarWidth）
@@ -1683,6 +1688,11 @@ export class WebviewSyncController {
     this.mainEl.appendChild(this.addonPanelDockEl)
     this.bodyEl = document.createElement('div')
     this.bodyEl.className = 'vsidian-body'
+    this.workspaceFilesView = new WorkspaceFilesView(this.bodyEl, message => this.bridge.postMessage(message), {
+      open: (entry, anchor, x, y) => this.openWorkspaceFileMenu(entry, anchor, x, y),
+      isOpen: () => this.workspaceFilesMenuEntry !== undefined,
+    })
+    this.bodyEl.appendChild(this.workspaceFilesView.element)
     this.bodyEl.appendChild(this.mainEl)
     this.bodyEl.appendChild(this.sidebarEl)
     parent.appendChild(this.bodyEl)
@@ -1702,6 +1712,11 @@ export class WebviewSyncController {
     // document 捕获先于 VS Code webview 预加载脚本的 window 冒泡转发。
     this.docKeydown = (e: KeyboardEvent) => {
       if (this.richPasteDialog?.isOpen()) return
+      if (this.workspaceFilesView?.handleLocalKey(e)) {
+        // 侧栏分隔条、手势与文件菜单的键由侧栏接管。
+        this.keybindingRouter.cancel()
+        return
+      }
       // Ctrl/Cmd 按下（非重复）：Live 悬停补触发——指针已在链接上时开浮层
       // （不 preventDefault/stopPropagation：修饰键本身不是键绑定，其余
       // 路由照常）
@@ -1713,6 +1728,7 @@ export class WebviewSyncController {
           // #577 大纲条目上的「先悬停、后按 Ctrl」补触发（面板现场与 Live
           // 独立记录，互不串扰）
           this.onOutlineHoverModifierDown()
+          this.workspaceFilesView?.onPreviewModifierDown()
         }
       }
       if (e.key === 'Escape' && this.quickHeadingMenu && !this.quickHeadingMenu.hidden) {
@@ -1915,6 +1931,7 @@ export class WebviewSyncController {
           reqId: req.reqId,
           src: req.src,
           fileName: req.fileName,
+          ...(req.workspaceFileId !== undefined ? { workspaceFileId: req.workspaceFileId } : {}),
         })
       },
     })
@@ -2356,6 +2373,9 @@ export class WebviewSyncController {
     this.readingContainer?.remove()
     this.readingContainer = undefined
     this.sidebarToggleBtn = undefined
+    this.workspaceFilesView?.dispose()
+    this.workspaceFilesView = undefined
+    this.workspaceFilesToggleBtn = undefined
     this.outlineToggleBtn = undefined
     this.outlinePanelEl = undefined
     this.outlineSlider = undefined
@@ -3238,6 +3258,18 @@ export class WebviewSyncController {
           dispatchHoverEvent(item, message.action === 'enter', message.ctrlKey === true)
           break
         }
+        if (message.link === 'file-tree' || message.link === 'file-tab') {
+          const group = message.link === 'file-tree' ? '.vsidian-file-tree' : '.vsidian-file-opened'
+          const items = this.workspaceFilesView?.element.querySelectorAll<HTMLElement>(`${group} .vsidian-file-entry`)
+          const item = message.fileId === undefined ? items?.[message.index] :
+            message.link === 'file-tab' ? this.workspaceFilesView?.tabButtonForTest(message.fileId) :
+              Array.from(items ?? []).find(el => el.dataset.fileFocus === `activate:${message.fileId}`)
+          if (item) {
+            if (message.action === 'enter') item.scrollIntoView({ block: 'nearest' })
+            dispatchHoverEvent(item, message.action === 'enter', message.ctrlKey === true)
+          }
+          break
+        }
         const container = this.readingContainer
         if (!container || this.viewMode !== 'reading') {
           break
@@ -3321,6 +3353,31 @@ export class WebviewSyncController {
         // 宿主通知：面板处于暂停状态（典型为 webview 重载后的状态恢复）
         this.live?.handleSessionSuspended()
         break
+      case 'workspaceFiles.layout':
+        this.workspaceFilesView?.layout.apply(message.layout)
+        break
+      case 'workspaceFiles.snapshot': {
+        const files = this.workspaceFilesView
+        const button = this.workspaceFilesToggleBtn
+        const menuEntry = this.workspaceFilesMenuEntry
+        if (menuEntry) {
+          const current = message.entries.find(entry => entry.id === menuEntry.id)
+          if (!message.open || !current || current.kind !== menuEntry.kind || current.name !== menuEntry.name ||
+            current.expanded !== menuEntry.expanded || current.actions.length !== menuEntry.actions.length ||
+            current.actions.some((action, index) => action !== menuEntry.actions[index])) {
+            if (!current && message.open) this.menuPrevFocus = button ?? null
+            this.closeContextMenu()
+          }
+        }
+        if (!message.open && files?.element.contains(document.activeElement)) button?.focus()
+        this.bodyEl?.classList.toggle('vsidian-file-sidebar-open', message.open)
+        files?.apply(message)
+        if (button) {
+          button.setAttribute('aria-expanded', String(message.open))
+          refreshElementLocale(button)
+        }
+        break
+      }
       case 'view.mode.set':
         // 模式切换指令（宿主命令路径；webview 按钮走同一状态机）
         // #163 验收反馈：切换模式 = 离开当前视图，跳转目标高亮随之消失——
@@ -3395,6 +3452,7 @@ export class WebviewSyncController {
           case 'paste': this.requestClipboardPaste(); break
           case 'pastePlain': this.requestClipboardPaste({ plain: true }); break
           case 'sidebarToggle': this.toggleSidebar(); break
+          case 'workspaceFilesToggle': this.bridge.postMessage({ kind: 'workspaceFiles.toggle' }); break
           case 'outlineToggle':
             if (!this.sidebarOpen && !this.outlineActive) this.toggleSidebar()
             this.toggleOutline()
@@ -3707,6 +3765,14 @@ export class WebviewSyncController {
         if (snapshot) {
           this.openContextMenu(snapshot, 24, 24, view)
         }
+        break
+      }
+      case 'workspaceFiles.test.contextMenu': {
+        this.workspaceFilesView?.dispatchContextMenuForTest(message.id)
+        break
+      }
+      case 'workspaceFiles.test.tab': {
+        this.workspaceFilesView?.tabButtonForTest(message.id, message.action === 'close')?.click()
         break
       }
       case 'contextMenu.test.menuClick': {
@@ -5928,7 +5994,7 @@ export class WebviewSyncController {
     refreshOnDemandControlLocale(document)
   }
 
-  /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
+  /** 主编辑区顶栏：左侧栏开关后接齿轮设置按钮（打开宿主级 Vsidian
    *  设置页面板——webview 无权自建面板，必须经 settings.open 出站），
    *  其后快速操作 ✎；右端组（#158）= 刷新嵌入资源（#208，持有
    *  margin-left:auto 推靠）+ 双态视图切换（#141）+ 侧栏切换按钮紧随其后，
@@ -5937,6 +6003,17 @@ export class WebviewSyncController {
   private buildToolbar(): HTMLElement {
     const bar = document.createElement('div')
     bar.className = 'vsidian-toolbar'
+    const filesBtn = document.createElement('button')
+    filesBtn.type = 'button'
+    filesBtn.className = 'vsidian-file-sidebar-toggle'
+    filesBtn.setAttribute('aria-controls', 'vsidian-file-sidebar')
+    filesBtn.setAttribute('aria-expanded', 'false')
+    bindLocaleFnAttrs(filesBtn, () => t(filesBtn.getAttribute('aria-expanded') === 'true'
+      ? 'workspaceFiles.collapse' : 'workspaceFiles.expand'))
+    filesBtn.appendChild(createSidebarToggleIcon('left'))
+    filesBtn.addEventListener('click', () => this.bridge.postMessage({ kind: 'workspaceFiles.toggle' }))
+    this.workspaceFilesToggleBtn = filesBtn
+    bar.appendChild(filesBtn)
     const settingsBtn = document.createElement('button')
     settingsBtn.type = 'button'
     settingsBtn.className = 'vsidian-settings-toggle'
@@ -8314,7 +8391,6 @@ export class WebviewSyncController {
     const menu = buildMenuDom(buildContextMenuModel(snapshot, hints), {
       onCommand: (command) => this.runContextMenuCommand(command),
     })
-    this.contextMenuEl = menu
     this.contextMenuView = view
     this.contextMenuTarget = snapshot.blockTarget
     this.contextMenuSnapshot = snapshot
@@ -8331,6 +8407,26 @@ export class WebviewSyncController {
       scopeRoot: this.rootEl ?? document.body,
       docScope: liveHtmlDocScopeOf(view.state) ?? 'doc',
     }) ?? undefined
+    this.showViewportContextMenu(menu, clientX, clientY)
+  }
+
+  private openWorkspaceFileMenu(entry: WorkspaceFileEntry, anchor: HTMLButtonElement, clientX: number, clientY: number): void {
+    this.closeContextMenu()
+    this.closeOutlineMenu()
+    const menu = buildWorkspaceFileMenu(entry, action => {
+      if (this.contextMenuEl !== menu) return
+      this.closeContextMenu()
+      this.bridge.postMessage(action === 'activate'
+        ? { kind: 'workspaceFiles.activate', id: entry.id, ...(entry.kind === 'file' ? {} : { expanded: !entry.expanded }) }
+        : { kind: 'workspaceFiles.action', id: entry.id, action })
+    })
+    this.workspaceFilesMenuEntry = entry
+    document.body.appendChild(menu)
+    this.showViewportContextMenu(menu, clientX, clientY, anchor)
+  }
+
+  private showViewportContextMenu(menu: HTMLElement, clientX: number, clientY: number, anchor?: HTMLElement): void {
+    this.contextMenuEl = menu
     if (menu.scrollHeight > menu.clientHeight) {
       menu.style.overflowY = 'auto'
     }
@@ -8346,7 +8442,8 @@ export class WebviewSyncController {
     applySubmenuFlip(menu, window.innerWidth || 1200, undefined, window.innerHeight || 800)
     // 键盘导航起点：聚焦菜单容器（打开菜单接管方向键；关闭时还焦先前
     // 宿主——见 menuPrevFocus 注释）
-    this.captureMenuFocus()
+    if (anchor) this.menuPrevFocus = anchor
+    else this.captureMenuFocus()
     focusMenuDom(menu)
     // 关闭通道：菜单外 pointerdown（capture）与 Esc（与大纲菜单同模式）
     this.contextMenuDismissPointer = (e) => {
@@ -8381,6 +8478,7 @@ export class WebviewSyncController {
     }
     this.contextMenuEl?.remove()
     this.contextMenuEl = undefined
+    this.workspaceFilesMenuEntry = undefined
     // #658（T07）：预览探针与观察器随菜单关闭归零（无泄漏；幂等）
     this.calloutMenuPreview?.dispose()
     this.calloutMenuPreview = undefined
@@ -11170,9 +11268,23 @@ export class WebviewSyncController {
   private collectPaint(): PaintProbe {
     const view = this.view
     const contentEl = view?.dom.querySelector<HTMLElement>('.cm-content')
+    const files = this.workspaceFilesView
+    const fileMenu = this.workspaceFilesMenuEntry ? this.contextMenuEl : undefined
+    const previewTab = files?.previewTabName()
+    const workspaceFiles: PaintProbe['workspaceFiles'] = {
+      togglePainted: hitPaintedElement(this.workspaceFilesToggleBtn),
+      panelPainted: hitPaintedElement(files?.header),
+      currentFilePainted: hitPaintedElement(files?.currentFile()),
+      treeActionsPainted: files?.treeActions.every(button => hitPaintedElement(button)) ?? false,
+      menuPainted: hitPaintedElement(fileMenu, fileMenu),
+      widthHandlePainted: hitPaintedElement(files?.layout.widthHandle),
+      heightHandlePainted: hitPaintedElement(files?.layout.heightHandle),
+      previewTabPainted: !!previewTab && hitPaintedElement(previewTab) && getComputedStyle(previewTab).fontStyle === 'italic',
+    }
     if (!view || !contentEl) {
       return {
         textVisible: false,
+        workspaceFiles,
         scrollerDisplay: null,
         gutterUserSelect: null,
         darkTheme: false,
@@ -12133,6 +12245,7 @@ export class WebviewSyncController {
     }
     return {
       textVisible,
+      workspaceFiles,
       liveEnd,
       scrollerDisplay: view.scrollDOM ? getComputedStyle(view.scrollDOM).display : null,
       gutterUserSelect: guttersEl ? getComputedStyle(guttersEl).userSelect : null,
@@ -13016,11 +13129,18 @@ function collectHoverPopupPaint(): PaintProbe['hoverPopup'] {
   }
   const style = getComputedStyle(el)
   const stateEl = el.querySelector<HTMLElement>('.vsidian-hover-popup-state')
+  const nestedPdf = el.querySelector<HTMLCanvasElement>(`.${EMBED_CARD_CLASS_NAMES.card} .${HOVER_PDF_CLASS_NAMES.canvas}`)
+  const pdfInk = nestedPdf && nestedPdf.width > 0 && nestedPdf.height > 0 &&
+      hitPaintedElement(nestedPdf.closest<HTMLElement>(`.${HOVER_PDF_CLASS_NAMES.body}`))
+    ? nestedPdf.getContext('2d')?.getImageData(nestedPdf.width >> 1, nestedPdf.height >> 1, 1, 1).data
+    : undefined
   return {
     hit,
     background: style.backgroundColor,
     borderWidth: style.borderTopWidth,
     errorState: stateEl !== null && stateEl.classList.contains('vsidian-hover-popup-state-error'),
+    imageWidth: Array.from(el.querySelectorAll('img')).find(img => img.naturalWidth > 0 && hitPaintedElement(img))?.naturalWidth,
+    nestedPdfPainted: pdfInk !== undefined && pdfInk[3] === 255 && Math.min(pdfInk[0]!, pdfInk[1]!, pdfInk[2]!) < 240,
   }
 }
 
@@ -13130,7 +13250,7 @@ function createSettingsGearIcon(): SVGSVGElement {
  *  矩形外框 + 右侧竖线。两态粗细差异的唯一来源是样式表（收起细线 1.5px /
  *  展开粗线 3px，随 vsidian-sidebar-open 类切换），SVG 属性上不写
  *  stroke-width——样式失效时两态同值，集成绘制断言据此暴露 */
-function createSidebarToggleIcon(): SVGSVGElement {
+function createSidebarToggleIcon(side: 'left' | 'right' = 'right'): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg')
   svg.setAttribute('viewBox', '0 0 16 16')
   svg.setAttribute('fill', 'none')
@@ -13139,17 +13259,19 @@ function createSidebarToggleIcon(): SVGSVGElement {
   svg.setAttribute('stroke-linejoin', 'round')
   svg.setAttribute('aria-hidden', 'true')
   const frame = document.createElementNS(SVG_NS, 'rect')
-  frame.setAttribute('class', 'vsidian-sidebar-icon-frame')
+  const prefix = side === 'left' ? 'vsidian-file-sidebar-icon' : 'vsidian-sidebar-icon'
+  frame.setAttribute('class', `${prefix}-frame`)
   frame.setAttribute('x', '1.75')
   frame.setAttribute('y', '2.75')
   frame.setAttribute('width', '12.5')
   frame.setAttribute('height', '10.5')
   frame.setAttribute('rx', '1.5')
   const bar = document.createElementNS(SVG_NS, 'line')
-  bar.setAttribute('class', 'vsidian-sidebar-icon-bar')
-  bar.setAttribute('x1', '11')
+  bar.setAttribute('class', `${prefix}-bar`)
+  const x = side === 'left' ? '5' : '11'
+  bar.setAttribute('x1', x)
   bar.setAttribute('y1', '2.75')
-  bar.setAttribute('x2', '11')
+  bar.setAttribute('x2', x)
   bar.setAttribute('y2', '13.25')
   svg.appendChild(frame)
   svg.appendChild(bar)
