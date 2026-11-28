@@ -13,7 +13,8 @@
 //   承担（正文已装载的地址直接复用，不重新请求字节）。
 // - 工具条五钮：缩放（−/标签/+）/ 重置 / 刷新 / 导出 / 关闭。「刷新」按
 //   当前文档重定位该图（rawSrc 仍在文档中才算定位到）后走 image.invalidate
-//   单源失效重取；定位不到（图被删/改写）维持快照。导出经宿主字节级拷贝
+//   单源失效重取；定位不到（图被删/改写）维持快照。侧栏图片直接重读文件别名。
+//   导出经宿主字节级拷贝
 //   （image.export 消息对），外链图禁用 + 悬停提示。
 //
 // 零写回：点击/hover/开关弹窗/刷新/导出均不触碰文档与撤销栈。
@@ -158,6 +159,7 @@ export function locateImageOccurrence(doc: string, rawSrc: string): boolean {
 
 /** 导出请求序号（会话面板内自增；sessionId/docUri 由装配层补齐） */
 let exportReqSeq = 0
+let workspaceImageRefreshSeq = 0
 
 interface ImagePopupState {
   overlay: HTMLElement
@@ -171,6 +173,7 @@ interface ImagePopupState {
    *  全局 context 变化不影响已开弹窗，关闭 detach 用同一管理器） */
   ctx: ImagePopupContext
   rawSrc: string
+  workspaceImage: boolean
   intrinsic: { w: number; h: number }
   transform: PopupTransform
   prevFocus: HTMLElement | null
@@ -235,6 +238,15 @@ function fitToStage(p: ImagePopupState): void {
  *  docSource（嵌入内部 Live 按 B 全文，不读主正文） */
 function refreshImage(p: ImagePopupState): void {
   const ctx = p.ctx
+  if (p.workspaceImage && ctx.isDirectSrc(p.rawSrc)) {
+    // 只刷新宿主已签发的文件别名（授权按 URI 路径重验），不用正文找图。
+    // 查询串换代绕过 Webview 缓存，原 URI 路径与导出的文件身份保持不变。
+    const url = new URL(p.rawSrc)
+    url.searchParams.set('vsidianFileRefresh', `${Date.now()}-${++workspaceImageRefreshSeq}`)
+    ctx.images.detach(p.img)
+    ctx.images.attach(p.img, url.href)
+    return
+  }
   const doc = ctx.docSource()
   if (doc === null || !locateImageOccurrence(doc, p.rawSrc)) {
     return
@@ -350,6 +362,7 @@ export function openImagePopup(rawSrc: string, alt: string, source?: ImagePopupS
     img,
     ctx,
     rawSrc,
+    workspaceImage: workspaceFile !== undefined,
     intrinsic: POPUP_FALLBACK_SIZE,
     transform: { scale: 1, panX: 0, panY: 0 },
     prevFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,

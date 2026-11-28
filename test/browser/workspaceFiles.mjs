@@ -329,8 +329,14 @@ try {
   console.log('[PASS] 两类条目 Ctrl 悬停复用只读卡片，刷新保留、折叠与 Esc 关闭')
 
   const picture = { id: 'picture', name: '原图 #.png', kind: 'file', level: 1, previewKind: 'image', actions: [] }
-  const display = 'https://local-resource.example/preview.png'
-  await page.route(display, route => route.fulfill({ contentType: 'image/png', path: path.join(root, 'media', 'vsidian-icon.png') }))
+  const display = 'https://local-resource.example/preview.png?v=1'
+  await page.route('https://local-resource.example/preview.png*', route => {
+    const contentType = 'image/png'
+    return route.request().url() === display
+      ? route.fulfill({ contentType, path: path.join(root, 'media', 'vsidian-icon.png') })
+      : route.fulfill({ contentType, body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') })
+  })
   await state(true, [...entries, picture], withUntitled)
   await page.keyboard.down(modifier)
   await tree.getByRole('button', { name: picture.name, exact: true }).hover({ position: { x: 60, y: 12 } })
@@ -344,6 +350,12 @@ try {
   await popup.locator('img[data-vsidian-img-state="loaded"]').waitFor({ state: 'visible', timeout: 2500 })
   await popup.locator('.vsidian-graphic-frame').hover({ position: { x: 30, y: 30 }, timeout: 2500 })
   await popup.locator('.vsidian-graphic-chrome-popup').click({ timeout: 2500 })
+  await page.waitForFunction(() => document.querySelector('.vsidian-diagram-media img')?.naturalWidth > 1, undefined, { timeout: 2000 })
+  await page.locator('.vsidian-diagram-refresh').click()
+  await page.waitForFunction(src => {
+    const el = document.querySelector('.vsidian-diagram-media img')
+    return el?.src !== src && el?.naturalWidth === 1
+  }, display, { timeout: 2000 })
   const exportOriginal = page.locator('.vsidian-diagram-export-image')
   assert.equal(await exportOriginal.isEnabled(), true, '本地图片的显示别名不能禁用另存')
   await exportOriginal.click()
