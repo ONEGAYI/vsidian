@@ -330,12 +330,20 @@ try {
 
   const picture = { id: 'picture', name: '原图 #.png', kind: 'file', level: 1, previewKind: 'image', actions: [] }
   const display = 'https://local-resource.example/preview.png?v=1'
+  const replacementColor = [24, 160, 95, 255]
+  const replacement = await page.evaluate(([red, green, blue]) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 8
+    const context = canvas.getContext('2d')
+    context.fillStyle = `rgb(${red},${green},${blue})`
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/png').split(',')[1]
+  }, replacementColor)
   await page.route('https://local-resource.example/preview.png*', route => {
     const contentType = 'image/png'
     return route.request().url() === display
       ? route.fulfill({ contentType, path: path.join(root, 'media', 'vsidian-icon.png') })
-      : route.fulfill({ contentType, body: Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') })
+      : route.fulfill({ contentType, body: Buffer.from(replacement, 'base64') })
   })
   await state(true, [...entries, picture], withUntitled)
   await page.keyboard.down(modifier)
@@ -350,12 +358,31 @@ try {
   await popup.locator('img[data-vsidian-img-state="loaded"]').waitFor({ state: 'visible', timeout: 2500 })
   await popup.locator('.vsidian-graphic-frame').hover({ position: { x: 30, y: 30 }, timeout: 2500 })
   await popup.locator('.vsidian-graphic-chrome-popup').click({ timeout: 2500 })
-  await page.waitForFunction(() => document.querySelector('.vsidian-diagram-media img')?.naturalWidth > 1, undefined, { timeout: 2000 })
+  const openedImage = page.locator('.vsidian-diagram-media img')
+  await openedImage.evaluate(img => img.decode(), undefined, { timeout: 2000 })
+  assert.ok(await openedImage.evaluate(img => img.naturalWidth > 8))
   await page.locator('.vsidian-diagram-refresh').click()
   await page.waitForFunction(src => {
-    const el = document.querySelector('.vsidian-diagram-media img')
-    return el?.src !== src && el?.naturalWidth === 1
+    const img = document.querySelector('.vsidian-diagram-media img')
+    return img?.currentSrc && img.currentSrc !== src
   }, display, { timeout: 2000 })
+  await openedImage.evaluate(img => img.decode(), undefined, { timeout: 2000 })
+  assert.equal(await openedImage.evaluate(img => img.naturalWidth), 8)
+  await page.waitForFunction(() => {
+    const overlay = document.querySelector('.vsidian-diagram-overlay')
+    return overlay && getComputedStyle(overlay).opacity === '1'
+  }, undefined, { timeout: 2000 })
+  const pictureBox = await openedImage.boundingBox()
+  const pixel = await page.screenshot({ clip: {
+    x: Math.floor(pictureBox.x + pictureBox.width / 2), y: Math.floor(pictureBox.y + pictureBox.height / 2), width: 1, height: 1,
+  } })
+  const paintedColor = await page.evaluate(async base64 => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
+    const ctx = document.createElement('canvas').getContext('2d')
+    ctx.drawImage(bitmap, 0, 0)
+    return [...ctx.getImageData(0, 0, 1, 1).data]
+  }, pixel.toString('base64'))
+  assert.deepEqual(paintedColor, replacementColor, '刷新后实际绘制新 PNG，而不只改变 URL 或图片尺寸')
   const exportOriginal = page.locator('.vsidian-diagram-export-image')
   assert.equal(await exportOriginal.isEnabled(), true, '本地图片的显示别名不能禁用另存')
   await exportOriginal.click()
