@@ -6750,11 +6750,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
         return false
       })
       await vscode.commands.executeCommand(CMD.postToPanel, entry.toString(), { kind: 'contextMenu.test.menuClose' })
+      await waitViewState('侧栏交互夹具.md', ({ paint }) => paint?.workspaceFiles?.menuPainted === false)
 
-      await send(entry, { kind: 'workspaceFiles.activate', id: id(first), mode: 'preview' })
+      assert(await vscode.commands.executeCommand(CMD.postToPanel, entry.toString(), {
+        kind: 'workspaceFiles.test.contextMenu', id: id(first),
+      }), '为尚未打开的文件打开右键菜单')
+      await waitViewState('侧栏交互夹具.md', ({ paint }) => paint?.workspaceFiles?.menuPainted === true)
+      assert(await vscode.commands.executeCommand(CMD.postToPanel, entry.toString(), {
+        kind: 'contextMenu.test.menuClick', command: 'activate',
+      }), '通过右键菜单的「打开」进入临时标签')
       await waitSessionReady('侧栏临时甲.md')
+      assert(tab(first)?.isPreview && tab(first)?.isActive, '右键「打开」使用真实临时标签')
       await waitViewState('侧栏临时甲.md', ({ paint }) => paint?.workspaceFiles?.previewTabPainted === true)
-      assert(tab(first)?.isPreview && tab(first)?.isActive, '单击使用真实临时标签')
 
       await send(first, { kind: 'workspaceFiles.activate', id: id(second), mode: 'preview' })
       await waitSessionReady('侧栏临时乙.md')

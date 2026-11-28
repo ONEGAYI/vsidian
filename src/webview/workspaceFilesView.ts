@@ -231,7 +231,10 @@ export class WorkspaceFilesView {
 
   /** 宿主测试不能发送物理鼠标事件，派发到真实文件树按钮的同一入口。 */
   dispatchContextMenuForTest(id: string): void {
-    this.treeRows.get(id)?.button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    const button = this.treeRows.get(id)?.button
+    if (!button) return
+    button.scrollIntoView({ block: 'nearest' })
+    button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   }
 
   tabButtonForTest(id: string, close = false): HTMLButtonElement | undefined {

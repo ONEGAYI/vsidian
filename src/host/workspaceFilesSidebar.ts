@@ -594,7 +594,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       const existing = tabs.find(tab => tab.isActive && sameUri(tab.input.uri, target.uri)) ??
         tabs.find(tab => sameUri(tab.input.uri, target.uri))
       if (existing) await this.openTab(client, existing, request.mode === 'keep')
-      else await this.openFile(client, target.uri, request.mode === 'preview')
+      else await this.openFile(client, target.uri, request.mode !== 'keep')
     } else {
       const key = target.uri.toString()
       const expansion = target.kind === 'root' ? this.expandedRoots : this.expandedFolders

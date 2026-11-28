@@ -333,6 +333,15 @@ it('换组期间或新组快照已更新后，旧行都不能关闭新组同 URI
   expect(mock.closeTab.mock.calls[0]![0]).toBe(sameFile)
 })
 
+it('没有明确要求保留的文件树打开，使用宿主临时标签', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  client.request({ kind: 'workspaceFiles.activate', id: await client.id('start.md') })
+  await vi.waitFor(() => expect(mock.open).toHaveBeenCalledExactlyOnceWith(
+    'vscode.open', matchingUri('/notes/start.md'), { viewColumn: 2, preview: true },
+  ))
+})
+
 it('新文件以请求指定的临时或保留方式打开；已有持久标签单击不降级', async () => {
   const client = mount()
   client.request({ kind: 'workspaceFiles.toggle' })
