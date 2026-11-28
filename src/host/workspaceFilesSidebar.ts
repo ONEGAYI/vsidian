@@ -65,6 +65,10 @@ function isWorkspaceRoot(uri: vscode.Uri): boolean {
   return (vscode.workspace.workspaceFolders ?? []).some(folder => contains(folder.uri, uri) && contains(uri, folder.uri))
 }
 
+function containsWorkspaceRoot(uri: vscode.Uri): boolean {
+  return (vscode.workspace.workspaceFolders ?? []).some(folder => contains(uri, folder.uri))
+}
+
 /** 目录快照不能授权当前磁盘状态：根以下任一层变成链接或变更类型即视为过期。
  * 用户明确挂载的工作区根仍可使用（包括通过符号链接加入的根）。 */
 async function verifyTreePath(uri: vscode.Uri, expected: vscode.FileType,
@@ -524,7 +528,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       options.push({ label: t('workspaceFiles.createFile'), action: () => this.create(client, target.uri, 'file') },
         { label: t('workspaceFiles.createFolder'), action: () => this.create(client, target.uri, 'folder') })
     }
-    if (!isWorkspaceRoot(target.uri)) {
+    if (!containsWorkspaceRoot(target.uri)) {
       options.push({ label: t('workspaceFiles.rename'), action: () => this.rename(target) })
       if (canUseTrash(target.uri)) options.push({ label: t('workspaceFiles.trash'), action: () => this.trash(target) })
     }
@@ -574,12 +578,12 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   private async rename(target: TreeTarget): Promise<void> {
     const dir = parentOf(target.uri)
     const name = await this.promptName(dir, 'workspaceFiles.rename', 'workspaceFiles.renamePrompt', target.name)
-    if (!name || !isFileName(name) || name === target.name || !isWritable(target.uri) || isWorkspaceRoot(target.uri)) return
+    if (!name || !isFileName(name) || name === target.name || !isWritable(target.uri) || containsWorkspaceRoot(target.uri)) return
     const uri = vscode.Uri.joinPath(dir, name)
     // 大小写改名交由宿主判定；仍不允许覆盖其他文件。
     if (name.toLowerCase() !== target.name.toLowerCase()) await this.requireMissing(uri, name)
     await verifyTreePath(target.uri, target.kind === 'file' ? vscode.FileType.File : vscode.FileType.Directory)
-    if (isWorkspaceRoot(target.uri)) return
+    if (containsWorkspaceRoot(target.uri)) return
     const edit = new vscode.WorkspaceEdit()
     edit.renameFile(target.uri, uri, { overwrite: false })
     if (!await vscode.workspace.applyEdit(edit)) throw vscode.FileSystemError.Unavailable(target.uri)
@@ -593,9 +597,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const trash = t('workspaceFiles.trash')
     const answer = await vscode.window.showWarningMessage(t(target.kind === 'file'
       ? 'workspaceFiles.trashFilePrompt' : 'workspaceFiles.trashFolderPrompt', { name }), { modal: true }, trash)
-    if (answer !== trash || !isWritable(uri) || isWorkspaceRoot(uri)) return
+    if (answer !== trash || !isWritable(uri) || containsWorkspaceRoot(uri)) return
     await verifyTreePath(uri, target.kind === 'file' ? vscode.FileType.File : vscode.FileType.Directory)
-    if (isWorkspaceRoot(uri)) return
+    if (containsWorkspaceRoot(uri)) return
     const hasChanges = (doc: { isDirty: boolean; uri: vscode.Uri }): boolean => doc.isDirty && contains(uri, doc.uri)
     const dirty = vscode.workspace.textDocuments.some(hasChanges) || vscode.workspace.notebookDocuments.some(hasChanges) ||
       vscode.window.tabGroups.all.some(group => group.tabs.some(tab =>

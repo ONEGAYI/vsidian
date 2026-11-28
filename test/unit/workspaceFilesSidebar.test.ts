@@ -231,6 +231,60 @@ it.runIf(process.platform === 'win32' || process.platform === 'darwin')('大小�
     .toEqual(['workspaceFiles.createFile', 'workspaceFiles.createFolder'])
 })
 
+it('包含已挂载工作区根的父目录只能新建，路径前缀相同的兄弟目录不受限', async () => {
+  const nestedRoot = '/notes/drafts/project'
+  mock.extraRoots.push(nestedRoot)
+  files.set(nestedRoot, dirType)
+  files.set('/notes/drafts-archive', dirType)
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+
+  mock.showQuickPick.mockImplementationOnce(items => items.find((item: { label: string }) => item.label === 'workspaceFiles.createFolder'))
+  mock.showInputBox.mockResolvedValueOnce('assets')
+  client.request({ kind: 'workspaceFiles.manage', id: await client.id('drafts') })
+  await vi.waitFor(() => expect(mock.createDirectory).toHaveBeenCalledWith(matchingUri('/notes/drafts/assets')))
+  expect(mock.showQuickPick.mock.calls[0]![0].map((item: { label: string }) => item.label))
+    .toEqual(['workspaceFiles.createFile', 'workspaceFiles.createFolder'])
+
+  client.request({ kind: 'workspaceFiles.manage', id: await client.id('drafts-archive') })
+  await vi.waitFor(() => expect(mock.showQuickPick).toHaveBeenCalledTimes(2))
+  expect(mock.showQuickPick.mock.calls[1]![0].map((item: { label: string }) => item.label))
+    .toEqual(['workspaceFiles.createFile', 'workspaceFiles.createFolder', 'workspaceFiles.rename', 'workspaceFiles.trash'])
+})
+
+it.each([
+  { action: 'rename', phase: '对话', prompt: mock.showInputBox, answer: 'renamed' },
+  { action: 'trash', phase: '对话', prompt: mock.warn, answer: 'workspaceFiles.trash' },
+  { action: 'rename', phase: '路径复核', prompt: mock.showInputBox, answer: 'renamed' },
+  { action: 'trash', phase: '路径复核', prompt: mock.warn, answer: 'workspaceFiles.trash' },
+])('$action 在 $phase 期间挂载子工作区根时，不移动父目录', async ({ action, phase, prompt, answer }) => {
+  const nestedRoot = '/notes/drafts/project'
+  files.set(nestedRoot, dirType)
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('drafts')
+  const mountNestedRoot = vi.fn(() => mock.extraRoots.push(nestedRoot))
+
+  mock.showQuickPick.mockImplementationOnce(items => items.find((item: { label: string }) => item.label === `workspaceFiles.${action}`))
+  prompt.mockImplementationOnce(async () => {
+    if (phase === '对话') mountNestedRoot()
+    return answer
+  })
+  if (phase === '路径复核') {
+    const stat = mock.stat.getMockImplementation()!
+    mock.stat.mockImplementation(async (uri: vscode.Uri) => {
+      const result = await stat(uri)
+      if (uri.path === '/notes/drafts') mountNestedRoot()
+      return result
+    })
+  }
+  client.request({ kind: 'workspaceFiles.manage', id })
+  await vi.waitFor(() => expect(mountNestedRoot).toHaveBeenCalledTimes(1))
+  expect(mock.renameFile).not.toHaveBeenCalled()
+  expect(mock.applyEdit).not.toHaveBeenCalled()
+  expect(mock.remove).not.toHaveBeenCalled()
+})
+
 it('来源图片别名单文件读取；重定向的路径和非图片不获授权', async () => {
   const client = mount('/notes/drafts/old.md')
   client.request({ kind: 'workspaceFiles.toggle' })
