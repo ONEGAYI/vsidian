@@ -99,7 +99,7 @@ export class WorkspaceFilesLayoutControls {
       ? event.clientX * (getComputedStyle(this.aside).direction === 'rtl' ? -1 : 1)
       : event.clientY
     handle.addEventListener('pointerdown', event => {
-      if (this.aside.inert || handle.hidden || this.gesture || event.button !== 0 || !event.isPrimary) return
+      if (this.aside.inert || handle.hidden || this.gesture || event.button !== 0 || event.buttons !== 1 || !event.isPrimary) return
       event.preventDefault()
       closeHoverPopupIfAnchorWithin(this.aside)
       handle.focus({ preventScroll: true })
@@ -113,7 +113,8 @@ export class WorkspaceFilesLayoutControls {
     handle.addEventListener('pointermove', event => {
       const gesture = this.gesture
       if (gesture?.pointerId !== event.pointerId) return
-      if (event.buttons === 0) return this.cancel()
+      // 同一指针的第二个鼠标键变化会送 pointermove，而不另送 pointerdown。
+      if (event.buttons !== 1) return this.cancel()
       const { min, max, size } = gesture.geometry
       const value = Math.max(min, Math.min(max, Math.round(size + coordinate(event) - gesture.start)))
       if (gesture.size === value) return
@@ -123,6 +124,7 @@ export class WorkspaceFilesLayoutControls {
     handle.addEventListener('pointerup', event => {
       const gesture = this.gesture
       if (gesture?.pointerId !== event.pointerId) return
+      if (event.button !== 0 || event.buttons !== 0) return this.cancel()
       const { size, geometry } = gesture
       this.finish()
       if (size === geometry.size) this.render()

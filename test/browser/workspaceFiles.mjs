@@ -395,6 +395,27 @@ try {
   assert.equal(await treeScroller.evaluate(el => el.scrollTop), 0, '两个列表仍独立滚动')
   await page.screenshot({ path: path.join(path.dirname(output), 'files-resized.png') })
 
+  const resizeCount = () => page.evaluate(() => window.messages.filter(message => message.kind === 'workspaceFiles.resize').length)
+  for (const { handle, pane, dimension, dx, dy, first } of [
+    { handle: widthHandle, pane: left, dimension: 'width', dx: 35, dy: 0, first: 'left' },
+    { handle: heightHandle, pane: opened, dimension: 'height', dx: 0, dy: 35, first: 'right' },
+  ]) {
+    const before = (await pane.boundingBox())[dimension]
+    const sent = await resizeCount()
+    const { x, y } = await center(handle)
+    await page.mouse.move(x, y)
+    await page.mouse.down({ button: 'left' })
+    await page.mouse.move(x + dx, y + dy)
+    assert.equal((await pane.boundingBox())[dimension], before + 35, '左键仍可实时调整')
+    await page.mouse.down({ button: 'right' })
+    assert.equal((await pane.boundingBox())[dimension], before, '拖动中按下右键，立即恢复拖动前尺寸')
+    await page.mouse.up({ button: first })
+    await page.mouse.move(x + dx * 2, y + dy * 2)
+    await page.mouse.up({ button: first === 'left' ? 'right' : 'left' })
+    assert.equal(await resizeCount(), sent, '混按后两种松键顺序都不能提交尺寸')
+    assert.equal((await pane.boundingBox())[dimension], before)
+  }
+
   await heightHandle.focus()
   await page.keyboard.press('ArrowUp')
   await waitMessage({ kind: 'workspaceFiles.resize', dimension: 'openedHeight', value: oldHeight + 52 })
