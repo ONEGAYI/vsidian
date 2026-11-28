@@ -9,12 +9,13 @@ const mock = vi.hoisted(() => ({
   watchCreate: vi.fn(), watchDelete: vi.fn(),
   mediaProvider: vi.fn(), readFile: vi.fn(),
   extraRoots: [] as string[],
+  extraRootAuthorities: new Map<string, string>(),
   rootScheme: 'file',
   rootAuthority: '',
   remoteName: undefined as string | undefined,
   filesEnableTrash: true,
   tabGroups: [] as unknown[],
-  showNotebook: vi.fn(),
+  showNotebook: vi.fn(), closeTab: vi.fn(),
 }))
 
 vi.mock('vscode', async () => {
@@ -28,7 +29,9 @@ vi.mock('vscode', async () => {
     static Unavailable() { return new FileSystemError('Unavailable') }
     static FileNotFound() { return new FileSystemError('FileNotFound') }
   }
-  const folders = () => ['/notes', ...mock.extraRoots].map((path, index) => ({ name: path.slice(1), uri: uri(path, mock.rootScheme), index }))
+  const folders = () => ['/notes', ...mock.extraRoots].map((path, index) => ({
+    name: path.slice(1), uri: uri(path, mock.rootScheme, mock.extraRootAuthorities.get(path)), index,
+  }))
   return {
     Uri: {
       file: uri,
@@ -44,12 +47,13 @@ vi.mock('vscode', async () => {
     EventEmitter: class { event = disposable; dispose() {} },
     WorkspaceEdit: class { createFile = mock.createFile; renameFile = mock.renameFile },
     TabInputText: class {},
-    TabInputCustom: class {},
+    TabInputCustom: class { constructor(readonly uri: unknown, readonly viewType: string) {} },
     TabInputNotebook: class { constructor(readonly uri: unknown, readonly notebookType: string) {} },
     workspace: {
       get workspaceFolders() { return folders() },
-      getWorkspaceFolder: ({ path, scheme }: { path: string; scheme: string }) => folders().reverse().find(folder =>
-        scheme === folder.uri.scheme && (path === folder.uri.path || path.startsWith(`${folder.uri.path}/`))),
+      getWorkspaceFolder: ({ path, scheme, authority }: { path: string; scheme: string; authority: string }) => folders().reverse().find(folder =>
+        scheme === folder.uri.scheme && authority === folder.uri.authority &&
+        (path === folder.uri.path || path.startsWith(`${folder.uri.path}/`))),
       getConfiguration: (section?: string) => ({ get: (key: string, fallback?: unknown) =>
         (section ? `${section}.${key}` : key) === 'files.enableTrash' ? mock.filesEnableTrash : fallback }),
       asRelativePath: ({ path }: { path: string }) => path.replace('/notes/', ''),
@@ -64,7 +68,7 @@ vi.mock('vscode', async () => {
       createFileSystemWatcher: () => ({ ...disposable(), onDidCreate: mock.watchCreate, onDidDelete: mock.watchDelete }),
     },
     window: {
-      tabGroups: { all: mock.tabGroups, onDidChangeTabGroups: disposable, onDidChangeTabs: disposable },
+      tabGroups: { all: mock.tabGroups, onDidChangeTabGroups: disposable, onDidChangeTabs: disposable, close: mock.closeTab },
       showNotebookDocument: mock.showNotebook,
       showInputBox: mock.showInputBox, showQuickPick: mock.showQuickPick,
       showWarningMessage: mock.warn, showErrorMessage: mock.error,
@@ -76,7 +80,7 @@ vi.mock('vscode', async () => {
 import * as vscode from 'vscode'
 import { WorkspaceFilesSidebar } from '../../src/host/workspaceFilesSidebar'
 import { previewSourceImagePaths } from '../../src/host/previewSourceImages'
-import type { WorkspaceFilesSnapshot } from '../../src/shared/protocol'
+import type { HostToWebview, WorkspaceFilesSnapshot } from '../../src/shared/protocol'
 import { isHostToWebview, isWebviewToHost } from '../../src/shared/protocol'
 
 const files = new Map<string, number>()
@@ -84,10 +88,10 @@ const fileType = vscode.FileType.File
 const dirType = vscode.FileType.Directory
 const makeUri = vscode.Uri.file
 const matchingUri = (path: string) => expect.objectContaining({ path, scheme: 'file' })
-const initial = { open: false }
+const initial: { open: boolean; layout?: unknown } = { open: false }
 const update = vi.fn()
 const makeSidebar = (hostKind = vscode.ExtensionKind.UI) => new WorkspaceFilesSidebar(
-  { get: () => initial.open, update } as unknown as vscode.Memento, hostKind,
+  { get: (key: string) => key === 'vsidian.workspaceFiles.open' ? initial.open : initial.layout, update } as unknown as vscode.Memento, hostKind,
 )
 let sidebar: WorkspaceFilesSidebar
 let created: (uri: vscode.Uri) => void
@@ -97,6 +101,7 @@ beforeEach(() => {
   mock.textDocuments.length = 0
   mock.notebookDocuments.length = 0
   mock.extraRoots.length = 0
+  mock.extraRootAuthorities.clear()
   mock.rootScheme = 'file'
   mock.rootAuthority = ''
   mock.remoteName = undefined
@@ -121,6 +126,7 @@ beforeEach(() => {
   mock.watchCreate.mockImplementation(callback => { created = callback })
   mock.applyEdit.mockResolvedValue(true)
   initial.open = false
+  initial.layout = undefined
   update.mockReset()
   sidebar = makeSidebar()
 })
@@ -129,10 +135,14 @@ afterEach(() => { sidebar.dispose() })
 
 function mount(document: string | vscode.Uri = '/notes/start.md') {
   let snapshot: WorkspaceFilesSnapshot | undefined
+  let layout: Extract<HostToWebview, { kind: 'workspaceFiles.layout' }>['layout'] | undefined
   let active = true
   const panel = {
     get active() { return active }, visible: true, viewColumn: 2,
-    webview: { postMessage: (message: WorkspaceFilesSnapshot) => { snapshot = message } },
+    webview: { postMessage: (message: HostToWebview) => {
+      if (message.kind === 'workspaceFiles.snapshot') snapshot = message
+      if (message.kind === 'workspaceFiles.layout') layout = message.layout
+    } },
   } as unknown as vscode.WebviewPanel
   const client = sidebar.attach(typeof document === 'string' ? makeUri(document) : document, panel)
   client.ready()
@@ -142,9 +152,168 @@ function mount(document: string | vscode.Uri = '/notes/start.md') {
       return snapshot!
     })
   }
-  return { ...client, loaded, snapshot: () => snapshot, setActive: (value: boolean) => { active = value },
+  return { ...client, loaded, snapshot: () => snapshot, layout: () => layout, setActive: (value: boolean) => { active = value },
     id: async (name: string) => (await loaded()).entries.find(entry => entry.name === name)!.id }
 }
+
+it('记住两个独立尺寸；提交只刷新布局，新面板及新宿主读回同一工作区状态', async () => {
+  initial.open = true
+  initial.layout = { width: 330, openedHeight: null }
+  update.mockImplementation((key, value) => { if (key === 'vsidian.workspaceFiles.layout') initial.layout = value })
+  sidebar = makeSidebar()
+  const client = mount()
+  const before = await client.loaded()
+  expect(client.layout()).toEqual({ width: 330, openedHeight: null })
+  client.request({ kind: 'workspaceFiles.resize', dimension: 'openedHeight', value: 126 })
+  client.request({ kind: 'workspaceFiles.resize', dimension: 'width', value: 412 })
+  expect(client.layout()).toEqual({ width: 412, openedHeight: 126 })
+  expect(client.snapshot()).toBe(before)
+  expect(mock.readDirectory).toHaveBeenCalledTimes(1)
+  const loadedLater = mount('/notes/drafts/old.md')
+  expect(loadedLater.layout()).toEqual({ width: 412, openedHeight: 126 })
+  client.request({ kind: 'workspaceFiles.resize', dimension: 'openedHeight', value: null })
+  expect(loadedLater.layout()).toEqual({ width: 412, openedHeight: null })
+  sidebar.dispose()
+  sidebar = makeSidebar()
+  expect(mount().layout()).toEqual({ width: 412, openedHeight: null })
+})
+
+it('移动只用快照 ID，走 VS Code 文件重命名且展开落点，可再移回工作区根', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const startId = await client.id('start.md')
+  const root = await client.id('notes')
+  const drafts = await client.id('drafts')
+  mock.renameFile.mockImplementation((from, to) => {
+    files.delete(from.path)
+    files.set(to.path, fileType)
+  })
+
+  client.request({ kind: 'workspaceFiles.move', id: startId, directoryId: drafts })
+  await vi.waitFor(() => expect(client.snapshot()?.entries.find(row => row.name === 'start.md')).toMatchObject({ level: 2 }))
+  expect(mock.renameFile).toHaveBeenCalledWith(matchingUri('/notes/start.md'), matchingUri('/notes/drafts/start.md'), { overwrite: false })
+  expect(mock.applyEdit).toHaveBeenCalledTimes(1)
+  const moved = await client.id('start.md')
+  expect(moved).not.toBe(startId)
+  client.request({ kind: 'workspaceFiles.move', id: moved, directoryId: root })
+  await vi.waitFor(() => expect(client.snapshot()?.entries.find(row => row.name === 'start.md')).toMatchObject({ level: 1 }))
+  expect(mock.renameFile).toHaveBeenLastCalledWith(matchingUri('/notes/drafts/start.md'), matchingUri('/notes/start.md'), { overwrite: false })
+  expect(mock.open).not.toHaveBeenCalled()
+})
+
+it.each(['同名目标', '目标变成符号链接', '查重时目标变成符号链接'])('拖放遇到%s时不应用文件改动', async conflict => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('start.md')
+  const directoryId = await client.id('drafts')
+  if (conflict === '同名目标') files.set('/notes/drafts/start.md', fileType)
+  else if (conflict === '目标变成符号链接') files.set('/notes/drafts', dirType | vscode.FileType.SymbolicLink)
+  else {
+    const stat = mock.stat.getMockImplementation()!
+    mock.stat.mockImplementation(async (uri: vscode.Uri) => {
+      if (uri.path === '/notes/drafts/start.md') files.set('/notes/drafts', dirType | vscode.FileType.SymbolicLink)
+      return stat(uri)
+    })
+  }
+  client.request({ kind: 'workspaceFiles.move', id, directoryId })
+  await vi.waitFor(() => expect(mock.error).toHaveBeenCalledTimes(1))
+  expect(mock.renameFile).not.toHaveBeenCalled()
+  expect(files.get('/notes/start.md')).toBe(fileType)
+})
+
+it('拖放不接受目录源、文件目的地、原目录或不在本面板快照中的 ID', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('start.md')
+  const dir = await client.id('drafts')
+  const root = await client.id('notes')
+  mock.stat.mockClear()
+  for (const [from, to] of [[dir, root], [id, id], [id, root], [id, '/notes/drafts'], ['/notes/start.md', dir]]) {
+    client.request({ kind: 'workspaceFiles.move', id: from!, directoryId: to! })
+    await Promise.resolve()
+    await Promise.resolve()
+  }
+  expect(mock.renameFile).not.toHaveBeenCalled()
+  expect(mock.stat).not.toHaveBeenCalled()
+})
+
+it('快照区分移动范围，并把同一目录的多根视图映射到同一个落点身份', async () => {
+  mock.extraRoots.push('/notes/drafts', '/share')
+  mock.extraRootAuthorities.set('/share', 'server')
+  files.set('/share', dirType)
+  const client = mount('/notes/drafts/old.md')
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const rows = (await client.loaded()).entries
+  const source = rows.find(row => row.name === 'old.md')!
+  const destination = rows.find(row => row.name === 'share')!
+  expect(source.move).toEqual(rows.find(row => row.kind === 'root' && row.name === 'notes/drafts')?.move)
+  expect(source.move?.scope).not.toBe(destination.move?.scope)
+  expect(destination.move?.scope).toBe('file://server')
+  mock.stat.mockClear()
+  client.request({ kind: 'workspaceFiles.move', id: source.id, directoryId: destination.id })
+  expect(mock.stat).not.toHaveBeenCalled()
+  expect(mock.renameFile).not.toHaveBeenCalled()
+})
+
+it('已打开列表取 VS Code 的临时状态，中键和关闭按钮命中当前组的实时标签', async () => {
+  const input = new vscode.TabInputCustom(makeUri('/notes/start.md'), 'vsidian')
+  const preview = { input, label: 'start.md', isPreview: true, isActive: true, isDirty: false }
+  const group = { viewColumn: 2, tabs: [preview] }
+  mock.tabGroups.push({ viewColumn: 1, tabs: [{ ...preview }] }, group)
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const [tab] = (await client.loaded()).tabs
+  expect(tab).toMatchObject({ name: 'start.md', isPreview: true })
+  client.request({ kind: 'workspaceFiles.activate', id: tab!.id, mode: 'keep' })
+  await vi.waitFor(() => expect(mock.open).toHaveBeenCalledExactlyOnceWith(
+    'vscode.openWith', input.uri, input.viewType, { viewColumn: 2, preview: false },
+  ))
+  await new Promise<void>(resolve => setImmediate(resolve))
+  const latest = { ...preview, isPreview: false, isDirty: true }
+  group.tabs = [latest] // VS Code 可在标签变化时重建 Tab。
+  mock.closeTab.mockResolvedValue(false) // 取消保存确认，仍保留标签。
+  client.request({ kind: 'workspaceFiles.closeTab', id: tab!.id })
+  await vi.waitFor(() => expect(mock.closeTab).toHaveBeenCalledTimes(1))
+  expect(mock.closeTab.mock.calls[0]![0]).toBe(latest)
+  client.request({ kind: 'workspaceFiles.closeTab', id: await client.id('start.md') })
+  expect(mock.closeTab).toHaveBeenCalledTimes(1)
+})
+
+it('新文件以请求指定的临时或保留方式打开；已有持久标签单击不降级', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('start.md')
+  client.request({ kind: 'workspaceFiles.activate', id, mode: 'preview' })
+  await vi.waitFor(() => expect(mock.open).toHaveBeenCalledExactlyOnceWith(
+    'vscode.open', matchingUri('/notes/start.md'), { viewColumn: 2, preview: true },
+  ))
+  client.request({ kind: 'workspaceFiles.activate', id, mode: 'keep' })
+  await vi.waitFor(() => expect(mock.open).toHaveBeenLastCalledWith(
+    'vscode.open', matchingUri('/notes/start.md'), { viewColumn: 2, preview: false },
+  ))
+  const uri = makeUri('/notes/start.md')
+  mock.tabGroups.push({ viewColumn: 2, tabs: [{
+    input: new vscode.TabInputCustom(uri, 'vsidian'), isPreview: false, isActive: false,
+  }] })
+  client.request({ kind: 'workspaceFiles.activate', id, mode: 'preview' })
+  await vi.waitFor(() => expect(mock.open).toHaveBeenLastCalledWith(
+    'vscode.openWith', uri, 'vsidian', { viewColumn: 2, preview: false },
+  ))
+})
+
+it('协议只接受有界尺寸、完整条目身份与已定义的打开方式', () => {
+  expect(isWebviewToHost({ kind: 'workspaceFiles.move', id: 'file', directoryId: 'folder' })).toBe(true)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.move', id: 'file', directoryId: '' })).toBe(false)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.move', id: 'file', uri: '/folder' })).toBe(false)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.resize', dimension: 'width', value: 360 })).toBe(true)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.resize', dimension: 'width', value: null })).toBe(false)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.resize', dimension: 'openedHeight', value: Infinity })).toBe(false)
+  expect(isHostToWebview({ kind: 'workspaceFiles.layout', layout: { width: 280, openedHeight: null } })).toBe(true)
+  expect(isHostToWebview({ kind: 'workspaceFiles.layout', layout: { width: 1000, openedHeight: 64 } })).toBe(false)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.activate', id: 'file', mode: 'preview', expanded: true })).toBe(false)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.activate', id: 'file', mode: 'other' })).toBe(false)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.closeTab', id: '' })).toBe(false)
+})
 
 it('关闭时不读盘；仅加载展开目录，显示当前文件并响应目录增量', async () => {
   const client = mount()

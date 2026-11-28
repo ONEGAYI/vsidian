@@ -389,6 +389,7 @@ vsidian/
         ├── wikilinkSuggest.ts            # 双链联想候选会话（含转阶段）
         ├── wordMotion.ts                 # 词级移动命令与引擎配置
         ├── wordSegmentSettings.ts        # 设置页中文分词分页
+        ├── workspaceFilesLayout.ts       # 文件侧栏宽高分隔条
         └── workspaceFilesView.ts         # 左栏文件与标签视图
 <!-- file-tree:tree^id=src:end -->
 ```

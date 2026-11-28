@@ -1688,7 +1688,7 @@ export class WebviewSyncController {
     this.mainEl.appendChild(this.addonPanelDockEl)
     this.bodyEl = document.createElement('div')
     this.bodyEl.className = 'vsidian-body'
-    this.workspaceFilesView = new WorkspaceFilesView(message => this.bridge.postMessage(message), {
+    this.workspaceFilesView = new WorkspaceFilesView(this.bodyEl, message => this.bridge.postMessage(message), {
       open: (entry, anchor, x, y) => this.openWorkspaceFileMenu(entry, anchor, x, y),
       isOpen: () => this.workspaceFilesMenuEntry !== undefined,
     })
@@ -1712,8 +1712,8 @@ export class WebviewSyncController {
     // document 捕获先于 VS Code webview 预加载脚本的 window 冒泡转发。
     this.docKeydown = (e: KeyboardEvent) => {
       if (this.richPasteDialog?.isOpen()) return
-      if (this.workspaceFilesView?.ownsMenuKey(e)) {
-        // 树条目的菜单键由行接管，不让正文绑定在捕获阶段截断。
+      if (this.workspaceFilesView?.handleLocalKey(e)) {
+        // 侧栏分隔条、手势与文件菜单的键由侧栏接管。
         this.keybindingRouter.cancel()
         return
       }
@@ -2373,7 +2373,7 @@ export class WebviewSyncController {
     this.readingContainer?.remove()
     this.readingContainer = undefined
     this.sidebarToggleBtn = undefined
-    this.workspaceFilesView?.element.remove()
+    this.workspaceFilesView?.dispose()
     this.workspaceFilesView = undefined
     this.workspaceFilesToggleBtn = undefined
     this.outlineToggleBtn = undefined
@@ -3351,6 +3351,9 @@ export class WebviewSyncController {
       case 'session.suspended':
         // 宿主通知：面板处于暂停状态（典型为 webview 重载后的状态恢复）
         this.live?.handleSessionSuspended()
+        break
+      case 'workspaceFiles.layout':
+        this.workspaceFilesView?.layout.apply(message.layout)
         break
       case 'workspaceFiles.snapshot': {
         const files = this.workspaceFilesView
@@ -11262,12 +11265,16 @@ export class WebviewSyncController {
     const contentEl = view?.dom.querySelector<HTMLElement>('.cm-content')
     const files = this.workspaceFilesView
     const fileMenu = this.workspaceFilesMenuEntry ? this.contextMenuEl : undefined
+    const previewTab = files?.previewTabName()
     const workspaceFiles: PaintProbe['workspaceFiles'] = {
       togglePainted: hitPaintedElement(this.workspaceFilesToggleBtn),
       panelPainted: hitPaintedElement(files?.header),
       currentFilePainted: hitPaintedElement(files?.currentFile()),
       treeActionsPainted: files?.treeActions.every(button => hitPaintedElement(button)) ?? false,
       menuPainted: hitPaintedElement(fileMenu, fileMenu),
+      widthHandlePainted: hitPaintedElement(files?.layout.widthHandle),
+      heightHandlePainted: hitPaintedElement(files?.layout.heightHandle),
+      previewTabPainted: !!previewTab && hitPaintedElement(previewTab) && getComputedStyle(previewTab).fontStyle === 'italic',
     }
     if (!view || !contentEl) {
       return {

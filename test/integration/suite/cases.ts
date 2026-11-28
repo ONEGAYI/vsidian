@@ -6701,6 +6701,91 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('lf.md', v => v.paint?.workspaceFiles?.panelPainted === false)
   }],
 
+  ['左侧文件栏：分隔条绘制、原生临时标签与文件移动', async () => {
+    const entry = wsUri('侧栏交互夹具.md')
+    const first = wsUri('侧栏临时甲.md')
+    const second = wsUri('侧栏临时乙.md')
+    const source = wsUri('侧栏移动夹具.md')
+    const directory = wsUri('侧栏拖放落点')
+    const destination = vscode.Uri.joinPath(directory, '侧栏移动夹具.md')
+    const root = vscode.workspace.getWorkspaceFolder(entry)!.uri
+    const id = (uri: vscode.Uri) => `tree:${root.toString()}|${uri.toString()}`
+    const tab = (uri: vscode.Uri) => vscode.window.tabGroups.activeTabGroup.tabs.find(({ input }) =>
+      input instanceof vscode.TabInputCustom && input.uri.toString() === uri.toString())
+    const send = async (panel: vscode.Uri, message: object) => {
+      await poll(`向就绪面板发送 ${JSON.stringify(message)}`, async () =>
+        await vscode.commands.executeCommand<boolean>(CMD.injectWebviewReceived, panel.toString(), message) || undefined, 5000)
+    }
+    const toggle = 'onegayi.vsidian.ui.workspaceFilesToggle'
+    const fixtureUris = [entry, first, second, source, destination]
+    let opened = false
+    let observedMove = false
+    const renamed = vscode.workspace.onDidRenameFiles(event => {
+      observedMove ||= event.files.some(({ oldUri, newUri }) =>
+        oldUri.toString() === source.toString() && newUri.toString() === destination.toString())
+    })
+    try {
+      await vscode.workspace.fs.createDirectory(directory)
+      const text = '# 本机侧栏交互样本\n'
+      for (const uri of [entry, first, second, source]) await vscode.workspace.fs.writeFile(uri, Buffer.from(text))
+      await vscode.commands.executeCommand('vscode.openWith', entry, VIEW_TYPE, { preview: false })
+      await waitSessionReady('侧栏交互夹具.md')
+      assert(await vscode.commands.executeCommand(toggle), '展开左侧栏')
+      opened = true
+      await waitViewState('侧栏交互夹具.md', ({ paint }) =>
+        paint?.workspaceFiles?.currentFilePainted === true &&
+        paint.workspaceFiles.widthHandlePainted === true && paint.workspaceFiles.heightHandlePainted === true)
+      await send(entry, { kind: 'workspaceFiles.move', id: id(source), directoryId: id(directory) })
+      await poll('真实 WorkspaceEdit 发出 rename 事件', async () => observedMove ? true : undefined)
+      const missing = await Promise.resolve(vscode.workspace.fs.stat(source)).then(() => false,
+        error => error instanceof vscode.FileSystemError && error.code === 'FileNotFound')
+      assert(missing, '原路径已不在')
+      assert(Buffer.from(await vscode.workspace.fs.readFile(destination)).toString() === text, '移动保留内容')
+      await waitViewState('侧栏交互夹具.md', ({ paint }) => {
+        if (paint?.workspaceFiles?.menuPainted) return true
+        // 用已移动条目的右键锚点确认树已刷新、目标文件夹已展开。
+        void vscode.commands.executeCommand(CMD.postToPanel, entry.toString(), {
+          kind: 'workspaceFiles.test.contextMenu', id: id(destination),
+        })
+        return false
+      })
+      await vscode.commands.executeCommand(CMD.postToPanel, entry.toString(), { kind: 'contextMenu.test.menuClose' })
+
+      await send(entry, { kind: 'workspaceFiles.activate', id: id(first), mode: 'preview' })
+      await waitSessionReady('侧栏临时甲.md')
+      await waitViewState('侧栏临时甲.md', ({ paint }) => paint?.workspaceFiles?.previewTabPainted === true)
+      assert(tab(first)?.isPreview && tab(first)?.isActive, '单击使用真实临时标签')
+
+      await send(first, { kind: 'workspaceFiles.activate', id: id(second), mode: 'preview' })
+      await waitSessionReady('侧栏临时乙.md')
+      await poll('替换临时标签但保留交互入口', async () =>
+        !tab(first) && tab(entry) && tab(second)?.isPreview ? true : undefined)
+      await send(second, { kind: 'workspaceFiles.activate', id: id(second), mode: 'keep' })
+      await poll('保留当前临时标签', async () => tab(second)?.isPreview === false ? true : undefined)
+      await waitViewState('侧栏临时乙.md', ({ paint }) => paint?.workspaceFiles?.previewTabPainted === false)
+
+      await send(second, { kind: 'workspaceFiles.closeTab', id: `tab:${VIEW_TYPE}|${second.toString()}` })
+      await poll('实际关闭所点标签且交互入口接管', async () => !tab(second) && tab(entry)?.isActive ? true : undefined)
+      await waitViewState('侧栏交互夹具.md', v => v.paint?.workspaceFiles?.currentFilePainted === true)
+      assert(Buffer.from(await vscode.workspace.fs.readFile(second)).toString() === text, '关闭不改变文件')
+    } finally {
+      renamed.dispose()
+      if (opened) {
+        if (!tab(entry)?.isActive) await vscode.commands.executeCommand('vscode.openWith', entry, VIEW_TYPE, { preview: false })
+        await poll('还原侧栏开合', async () => await vscode.commands.executeCommand<boolean>(toggle) || undefined)
+        await waitViewState('侧栏交互夹具.md', v => v.paint?.workspaceFiles?.panelPainted === false)
+      }
+      const tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(({ input }) =>
+        input instanceof vscode.TabInputCustom && fixtureUris.some(uri => input.uri.toString() === uri.toString()))
+      if (tabs.length) await vscode.window.tabGroups.close(tabs)
+      for (const uri of [...fixtureUris, directory]) {
+        await Promise.resolve(vscode.workspace.fs.delete(uri)).catch(error => {
+          if (!(error instanceof vscode.FileSystemError) || error.code !== 'FileNotFound') throw error
+        })
+      }
+    }
+  }],
+
   ['左侧文件栏：切回同组 Notebook 并保留编辑器类型', async () => {
     const toggle = 'onegayi.vsidian.ui.workspaceFilesToggle'
     const notebook = wsUri('文件侧栏测试.ipynb')

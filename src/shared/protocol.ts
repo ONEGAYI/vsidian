@@ -76,12 +76,36 @@ export function isWorkspaceFileAction(value: unknown): value is WorkspaceFileAct
   return WORKSPACE_FILE_ACTIONS.some(action => action === value)
 }
 
+export const WORKSPACE_FILES_DIMENSIONS = {
+  width: { min: 200, max: 720, default: 280 },
+  openedHeight: { min: 24, max: 480, default: null },
+} as const
+export type WorkspaceFilesDimension = keyof typeof WORKSPACE_FILES_DIMENSIONS
+export interface WorkspaceFilesLayout {
+  width: number
+  /** 已打开列表的像素高度；null 表示按内容自动布局。 */
+  openedHeight: number | null
+}
+
+function isWorkspaceFilesSize(dimension: WorkspaceFilesDimension, value: unknown): boolean {
+  const { min, max } = WORKSPACE_FILES_DIMENSIONS[dimension]
+  return (dimension === 'openedHeight' && value === null) ||
+    (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max)
+}
+
+export function isWorkspaceFilesLayout(value: unknown): value is WorkspaceFilesLayout {
+  return isObject(value) && isWorkspaceFilesSize('width', value.width) && isWorkspaceFilesSize('openedHeight', value.openedHeight)
+}
+
 /** 左侧栏只回传本面板快照中的条目 ID；一切文件操作由宿主解析。 */
 export type WorkspaceFilesRequest =
   | { kind: 'workspaceFiles.toggle' }
   | { kind: 'workspaceFiles.refresh' }
   | { kind: 'workspaceFiles.collapseAll' }
-  | { kind: 'workspaceFiles.activate'; id: string; expanded?: boolean }
+  | { kind: 'workspaceFiles.resize'; dimension: WorkspaceFilesDimension; value: number | null }
+  | { kind: 'workspaceFiles.activate'; id: string; expanded?: boolean; mode?: 'preview' | 'keep' }
+  | { kind: 'workspaceFiles.closeTab'; id: string }
+  | { kind: 'workspaceFiles.move'; id: string; directoryId: string }
   | { kind: 'workspaceFiles.manage'; id: string }
   | { kind: 'workspaceFiles.action'; id: string; action: WorkspaceFileAction }
   | { kind: 'workspaceFiles.create'; entry: 'file' | 'folder' }
@@ -91,6 +115,7 @@ export interface WorkspaceFileTab {
   name: string
   detail?: string
   current?: boolean
+  isPreview?: boolean
   /** 缺省表示此行不是现有本地引用读取器可处理的文件身份（如未命名标签）。 */
   previewKind?: LocalRefContentKind
 }
@@ -101,6 +126,8 @@ export interface WorkspaceFileEntry extends WorkspaceFileTab {
   expanded?: boolean
   unreadable?: boolean
   actions: WorkspaceFileAction[]
+  /** 宿主给出同源移动范围；文件的 directory 指其所在目录，目录行指自身。 */
+  move?: { scope: string; directory: string }
 }
 
 export interface WorkspaceFilesSnapshot {
@@ -116,6 +143,7 @@ export interface WorkspaceFilesSnapshot {
 export type HostToWebview =
   | { kind: 'paste.preferences.result'; reqId: number; ok: boolean }
   | WorkspaceFilesSnapshot
+  | { kind: 'workspaceFiles.layout'; layout: WorkspaceFilesLayout }
   /** ready 后首发：全文 + 当前权威版本。fsPath（#577，可选）：当前文档的
    *  宿主权威 fsPath——webview 无法从 docUri 自行无歧义转换（盘符/UNC 的
    *  平台形态只有宿主知道），面板条目组装 directTarget（悬停预览直接目标）
@@ -3007,8 +3035,11 @@ export interface ReadingFoldPaintProbe {
 }
 
 export interface PaintProbe {
-  /** 左侧栏的开关、顶栏、文件树操作与当前文件行的绘制层命中。 */
-  workspaceFiles?: { togglePainted: boolean; panelPainted: boolean; currentFilePainted: boolean; treeActionsPainted?: boolean; menuPainted?: boolean }
+  /** 左侧栏的交互面命中与临时标签斜体。 */
+  workspaceFiles?: {
+    togglePainted: boolean; panelPainted: boolean; currentFilePainted: boolean; treeActionsPainted?: boolean; menuPainted?: boolean
+    widthHandlePainted?: boolean; heightHandlePainted?: boolean; previewTabPainted?: boolean
+  }
   /** Live 文末：真实行盒、文字命中与下方留白（按需视口探针）。 */
   liveEnd?: { lineTopPx: number; endGapPx: number; textPainted: boolean; blankBelow: boolean }
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
@@ -4134,7 +4165,10 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       typeof v.workspaceFiles.panelPainted === 'boolean' &&
       typeof v.workspaceFiles.currentFilePainted === 'boolean' &&
       (v.workspaceFiles.treeActionsPainted === undefined || typeof v.workspaceFiles.treeActionsPainted === 'boolean') &&
-      (v.workspaceFiles.menuPainted === undefined || typeof v.workspaceFiles.menuPainted === 'boolean'))) &&
+      (v.workspaceFiles.menuPainted === undefined || typeof v.workspaceFiles.menuPainted === 'boolean') &&
+      (v.workspaceFiles.widthHandlePainted === undefined || typeof v.workspaceFiles.widthHandlePainted === 'boolean') &&
+      (v.workspaceFiles.heightHandlePainted === undefined || typeof v.workspaceFiles.heightHandlePainted === 'boolean') &&
+      (v.workspaceFiles.previewTabPainted === undefined || typeof v.workspaceFiles.previewTabPainted === 'boolean'))) &&
     (v.liveEnd === undefined || (isObject(v.liveEnd) &&
       typeof v.liveEnd.lineTopPx === 'number' && Number.isFinite(v.liveEnd.lineTopPx) &&
       typeof v.liveEnd.endGapPx === 'number' && Number.isFinite(v.liveEnd.endGapPx) &&
@@ -4665,10 +4699,17 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'workspaceFiles.refresh':
     case 'workspaceFiles.collapseAll':
       return true
+    case 'workspaceFiles.resize':
+      return (v.dimension === 'width' || v.dimension === 'openedHeight') && isWorkspaceFilesSize(v.dimension, v.value)
     case 'workspaceFiles.activate':
-      return typeof v.id === 'string' && v.id.length > 0 && (v.expanded === undefined || typeof v.expanded === 'boolean')
+      return typeof v.id === 'string' && v.id.length > 0 &&
+        (v.mode === undefined || ((v.mode === 'preview' || v.mode === 'keep') && v.expanded === undefined)) &&
+        (v.expanded === undefined || typeof v.expanded === 'boolean')
+    case 'workspaceFiles.closeTab':
     case 'workspaceFiles.manage':
       return typeof v.id === 'string' && v.id.length > 0
+    case 'workspaceFiles.move':
+      return typeof v.id === 'string' && v.id.length > 0 && typeof v.directoryId === 'string' && v.directoryId.length > 0
     case 'workspaceFiles.action':
       return typeof v.id === 'string' && v.id.length > 0 && isWorkspaceFileAction(v.action)
     case 'workspaceFiles.create':
@@ -5507,6 +5548,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
 function isWorkspaceFileTab(v: unknown): v is WorkspaceFileTab {
   return isObject(v) && isString(v.id) && isString(v.name) &&
     (v.detail === undefined || isString(v.detail)) && (v.current === undefined || typeof v.current === 'boolean') &&
+    (v.isPreview === undefined || typeof v.isPreview === 'boolean') &&
     (v.previewKind === undefined || (isRefContentKind(v.previewKind) && v.previewKind !== 'web'))
 }
 
@@ -5519,6 +5561,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case '_test.skeleton.release':
       // #292 骨架测试钩子：无字段的触发型消息
       return true
+    case 'workspaceFiles.layout':
+      return isWorkspaceFilesLayout(v.layout)
     case 'workspaceFiles.snapshot':
       return typeof v.open === 'boolean' && typeof v.loading === 'boolean' && typeof v.canCreate === 'boolean' &&
         Array.isArray(v.tabs) && v.tabs.every(isWorkspaceFileTab) && Array.isArray(v.entries) &&
@@ -5526,6 +5570,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           (row.kind === 'root' || row.kind === 'folder' || row.kind === 'file') &&
           isNonNegativeInt(row.level) && Array.isArray(row.actions) && row.actions.every(isWorkspaceFileAction) &&
           (row.expanded === undefined || typeof row.expanded === 'boolean') &&
+          (row.move === undefined || (isObject(row.move) && isString(row.move.scope) && isString(row.move.directory))) &&
           (row.unreadable === undefined || typeof row.unreadable === 'boolean') && isWorkspaceFileTab(row))
     case 'workspaceFiles.test.contextMenu':
       return typeof v.id === 'string' && v.id.length > 0

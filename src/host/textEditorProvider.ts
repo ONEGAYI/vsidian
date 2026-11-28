@@ -3726,7 +3726,10 @@ export function createTextEditorProvider(
             case 'workspaceFiles.toggle':
             case 'workspaceFiles.refresh':
             case 'workspaceFiles.collapseAll':
+            case 'workspaceFiles.resize':
             case 'workspaceFiles.activate':
+            case 'workspaceFiles.closeTab':
+            case 'workspaceFiles.move':
             case 'workspaceFiles.manage':
             case 'workspaceFiles.action':
             case 'workspaceFiles.create':

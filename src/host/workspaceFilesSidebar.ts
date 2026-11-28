@@ -3,10 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { PDF_HOVER_MAX_BYTES } from './hoverDocAccess'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
-import type { WorkspaceFileAction, WorkspaceFileEntry, WorkspaceFilesRequest, WorkspaceFilesSnapshot } from '../shared/protocol'
+import {
+  isWorkspaceFilesLayout, WORKSPACE_FILES_DIMENSIONS, type HostToWebview, type WorkspaceFileAction,
+  type WorkspaceFileEntry, type WorkspaceFilesLayout, type WorkspaceFilesRequest, type WorkspaceFilesSnapshot,
+} from '../shared/protocol'
 import { classifyLocalRefContentKind } from '../shared/refContent'
 
 const OPEN_KEY = 'vsidian.workspaceFiles.open'
+const LAYOUT_KEY = 'vsidian.workspaceFiles.layout'
 const MEDIA_SCHEME = 'vsidian-file-preview'
 const ASSET_ALIAS_LIMIT = 256
 const nameOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
@@ -42,8 +46,8 @@ function pathIdentity(uri: vscode.Uri): string {
   return ignoreCase ? path.toLowerCase() : path
 }
 
-const sameOrigin = (a: vscode.Uri, b: vscode.Uri): boolean =>
-  a.scheme === b.scheme && a.authority.toLowerCase() === b.authority.toLowerCase()
+const originOf = (uri: vscode.Uri): string => `${uri.scheme}://${uri.authority.toLowerCase()}`
+const sameOrigin = (a: vscode.Uri, b: vscode.Uri): boolean => originOf(a) === originOf(b)
 
 function contains(parent: vscode.Uri, item: vscode.Uri): boolean {
   if (!sameOrigin(parent, item)) return false
@@ -94,9 +98,10 @@ function isFileName(name: string): boolean {
     !/^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(name)
 }
 
-/** 按工作区共享开关和目录展开态；按面板派发所在编辑器组的标签及可操作条目。 */
+/** 按工作区共享开关、尺寸和目录展开态；按面板派发所在编辑器组的标签及可操作条目。 */
 export class WorkspaceFilesSidebar implements vscode.Disposable {
   private open: boolean
+  private layout: WorkspaceFilesLayout
   private readonly clients = new Map<vscode.WebviewPanel, Client>()
   private readonly mediaClients = new Map<string, Client>()
   private readonly expandedRoots = new Map<string, boolean>()
@@ -109,6 +114,11 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
 
   constructor(private readonly store: vscode.Memento, private readonly hostKind: vscode.ExtensionKind) {
     this.open = store.get(OPEN_KEY) === true
+    const saved = store.get(LAYOUT_KEY)
+    this.layout = isWorkspaceFilesLayout(saved) ? saved : {
+      width: WORKSPACE_FILES_DIMENSIONS.width.default,
+      openedHeight: WORKSPACE_FILES_DIMENSIONS.openedHeight.default,
+    }
   }
 
   attach(uri: vscode.Uri, panel: vscode.WebviewPanel) {
@@ -223,11 +233,29 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
 
   private viewChanged(client: Client): void {
     if (!client.ready || !client.panel.visible || this.clients.get(client.panel) !== client) return
+    this.postLayout(client)
     if (this.open) {
       this.startWatching()
       if (client.panel.active) this.revealDocument(client.uri)
     }
     this.refresh()
+  }
+
+  private postLayout(client: Client): void {
+    const message: HostToWebview = { kind: 'workspaceFiles.layout', layout: this.layout }
+    void client.panel.webview.postMessage(message)
+  }
+
+  private resize({ dimension, value }: Extract<WorkspaceFilesRequest, { kind: 'workspaceFiles.resize' }>): void {
+    if (this.layout[dimension] === value) return
+    const layout = { ...this.layout, [dimension]: value }
+    if (!isWorkspaceFilesLayout(layout)) return
+    this.layout = layout
+    for (const client of this.clients.values()) {
+      if (client.ready && client.panel.visible) this.postLayout(client)
+    }
+    void Promise.resolve(this.store.update(LAYOUT_KEY, layout)).catch(() =>
+      vscode.window.showWarningMessage(t('workspaceFiles.storageFailed')))
   }
 
   private revealDocument(uri: vscode.Uri): void {
@@ -316,7 +344,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       const id = `tab:${editor}|${input.uri.toString()}`
       const dir = parentOf(input.uri)
       const detail = input.uri.scheme === 'untitled' ? undefined : vscode.workspace.asRelativePath(dir)
-      snapshot.tabs.push({ id, name: tab.label, detail, current: tab.isActive, previewKind: previewKindOf(input.uri) })
+      snapshot.tabs.push({ id, name: tab.label, detail, current: tab.isActive, isPreview: tab.isPreview, previewKind: previewKindOf(input.uri) })
       targets.set(id, { kind: 'tab', editor, uri: input.uri })
     }
     const roots = vscode.workspace.workspaceFolders ?? []
@@ -344,6 +372,10 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     targets.set(id, target)
     const row: WorkspaceFileEntry = { id, name, kind, level, actions: this.fileActions(target),
       detail: vscode.workspace.asRelativePath(uri), current: kind === 'file' && sameUri(uri, current) }
+    if (row.actions.includes(kind === 'file' ? 'rename' : 'createFile')) {
+      const directory = kind === 'file' ? parentOf(uri) : uri
+      row.move = { scope: originOf(directory), directory: JSON.stringify([pathIdentity(directory), directory.query, directory.fragment]) }
+    }
     if (kind === 'file') {
       row.previewKind = previewKindOf(uri)
       return [row]
@@ -432,6 +464,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       return
     }
     if (!this.open) return
+    if (request.kind === 'workspaceFiles.resize') return this.resize(request)
     if (request.kind === 'workspaceFiles.refresh') {
       this.listings.clear()
       this.refresh()
@@ -452,7 +485,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   }
 
   private async perform(client: Client, request: Extract<WorkspaceFilesRequest,
-    { kind: 'workspaceFiles.activate' | 'workspaceFiles.manage' | 'workspaceFiles.create' | 'workspaceFiles.action' }>): Promise<void> {
+    { kind: 'workspaceFiles.activate' | 'workspaceFiles.manage' | 'workspaceFiles.create' | 'workspaceFiles.action' |
+      'workspaceFiles.move' | 'workspaceFiles.closeTab' }>): Promise<void> {
     if (request.kind === 'workspaceFiles.create') {
       const directory = await this.defaultDirectory(client)
       if (directory) await this.create(client, directory, request.entry)
@@ -462,19 +496,24 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       await this.runFileAction(client, request.id, request.action)
       return
     }
+    if (request.kind === 'workspaceFiles.move') return this.moveFile(client, request.id, request.directoryId)
     const target = client.targets.get(request.id)
     if (!target) return
-    if (request.kind === 'workspaceFiles.activate' && request.expanded !== undefined &&
-        (target.kind === 'file' || target.kind === 'tab')) return
+    const isDirectory = target.kind === 'folder' || target.kind === 'root'
+    if (request.kind === 'workspaceFiles.activate' &&
+        ((request.expanded !== undefined && !isDirectory) || (request.mode !== undefined && isDirectory))) return
     if (target.kind === 'tab') {
       if (request.kind === 'workspaceFiles.activate') {
         // VS Code 可重建 Tab 对象；从同组实时标签按 URI 和编辑器类型重新定位。
         const tab = this.findTab(client, target)
-        if (tab) await this.openTab(client, tab)
+        if (tab) await this.openTab(client, tab, request.mode === 'keep')
+      } else if (request.kind === 'workspaceFiles.closeTab') {
+        const tab = this.findTab(client, target)
+        if (tab) await vscode.window.tabGroups.close(tab, !tab.isActive)
       }
       return
     }
-    if (!vscode.workspace.getWorkspaceFolder(target.uri)) return
+    if (request.kind === 'workspaceFiles.closeTab' || !vscode.workspace.getWorkspaceFolder(target.uri)) return
     if (request.kind === 'workspaceFiles.manage') {
       await this.manage(client, request.id, target)
     } else if (target.kind === 'file') {
@@ -482,8 +521,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       const tabs = this.groupOf(client)?.tabs.filter(isFileTab) ?? []
       const existing = tabs.find(tab => tab.isActive && sameUri(tab.input.uri, target.uri)) ??
         tabs.find(tab => sameUri(tab.input.uri, target.uri))
-      if (existing) await this.openTab(client, existing)
-      else await this.openFile(client, target.uri)
+      if (existing) await this.openTab(client, existing, request.mode === 'keep')
+      else await this.openFile(client, target.uri, request.mode === 'preview')
     } else {
       const key = target.uri.toString()
       const expansion = target.kind === 'root' ? this.expandedRoots : this.expandedFolders
@@ -496,9 +535,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     }
   }
 
-  private async openTab(client: Client, tab: FileTab): Promise<void> {
-    if (tab.isActive) return
-    const options = { viewColumn: client.panel.viewColumn, preview: tab.isPreview }
+  private async openTab(client: Client, tab: FileTab, keep: boolean): Promise<void> {
+    if (tab.isActive && (!keep || !tab.isPreview)) return
+    const options = { viewColumn: client.panel.viewColumn, preview: !keep && tab.isPreview }
     if (tab.input instanceof vscode.TabInputCustom) {
       await vscode.commands.executeCommand('vscode.openWith', tab.input.uri, tab.input.viewType, options)
     } else if (tab.input instanceof vscode.TabInputNotebook) {
@@ -511,8 +550,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     }
   }
 
-  private async openFile(client: Client, uri: vscode.Uri): Promise<void> {
-    await vscode.commands.executeCommand('vscode.open', uri, { viewColumn: client.panel.viewColumn, preview: false })
+  private async openFile(client: Client, uri: vscode.Uri, preview = false): Promise<void> {
+    await vscode.commands.executeCommand('vscode.open', uri, { viewColumn: client.panel.viewColumn, preview })
   }
 
   private async defaultDirectory(client: Client): Promise<vscode.Uri | undefined> {
@@ -592,8 +631,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       edit.createFile(uri, { overwrite: false })
       if (!await vscode.workspace.applyEdit(edit)) throw vscode.FileSystemError.Unavailable(uri)
     }
-    this.expandedFolders.set(dir.toString(), true)
-    if (isWorkspaceRoot(dir)) this.expandedRoots.set(dir.toString(), true)
+    this.expandDirectory(dir)
     this.invalidate(uri)
     this.scheduleRefresh()
     if (entry === 'file') await this.openFile(client, uri)
@@ -608,11 +646,54 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     if (name.toLowerCase() !== target.name.toLowerCase()) await this.requireMissing(uri, name)
     await verifyTreePath(target.uri, target.kind === 'file' ? vscode.FileType.File : vscode.FileType.Directory)
     if (containsWorkspaceRoot(target.uri)) return
+    await this.applyRename(target.uri, uri)
+  }
+
+  private async moveFile(client: Client, id: string, directoryId: string): Promise<void> {
+    const source = client.targets.get(id)
+    const directory = client.targets.get(directoryId)
+    if (source?.kind !== 'file' || (directory?.kind !== 'folder' && directory?.kind !== 'root') ||
+        !sameOrigin(source.uri, directory.uri) || sameUri(parentOf(source.uri), directory.uri) ||
+        !this.fileActions(source).includes('rename') || !isWritable(directory.uri)) return
+    const fromRoot = vscode.workspace.getWorkspaceFolder(source.uri)?.uri
+    const toRoot = vscode.workspace.getWorkspaceFolder(directory.uri)?.uri
+    if (!fromRoot || !toRoot) return
+    const to = vscode.Uri.joinPath(directory.uri, source.name)
+    if (!sameUri(parentOf(to), directory.uri)) return
+    await this.requireMissing(to, source.name)
+    // 查重的异步间隙也可能更换祖先目录；把实际路径复核放在写入前。
+    await Promise.all([
+      verifyTreePath(source.uri, vscode.FileType.File, fromRoot),
+      verifyTreePath(directory.uri, vscode.FileType.Directory, toRoot),
+    ])
+
+    // 读盘期间窗口可切走、目录可折叠或工作区根可撤下；不沿用已经失效的授权。
+    const currentSource = client.targets.get(id)
+    const currentDirectory = client.targets.get(directoryId)
+    const inSameRoot = (uri: vscode.Uri, root: vscode.Uri) => {
+      const currentRoot = vscode.workspace.getWorkspaceFolder(uri)?.uri
+      return currentRoot !== undefined && sameUri(root, currentRoot)
+    }
+    if (!this.open || !client.panel.active || this.clients.get(client.panel) !== client ||
+        currentSource?.kind !== 'file' || !sameUri(currentSource.uri, source.uri) ||
+        currentDirectory?.kind !== directory.kind || !sameUri(currentDirectory.uri, directory.uri) ||
+        !inSameRoot(source.uri, fromRoot) || !inSameRoot(directory.uri, toRoot) ||
+        !this.fileActions(source).includes('rename') || !isWritable(directory.uri)) return
+    await this.applyRename(source.uri, to)
+    this.expandDirectory(directory.uri)
+  }
+
+  private expandDirectory(uri: vscode.Uri): void {
+    this.expandedFolders.set(uri.toString(), true)
+    if (isWorkspaceRoot(uri)) this.expandedRoots.set(uri.toString(), true)
+  }
+
+  private async applyRename(from: vscode.Uri, to: vscode.Uri): Promise<void> {
     const edit = new vscode.WorkspaceEdit()
-    edit.renameFile(target.uri, uri, { overwrite: false })
-    if (!await vscode.workspace.applyEdit(edit)) throw vscode.FileSystemError.Unavailable(target.uri)
-    this.invalidate(target.uri)
-    this.invalidate(uri)
+    edit.renameFile(from, to, { overwrite: false })
+    if (!await vscode.workspace.applyEdit(edit)) throw vscode.FileSystemError.Unavailable(from)
+    this.invalidate(from)
+    this.invalidate(to)
     this.scheduleRefresh()
   }
 

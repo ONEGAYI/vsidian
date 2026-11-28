@@ -10,10 +10,12 @@ await build({ entryPoints: [path.join(root, 'test/browser/workspaceFilesFixture.
 
 const createActions = ['createFile', 'createFolder']
 const fileActions = ['rename', 'trash']
-const folder = { id: 'folder', name: '资料', level: 1, kind: 'folder', expanded: false, actions: [...createActions, ...fileActions] }
-const file = { id: 'current', name: '随记.md', level: 1, kind: 'file', current: true, actions: fileActions, previewKind: 'markdown' }
-const child = { id: 'child', name: '参考文献.md', level: 2, kind: 'file', actions: fileActions, previewKind: 'markdown' }
-const entries = [{ id: 'root', name: '笔记工作区', level: 0, kind: 'root', expanded: true, actions: createActions }, folder, file]
+const rootMove = { scope: 'file://', directory: 'root' }
+const folderMove = { ...rootMove, directory: 'folder' }
+const folder = { id: 'folder', name: '资料', level: 1, kind: 'folder', expanded: false, actions: [...createActions, ...fileActions], move: folderMove }
+const file = { id: 'current', name: '随记.md', level: 1, kind: 'file', current: true, actions: fileActions, previewKind: 'markdown', move: rootMove }
+const child = { id: 'child', name: '参考文献.md', level: 2, kind: 'file', actions: fileActions, previewKind: 'markdown', move: folderMove }
+const entries = [{ id: 'root', name: '笔记工作区', level: 0, kind: 'root', expanded: true, actions: createActions, move: rootMove }, folder, file]
 const tabs = [{ id: 'tab-current', name: '随记.md', current: true },
   { id: 'tab-other', name: '草稿.md', detail: '论文', current: false, previewKind: 'markdown' }]
 const browser = await chromium.launch({ headless: true, channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
@@ -25,6 +27,7 @@ try {
       --vscode-sideBar-background: #242424; --vscode-sideBar-foreground: #ddd;
       --vscode-panel-border: #393939; --vscode-list-activeSelectionBackground: #264f78;
       --vscode-list-activeSelectionForeground: #fff; --vscode-list-hoverBackground: #303030;
+      --vscode-list-dropBackground: #314963;
       --vscode-focusBorder: #007fd4; --vscode-descriptionForeground: #a5a5a5;
       --vscode-menu-background: #2e3033; --vscode-errorForeground: #f48771; }
     </style><div id="app"></div>`)
@@ -36,6 +39,10 @@ try {
     entries: open ? customEntries : [], tabs: open ? customTabs : [],
   })
   const lastMessage = () => page.evaluate(() => window.messages.filter(m => m.kind.startsWith('workspaceFiles.')).at(-1))
+  const waitMessage = message => page.waitForFunction(expected => {
+    const last = window.messages.filter(m => m.kind.startsWith('workspaceFiles.')).at(-1)
+    return JSON.stringify(last) === JSON.stringify(expected)
+  }, message, { timeout: 2000 })
   const left = page.locator('.vsidian-file-sidebar')
   const leftToggle = page.locator('.vsidian-file-sidebar-toggle')
   const rightToggle = page.locator('.vsidian-sidebar-toggle')
@@ -94,7 +101,7 @@ try {
   assert.equal(await dir.getAttribute('aria-expanded'), 'true')
   assert.equal(await dir.evaluate(el => el === document.activeElement), true, '刷新不得打断键盘导航')
   await tree.getByRole('button', { name: '参考文献.md', exact: true }).click()
-  assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.activate', id: 'child' })
+  await waitMessage({ kind: 'workspaceFiles.activate', id: 'child', mode: 'preview' })
   await left.getByRole('button', { name: /^草稿\.md/ }).click()
   assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.activate', id: 'tab-other' })
   await left.getByRole('button', { name: '新建文件', exact: true }).click()
@@ -345,6 +352,168 @@ try {
   assert.equal(exportRequest.fileName, picture.name)
   await page.keyboard.press('Escape')
   console.log('[PASS] 侧栏本地图复用放大与另存，并以条目身份发起导出')
+
+  const layout = (width = 280, openedHeight = null) => send({ kind: 'workspaceFiles.layout', layout: { width, openedHeight } })
+  const center = async locator => {
+    const box = await locator.boundingBox({ timeout: 2000 })
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  }
+  const widthHandle = left.getByRole('separator', { name: '调整文件侧栏宽度' })
+  const heightHandle = left.getByRole('separator', { name: '调整已打开列表高度' })
+  const opened = left.getByRole('list', { name: '已打开', exact: true })
+  const manyTabs = [...tabs, ...Array.from({ length: 22 }, (_, i) => ({ id: `tab-${i}`, name: `临时笔记 ${i}.md` }))]
+  await state(true, [...entries, ...inserted], manyTabs)
+  await layout()
+  const oldHeight = (await opened.boundingBox()).height
+  const widthAt = await center(widthHandle)
+  await page.mouse.move(widthAt.x, widthAt.y)
+  assert.deepEqual(await widthHandle.evaluate(el => {
+    const r = el.getBoundingClientRect()
+    return [el === document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
+      getComputedStyle(el).cursor, getComputedStyle(el, '::before').backgroundColor]
+  }), [true, 'col-resize', 'rgb(0, 127, 212)'])
+  await page.mouse.down()
+  await page.mouse.move(widthAt.x + 88, widthAt.y, { steps: 5 })
+  assert.ok(Math.abs((await left.boundingBox()).width - 368) < 1, '拖动时正文立即让位')
+  await page.mouse.up()
+  await waitMessage({ kind: 'workspaceFiles.resize', dimension: 'width', value: 368 })
+  assert.equal((await opened.boundingBox()).height, oldHeight)
+
+  const treeScroller = tree.locator('..')
+  const treeHeight = (await treeScroller.boundingBox()).height
+  const heightAt = await center(heightHandle)
+  await page.mouse.move(heightAt.x, heightAt.y)
+  assert.equal(await heightHandle.evaluate(el => getComputedStyle(el).cursor), 'row-resize')
+  await page.mouse.down()
+  await page.mouse.move(heightAt.x, heightAt.y + 60, { steps: 5 })
+  assert.equal((await opened.boundingBox()).height, oldHeight + 60)
+  assert.equal((await treeScroller.boundingBox()).height, treeHeight - 60)
+  await page.mouse.up()
+  await waitMessage({ kind: 'workspaceFiles.resize', dimension: 'openedHeight', value: oldHeight + 60 })
+  await opened.evaluate(el => { el.scrollTop = 60 })
+  assert.equal(await opened.evaluate(el => el.scrollTop), 60)
+  assert.equal(await treeScroller.evaluate(el => el.scrollTop), 0, '两个列表仍独立滚动')
+  await page.screenshot({ path: path.join(path.dirname(output), 'files-resized.png') })
+
+  await heightHandle.focus()
+  await page.keyboard.press('ArrowUp')
+  await waitMessage({ kind: 'workspaceFiles.resize', dimension: 'openedHeight', value: oldHeight + 52 })
+  const start = await center(heightHandle)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  await page.mouse.move(start.x, start.y + 35)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  assert.equal((await opened.boundingBox()).height, oldHeight + 52, 'Esc 回到拖动前且不提交')
+  await widthHandle.dblclick()
+  await waitMessage({ kind: 'workspaceFiles.resize', dimension: 'width', value: 280 })
+  await heightHandle.dblclick()
+  await waitMessage({ kind: 'workspaceFiles.resize', dimension: 'openedHeight', value: null })
+  assert.equal((await opened.boundingBox()).height, oldHeight)
+  await page.setViewportSize({ width: 760, height: 360 })
+  await layout(720, 480)
+  assert.equal((await left.boundingBox()).width, 356, '两栏同开时，拖宽不能挤走正文和右栏')
+  assert.ok((await main.boundingBox()).width >= 224)
+  assert.ok((await treeScroller.boundingBox()).height >= 96, '较矮窗口为文件树留出位置')
+  await page.setViewportSize({ width: 360, height: 380 })
+  assert.equal((await left.boundingBox()).width, 306, '窄窗覆盖层的宽度上限随视口调整')
+  await page.setViewportSize({ width: 1440, height: 780 })
+  assert.equal((await left.boundingBox()).width, 720, '窗口变大后恢复实际记忆的宽度')
+  await layout()
+  await state(true, entries, [])
+  assert.equal(await heightHandle.isVisible(), false, '没有已打开文件时，不留不能调整的分隔条')
+  console.log('[PASS] 两个分隔条命中、拖动、键盘、取消和恢复默认；列表各自滚动')
+
+  const foreign = { ...entries[0], id: 'foreign', name: '另一个文件系统', move: { scope: 'file://another-server', directory: 'remote-root' } }
+  const nestedRoot = { ...entries[0], id: 'nested-root', name: '资料（另一工作区根）', move: folderMove }
+  await state(true, [entries[0], { ...folder, expanded: true }, child, file, foreign, nestedRoot])
+  const rootRow = tree.getByRole('button', { name: '笔记工作区', exact: true })
+  const foreignRow = tree.getByRole('button', { name: foreign.name, exact: true })
+  const nestedRootRow = tree.getByRole('button', { name: nestedRoot.name, exact: true })
+  const childRow = tree.getByRole('button', { name: child.name, exact: true })
+  const moveRequests = () => page.evaluate(() => window.messages.filter(m => m.kind === 'workspaceFiles.move'))
+  const drag = async (source, destination) => {
+    const from = await center(source), to = await center(destination)
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x + 12, from.y, { steps: 4 })
+    await page.mouse.move(to.x, to.y, { steps: 6 })
+    await page.mouse.move(to.x + 1, to.y)
+  }
+  await drag(current, dir)
+  await dir.evaluate(el => el.scrollIntoView({ block: 'nearest' }))
+  await page.waitForFunction(() => {
+    const target = document.querySelector('.vsidian-file-tree .vsidian-file-entry.vsidian-file-drop-target')
+    return target && getComputedStyle(target).backgroundColor === 'rgb(49, 73, 99)'
+  }, undefined, { timeout: 2000 })
+  assert.equal(await dir.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(49, 73, 99)')
+  await page.screenshot({ path: path.join(path.dirname(output), 'files-drag-move.png'),
+    clip: { x: 0, y: 0, width: 860, height: 410 } })
+  await page.mouse.up()
+  await waitMessage({ kind: 'workspaceFiles.move', id: file.id, directoryId: folder.id })
+  assert.equal(await tree.locator('.vsidian-file-drop-target').count(), 0)
+  await drag(childRow, rootRow)
+  await page.mouse.up()
+  await waitMessage({ kind: 'workspaceFiles.move', id: child.id, directoryId: entries[0].id })
+  for (const dest of [current, dir, foreignRow, nestedRootRow]) {
+    await drag(childRow, dest)
+    assert.equal(await tree.locator('.vsidian-file-drop-target').count(), 0)
+    await page.mouse.up()
+  }
+  await drag(current, dir)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  const outsideDrag = await page.evaluateHandle(() => new DataTransfer())
+  await dir.dispatchEvent('dragover', { dataTransfer: outsideDrag })
+  await dir.dispatchEvent('drop', { dataTransfer: outsideDrag })
+  assert.equal((await moveRequests()).length, 2, '不移动到原目录、文件，或响应外部拖放与取消手势')
+  assert.equal(await tree.locator('.vsidian-file-drop-target').count(), 0)
+  console.log('[PASS] 鼠标拖文件到子目录或根；落点着色，取消和无效目标不提交')
+
+  await state(true, entries, [tabs[0], { ...tabs[1], isPreview: true }])
+  const previewTab = opened.getByRole('button', { name: /^草稿\.md/ })
+  const closeTab = opened.getByRole('button', { name: '关闭草稿.md', exact: true })
+  await page.mouse.move(650, 55)
+  assert.equal(await previewTab.locator('.vsidian-file-name').evaluate(el => getComputedStyle(el).fontStyle), 'italic')
+  assert.equal(await opened.getByText('随记.md').evaluate(el => getComputedStyle(el).fontStyle), 'normal')
+  assert.equal(await closeTab.evaluate(el => getComputedStyle(el).opacity), '0')
+  await previewTab.hover()
+  assert.equal(await closeTab.evaluate(el => {
+    const r = el.getBoundingClientRect(), row = el.parentElement.getBoundingClientRect()
+    return getComputedStyle(el).opacity === '1' && row.right - r.right <= 2 &&
+      el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))
+  }), true, '只在悬停行展示可命中的右对齐关闭按钮')
+  await page.screenshot({ path: path.join(path.dirname(output), 'files-open-editors.png'),
+    clip: { x: 0, y: 0, width: 720, height: 260 } })
+  const beforeClose = await page.evaluate(() => window.messages.length)
+  await previewTab.click({ button: 'middle' })
+  await waitMessage({ kind: 'workspaceFiles.closeTab', id: 'tab-other' })
+  await closeTab.click()
+  assert.deepEqual(await page.evaluate(start => window.messages.slice(start).filter(m => m.kind.startsWith('workspaceFiles.')), beforeClose), [
+    { kind: 'workspaceFiles.closeTab', id: 'tab-other' }, { kind: 'workspaceFiles.closeTab', id: 'tab-other' },
+  ])
+  await previewTab.dblclick({ delay: 70 })
+  await waitMessage({ kind: 'workspaceFiles.activate', id: 'tab-other', mode: 'keep' })
+  await state(true, [entries[0], { ...folder, expanded: true }, child, file])
+  const beforeCurrent = await page.evaluate(() => window.messages.length)
+  await current.dblclick()
+  assert.deepEqual(await page.evaluate(start => window.messages.slice(start).filter(m => m.kind === 'workspaceFiles.activate'), beforeCurrent), [
+    { kind: 'workspaceFiles.activate', id: file.id, mode: 'keep' },
+  ], '当前文件首击不走查盘，避免忙碌守卫吞掉紧随其后的保留')
+  const beforeDoubleClick = await page.evaluate(() => window.messages.length)
+  const doubleAt = await center(childRow)
+  await page.mouse.click(doubleAt.x, doubleAt.y)
+  await page.waitForTimeout(425) // 本机系统识别的双击间隔；此时临时打开会让原行随 webview 换出。
+  assert.equal(await page.evaluate(start => window.messages.slice(start).filter(m => m.kind === 'workspaceFiles.activate').length, beforeDoubleClick), 0)
+  await page.mouse.down({ clickCount: 2 })
+  await page.mouse.up({ clickCount: 2 })
+  await waitMessage({ kind: 'workspaceFiles.activate', id: child.id, mode: 'keep' })
+  await dir.click()
+  assert.deepEqual(await page.evaluate(start => window.messages.slice(start).filter(m => m.kind === 'workspaceFiles.activate'), beforeDoubleClick), [
+    { kind: 'workspaceFiles.activate', id: child.id, mode: 'keep' },
+    { kind: 'workspaceFiles.activate', id: folder.id },
+  ], '双击只发一次保留请求，不先打开临时标签再切面板')
+  console.log('[PASS] 临时标签斜体、右对齐关闭按钮、中键关闭和双击保留')
 } finally {
   await browser.close()
 }

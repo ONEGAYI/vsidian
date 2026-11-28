@@ -545,6 +545,8 @@ body.vscode-light #app {
    公开变量入口（外部片段可覆盖）：--vsidian-sidebar-width（侧栏宽）/
    --vsidian-toolbar-height（两侧顶栏高度，取同一值保证对齐）。 */
 #app .vsidian-body {
+  --_vsidian-file-sidebar-available: max(0px, calc(100vw - var(--_vsidian-file-sidebar-reserved, 224px)));
+  --_vsidian-file-sidebar-width: min(var(--_vsidian-file-sidebar-requested-width, 280px), var(--_vsidian-file-sidebar-available));
   display: flex;
   height: 100%;
   min-width: 0;
@@ -559,12 +561,13 @@ body.vscode-light #app {
 
 /* 文件侧栏：与右栏共享 280px 默认档和顶栏高度，不改右栏的变量或结构。 */
 #app .vsidian-file-sidebar {
-  --_vsidian-file-sidebar-width: 280px;
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
   box-sizing: border-box;
   width: 0;
+  max-width: var(--_vsidian-file-sidebar-available);
   overflow: hidden;
   visibility: hidden;
   color: var(--vscode-sideBar-foreground, var(--vscode-editor-foreground));
@@ -580,14 +583,18 @@ body.vscode-light #app {
 
 /* 像右栏一样只裁开合动画的外壳。行宽若随外壳暂时压成零，行尾按钮会
    折到下一行，首帧按这份高度定位会在动画结束后滚过当前文件。 */
-#app .vsidian-file-sidebar > * {
+#app .vsidian-file-sidebar > :not(.vsidian-file-resizer-width) {
   box-sizing: border-box;
   width: calc(var(--_vsidian-file-sidebar-width) - 1px);
 }
 
 /* 两栏同开时先保留主工具栏的位置，单开右栏保持其原有拖宽契约。 */
+#app .vsidian-file-sidebar-open.vsidian-sidebar-open {
+  --_vsidian-file-sidebar-reserved: 404px; /* 主区 224px + 右栏至少 180px */
+}
+
 #app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar {
-  max-width: calc(100% - 280px - 224px);
+  max-width: max(0px, calc(100% - var(--_vsidian-file-sidebar-width) - 224px));
 }
 
 #app .vsidian-file-sidebar-open.vsidian-sidebar-open > .vsidian-sidebar > :is(
@@ -597,8 +604,11 @@ body.vscode-light #app {
 }
 
 @media (max-width: 700px) {
+  #app .vsidian-body {
+    --_vsidian-file-sidebar-available: 85vw;
+  }
+
   #app .vsidian-file-sidebar {
-    --_vsidian-file-sidebar-width: min(280px, 85vw);
     position: absolute;
     inset-block: var(--vsidian-toolbar-height, 30px) 0;
     inset-inline-start: 0;
@@ -612,6 +622,62 @@ body.vscode-light #app {
 
 @media (prefers-reduced-motion: reduce) {
   #app .vsidian-file-sidebar { transition: none; }
+}
+
+#app .vsidian-file-sidebar.vsidian-file-sidebar-resizing {
+  transition: none;
+}
+
+.vsidian-file-resizer {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+}
+
+.vsidian-file-resizer-width {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 6px;
+  z-index: 1;
+  cursor: col-resize;
+}
+
+.vsidian-file-resizer-height {
+  flex: 0 0 7px;
+  cursor: row-resize;
+}
+
+.vsidian-file-resizer::before {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+
+.vsidian-file-resizer-width::before {
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 2px;
+}
+
+.vsidian-file-resizer-height::before {
+  inset-inline: 0;
+  inset-block-start: 3px;
+  height: 1px;
+  background: var(--vscode-panel-border);
+}
+
+.vsidian-file-resizer:is(:hover, :focus-visible, .vsidian-file-resizer-active)::before {
+  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+.vsidian-file-resizer:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.vsidian-file-resizer-height:is(:hover, :focus-visible, .vsidian-file-resizer-active)::before {
+  height: 2px;
 }
 
 .vsidian-file-sidebar-header {
@@ -644,17 +710,25 @@ body.vscode-light #app {
 }
 
 .vsidian-file-opened {
+  display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
+  min-height: 0;
+  max-height: 62vh;
   padding: 6px;
-  border-block-end: 1px solid var(--vscode-panel-border);
 }
 
+.vsidian-file-opened[hidden] { display: none; }
+
 .vsidian-file-opened ul {
-  max-height: min(144px, 24vh);
+  height: var(--_vsidian-file-opened-height, auto);
+  max-height: var(--_vsidian-file-opened-height, min(144px, 24vh));
+  min-height: 0;
   overflow: auto;
 }
 
 .vsidian-file-opened h2 {
+  flex: none;
   margin: 4px 6px;
   font-size: 12px;
   font-weight: 600;
@@ -712,6 +786,32 @@ body.vscode-light #app {
 
 .vsidian-file-entry[aria-current='page'] {
   background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.vsidian-file-tree .vsidian-file-entry.vsidian-file-drop-target {
+  background: var(--vscode-list-dropBackground, var(--vscode-list-activeSelectionBackground));
+}
+
+.vsidian-file-opened .vsidian-file-row { position: relative; }
+
+.vsidian-file-opened .vsidian-file-entry { padding-inline-end: 28px; }
+
+.vsidian-file-opened .vsidian-file-preview-tab .vsidian-file-name { font-style: italic; }
+
+.vsidian-file-opened .vsidian-file-row .vsidian-file-close {
+  position: absolute;
+  inset-block-start: 1px;
+  inset-inline-end: 0;
+  width: 22px;
+  pointer-events: none;
+}
+
+.vsidian-file-opened .vsidian-file-row:is(:hover, :focus-within) .vsidian-file-close {
+  pointer-events: auto;
+}
+
+.vsidian-file-opened .vsidian-file-row:has(.vsidian-file-entry[aria-current='page']) .vsidian-file-close {
   color: var(--vscode-list-activeSelectionForeground);
 }
 
