@@ -89,11 +89,6 @@ async function verifyTreePath(uri: vscode.Uri, expected: vscode.FileType,
   }
 }
 
-function canUseTrash(uri: vscode.Uri): boolean {
-  // 扩展自注册的文件系统可能忽略 useTrash；只向 VS Code 内建文件系统请求回收站。
-  return uri.scheme === 'file' || uri.scheme === 'vscode-remote'
-}
-
 function isFileName(name: string): boolean {
   return !!name && name.toLowerCase() !== '.git' && name === name.trim() && !/[<>:"/\\|?*\u0000-\u001f]/.test(name) && !name.endsWith('.') &&
     !/^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(name)
@@ -112,7 +107,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   private refreshTimer: ReturnType<typeof setTimeout> | undefined
   private actionPending = false
 
-  constructor(private readonly store: vscode.Memento) {
+  constructor(private readonly store: vscode.Memento, private readonly hostKind: vscode.ExtensionKind) {
     this.open = store.get(OPEN_KEY) === true
   }
 
@@ -522,6 +517,12 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     return chosen?.uri
   }
 
+  private canUseTrash(uri: vscode.Uri): boolean {
+    // 只向内建本机文件系统发出回收站请求。远程 provider 没有 Trash 能力；
+    // 远端扩展宿主中的 file URI 经 VS Code RPC 也会变成 vscode-remote。
+    return this.hostKind === vscode.ExtensionKind.UI && uri.scheme === 'file'
+  }
+
   private async manage(client: Client, target: TreeTarget): Promise<void> {
     const options: Array<{ label: string; action: () => Promise<void> }> = []
     if (target.kind !== 'file') {
@@ -530,7 +531,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     }
     if (!containsWorkspaceRoot(target.uri)) {
       options.push({ label: t('workspaceFiles.rename'), action: () => this.rename(target) })
-      if (canUseTrash(target.uri)) options.push({ label: t('workspaceFiles.trash'), action: () => this.trash(target) })
+      if (this.canUseTrash(target.uri)) options.push({ label: t('workspaceFiles.trash'), action: () => this.trash(target) })
     }
     const selection = await vscode.window.showQuickPick(options, { title: t('workspaceFiles.manage', { name: target.name }) })
     if (selection && client.panel.active && isWritable(target.uri)) await selection.action()

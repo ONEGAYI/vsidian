@@ -440,7 +440,7 @@ export function createTextEditorProvider(
   capturePdfBatchDoc(fsPath: string): Promise<PdfBatchDocCaptureOutcome>
 } {
   const sessions = new Map<string, SessionEntry>()
-  const workspaceFiles = new WorkspaceFilesSidebar(context.workspaceState)
+  const workspaceFiles = new WorkspaceFilesSidebar(context.workspaceState, context.extension.extensionKind)
   context.subscriptions.push(workspaceFiles, workspaceFiles.registerMediaResources())
   const trackNativeDiff = createNativeDiffFallback(context)
   // ---- #351 T02 附加组件面板刷新：runtime 状态变化（启停/故障/注册/代次）

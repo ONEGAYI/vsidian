@@ -9,14 +9,17 @@ const mock = vi.hoisted(() => ({
   watchCreate: vi.fn(), watchDelete: vi.fn(),
   mediaProvider: vi.fn(), readFile: vi.fn(),
   extraRoots: [] as string[],
+  rootScheme: 'file',
   rootAuthority: '',
+  remoteName: undefined as string | undefined,
+  filesEnableTrash: true,
   tabGroups: [] as unknown[],
   showNotebook: vi.fn(),
 }))
 
 vi.mock('vscode', async () => {
   const path = (await import('node:path')).posix
-  const uri = (path: string, scheme = 'file', authority = scheme === 'file' ? mock.rootAuthority : '') =>
+  const uri = (path: string, scheme = 'file', authority = scheme === mock.rootScheme ? mock.rootAuthority : '') =>
     ({ path, fsPath: path, scheme, authority, toString: () => `${scheme}://${authority}${path}` })
   const disposable = () => ({ dispose() {} })
   class FileSystemError extends Error {
@@ -25,7 +28,7 @@ vi.mock('vscode', async () => {
     static Unavailable() { return new FileSystemError('Unavailable') }
     static FileNotFound() { return new FileSystemError('FileNotFound') }
   }
-  const folders = () => ['/notes', ...mock.extraRoots].map((path, index) => ({ name: path.slice(1), uri: uri(path), index }))
+  const folders = () => ['/notes', ...mock.extraRoots].map((path, index) => ({ name: path.slice(1), uri: uri(path, mock.rootScheme), index }))
   return {
     Uri: {
       file: uri,
@@ -35,6 +38,8 @@ vi.mock('vscode', async () => {
     },
     FileSystemError,
     FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
+    ExtensionKind: { UI: 1, Workspace: 2 },
+    env: { get remoteName() { return mock.remoteName } },
     Disposable: { from: disposable },
     EventEmitter: class { event = disposable; dispose() {} },
     WorkspaceEdit: class { createFile = mock.createFile; renameFile = mock.renameFile },
@@ -43,12 +48,14 @@ vi.mock('vscode', async () => {
     TabInputNotebook: class { constructor(readonly uri: unknown, readonly notebookType: string) {} },
     workspace: {
       get workspaceFolders() { return folders() },
-      getWorkspaceFolder: ({ path }: { path: string }) => folders().reverse().find(folder =>
-        path === folder.uri.path || path.startsWith(`${folder.uri.path}/`)),
+      getWorkspaceFolder: ({ path, scheme }: { path: string; scheme: string }) => folders().reverse().find(folder =>
+        scheme === folder.uri.scheme && (path === folder.uri.path || path.startsWith(`${folder.uri.path}/`))),
+      getConfiguration: (section?: string) => ({ get: (key: string, fallback?: unknown) =>
+        (section ? `${section}.${key}` : key) === 'files.enableTrash' ? mock.filesEnableTrash : fallback }),
       asRelativePath: ({ path }: { path: string }) => path.replace('/notes/', ''),
       fs: { readDirectory: mock.readDirectory, stat: mock.stat, createDirectory: mock.createDirectory, delete: mock.remove,
         readFile: mock.readFile,
-        isWritableFileSystem: (scheme: string) => scheme === 'file' },
+        isWritableFileSystem: (scheme: string) => scheme === mock.rootScheme },
       applyEdit: mock.applyEdit,
       textDocuments: mock.textDocuments,
       notebookDocuments: mock.notebookDocuments,
@@ -79,6 +86,9 @@ const makeUri = vscode.Uri.file
 const matchingUri = (path: string) => expect.objectContaining({ path, scheme: 'file' })
 const initial = { open: false }
 const update = vi.fn()
+const makeSidebar = (hostKind = vscode.ExtensionKind.UI) => new WorkspaceFilesSidebar(
+  { get: () => initial.open, update } as unknown as vscode.Memento, hostKind,
+)
 let sidebar: WorkspaceFilesSidebar
 let created: (uri: vscode.Uri) => void
 
@@ -87,7 +97,10 @@ beforeEach(() => {
   mock.textDocuments.length = 0
   mock.notebookDocuments.length = 0
   mock.extraRoots.length = 0
+  mock.rootScheme = 'file'
   mock.rootAuthority = ''
+  mock.remoteName = undefined
+  mock.filesEnableTrash = true
   mock.tabGroups.length = 0
   files.clear()
   for (const [path, type] of Object.entries({ '/notes': dirType, '/notes/start.md': fileType,
@@ -109,19 +122,19 @@ beforeEach(() => {
   mock.applyEdit.mockResolvedValue(true)
   initial.open = false
   update.mockReset()
-  sidebar = new WorkspaceFilesSidebar({ get: () => initial.open, update } as unknown as vscode.Memento)
+  sidebar = makeSidebar()
 })
 
 afterEach(() => { sidebar.dispose() })
 
-function mount(path = '/notes/start.md') {
+function mount(document: string | vscode.Uri = '/notes/start.md') {
   let snapshot: WorkspaceFilesSnapshot | undefined
   let active = true
   const panel = {
     get active() { return active }, visible: true, viewColumn: 2,
     webview: { postMessage: (message: WorkspaceFilesSnapshot) => { snapshot = message } },
   } as unknown as vscode.WebviewPanel
-  const client = sidebar.attach(makeUri(path), panel)
+  const client = sidebar.attach(typeof document === 'string' ? makeUri(document) : document, panel)
   client.ready()
   async function loaded() {
     return vi.waitFor(() => {
@@ -459,6 +472,49 @@ it('目录入回收站前检查未保存内容，确认后也不退回永久删�
   await vi.waitFor(() => expect(mock.error).toHaveBeenCalledTimes(1))
   expect(mock.remove).toHaveBeenCalledTimes(1)
   expect(mock.remove).toHaveBeenCalledWith(matchingUri('/notes/drafts'), { recursive: true, useTrash: true })
+})
+
+it.each([
+  { scheme: 'file', hostKind: 'Workspace' },
+  { scheme: 'vscode-remote', hostKind: 'UI' },
+] as const)('Remote SSH $hostKind 宿主的 $scheme 文件保留改名，不提供回收站', async ({ scheme, hostKind }) => {
+  mock.remoteName = 'ssh-remote'
+  mock.rootScheme = scheme
+  mock.rootAuthority = scheme === 'vscode-remote' ? 'ssh-remote+mock-host' : ''
+  sidebar.dispose()
+  sidebar = makeSidebar(vscode.ExtensionKind[hostKind])
+  const file = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0]!.uri, 'start.md')
+  const client = mount(file)
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('start.md')
+
+  mock.showQuickPick.mockImplementationOnce((items: vscode.QuickPickItem[]) =>
+    items.find(item => item.label === 'workspaceFiles.trash') ?? items.find(item => item.label === 'workspaceFiles.rename'))
+  mock.warn.mockResolvedValue('workspaceFiles.trash')
+  mock.showInputBox.mockResolvedValueOnce('renamed.md')
+  client.request({ kind: 'workspaceFiles.manage', id })
+  await vi.waitFor(() => expect(mock.showQuickPick).toHaveBeenCalledTimes(1))
+  expect(mock.showQuickPick.mock.calls[0]![0].map((item: { label: string }) => item.label)).toEqual(['workspaceFiles.rename'])
+  const targetUri = (path: string) => expect.objectContaining({ scheme, authority: mock.rootAuthority, path })
+  await vi.waitFor(() => expect(mock.renameFile).toHaveBeenCalledExactlyOnceWith(
+    targetUri('/notes/start.md'), targetUri('/notes/renamed.md'), { overwrite: false },
+  ))
+  expect(mock.warn).not.toHaveBeenCalled()
+  expect(mock.remove).not.toHaveBeenCalled()
+})
+
+it('远程窗口的本机宿主仍能将本机文件移入回收站，不采用永久删除设置', async () => {
+  mock.remoteName = 'ssh-remote'
+  mock.filesEnableTrash = false
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('start.md')
+  mock.showQuickPick.mockImplementationOnce(items => items.find((item: { label: string }) => item.label === 'workspaceFiles.trash'))
+  mock.warn.mockResolvedValueOnce('workspaceFiles.trash')
+  client.request({ kind: 'workspaceFiles.manage', id })
+  await vi.waitFor(() => expect(mock.remove).toHaveBeenCalledExactlyOnceWith(
+    matchingUri('/notes/start.md'), { recursive: false, useTrash: true },
+  ))
 })
 
 it('只接受合法消息形态、活动面板与当前已发出的树条目', async () => {
