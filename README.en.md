@@ -25,6 +25,7 @@ Preview and edit one note from inside another, or export a document with equatio
 ![Typing bold text and a wikilink in live preview, then moving the cursor away to render it](docs/images/readme/live-preview-en.gif)
 
 - **Switch views**: edit in live preview, read without editing, or open the native source editor. Vsidian remembers your last mode and scroll position across windows.
+- **Manage files in the left sidebar**: open it from the editor toolbar to browse the workspace, drag files to move them, or switch tabs. Hold `Ctrl` (or `⌘` on macOS) and hover to preview a file without opening a tab.
 - **Render what’s on screen**: live preview and reading mode render content around the viewport instead of drawing the whole document at once.
 - **Keep familiar editing controls**: use multiple cursors, select the next match with `Ctrl+D`, find and replace with regex, or jump to a line with `Ctrl+G`.
 - **Write in Chinese or English**: the interface supports both languages. In Chinese text, `Ctrl+arrow` moves by word, with an optional jieba segmenter.
