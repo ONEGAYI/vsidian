@@ -234,6 +234,12 @@ export class WorkspaceFilesView {
     this.treeRows.get(id)?.button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   }
 
+  tabButtonForTest(id: string, close = false): HTMLButtonElement | undefined {
+    // 测试使用编辑器类型及 URI 定位；生产交互仍由真实 DOM 行回传组级 ID。
+    const row = [...this.tabRows.values()].find(({ tab }) => tab.id === id || tab.id.startsWith(`${id}|group:`))
+    return close ? row?.close : row?.button
+  }
+
   onPreviewModifierDown(): void {
     if (this.hovered) this.preview(this.hovered)
   }
@@ -247,8 +253,11 @@ export class WorkspaceFilesView {
       this.cancelFileClick()
       return true
     }
-    return !this.element.inert && isFileMenuKey(event) && event.target instanceof Element &&
-      this.tree.contains(event.target) && event.target.closest('.vsidian-file-row') !== null
+    const target = event.target
+    if (this.element.inert || !(target instanceof Element) || !this.tree.contains(target)) return false
+    if (isFileMenuKey(event)) return target.closest('.vsidian-file-row') !== null
+    return event.key === 'Enter' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+      target.matches('button.vsidian-file-entry:not([aria-expanded])')
   }
 
   private preview(row: FileRow): void {

@@ -551,6 +551,7 @@ export type HostToWebview =
    *  宿主内的菜单装配 */
   | { kind: 'contextMenu.test.contextMenu'; pos: number }
   | { kind: 'workspaceFiles.test.contextMenu'; id: string }
+  | { kind: 'workspaceFiles.test.tab'; id: string; action: 'activate' | 'close' }
   /** 测试钩子（#183）：点击菜单中 command 对应的真实按钮（与用户点击同一
    *  处理器；command 取菜单项描述符的 command——含运行期注册项，通道为
    *  非空字符串校验） */
@@ -5574,6 +5575,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           (row.unreadable === undefined || typeof row.unreadable === 'boolean') && isWorkspaceFileTab(row))
     case 'workspaceFiles.test.contextMenu':
       return typeof v.id === 'string' && v.id.length > 0
+    case 'workspaceFiles.test.tab':
+      return typeof v.id === 'string' && v.id.length > 0 && (v.action === 'activate' || v.action === 'close')
     case 'addonDocNav.result':
       // #543 T03 导航回执：结果形状守卫（shared/addonNavApi 单一事实源）
       return isPositiveInt(v.reqId) &&

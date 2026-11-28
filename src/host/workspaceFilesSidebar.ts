@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
+import { realpath } from 'node:fs/promises'
 import { PDF_HOVER_MAX_BYTES } from './hoverDocAccess'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
@@ -18,7 +19,10 @@ const parentOf = (uri: vscode.Uri): vscode.Uri => vscode.Uri.joinPath(uri, '..')
 
 type FileTab = vscode.Tab & { input: vscode.TabInputText | vscode.TabInputCustom | vscode.TabInputNotebook }
 type TreeTarget = { kind: WorkspaceFileEntry['kind']; uri: vscode.Uri; name: string }
-type Target = TreeTarget | { kind: 'tab'; uri: vscode.Uri; editor: string }
+type Target = TreeTarget | { kind: 'tab'; uri: vscode.Uri; editor: string; group: vscode.TabGroup }
+// null 表示确认不存在；undefined（或缺项）表示无法核验。
+type PhysicalRoots = ReadonlyMap<string, vscode.Uri | null | undefined>
+const NO_PHYSICAL_ROOTS: PhysicalRoots = new Map()
 interface AssetAlias { owner: string; uri: vscode.Uri; source: vscode.Uri; root: vscode.Uri; active(): boolean }
 interface Client {
   uri: vscode.Uri
@@ -69,8 +73,34 @@ function isWorkspaceRoot(uri: vscode.Uri): boolean {
   return (vscode.workspace.workspaceFolders ?? []).some(folder => contains(folder.uri, uri) && contains(uri, folder.uri))
 }
 
-function containsWorkspaceRoot(uri: vscode.Uri): boolean {
-  return (vscode.workspace.workspaceFolders ?? []).some(folder => contains(uri, folder.uri))
+async function readPhysicalRoots(folders = vscode.workspace.workspaceFolders ?? []): Promise<PhysicalRoots> {
+  const local = folders.filter(folder => folder.uri.scheme === 'file')
+  // 单根里的目录不可能是该根的物理祖先。不为它增加磁盘探测。
+  if (local.length < 2) return NO_PHYSICAL_ROOTS
+  return new Map(await Promise.all(local.map(async ({ uri }) => {
+    const canonical = await realpath(uri.fsPath).then(path => vscode.Uri.file(path), (error: NodeJS.ErrnoException) =>
+      error.code === 'ENOENT' || error.code === 'ENOTDIR' ? null : undefined)
+    return [uri.toString(), canonical] as const
+  })))
+}
+
+function containsWorkspaceRoot(uri: vscode.Uri, physical?: PhysicalRoots): boolean {
+  const folders = vscode.workspace.workspaceFolders ?? []
+  if (folders.some(folder => contains(uri, folder.uri))) return true
+  if (!physical || uri.scheme !== 'file') return false
+  const local = folders.filter(folder => folder.uri.scheme === 'file')
+  if (local.length < 2) return false
+  // 根在取真实路径期间切换，或有根无法解析时，不移走可能包含它的目录。
+  if (local.some(folder => physical.get(folder.uri.toString()) === undefined)) return true
+  const owner = vscode.workspace.getWorkspaceFolder(uri)?.uri
+  const canonicalOwner = owner && physical.get(owner.toString())
+  if (!owner || !canonicalOwner) return true
+  const relative = uri.path.slice(pathIdentity(owner).length).replace(/^\/+/, '')
+  const canonical = vscode.Uri.joinPath(canonicalOwner, relative)
+  return local.some(folder => {
+    const root = physical.get(folder.uri.toString())
+    return root !== undefined && root !== null && contains(canonical, root)
+  })
 }
 
 /** 目录快照不能授权当前磁盘状态：根以下任一层变成链接或变更类型即视为过期。
@@ -103,6 +133,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   private open: boolean
   private layout: WorkspaceFilesLayout
   private readonly clients = new Map<vscode.WebviewPanel, Client>()
+  private readonly groupIds = new WeakMap<vscode.TabGroup, number>()
+  private nextGroupId = 0
+  private physicalSnapshot: { key: string; roots?: PhysicalRoots } | undefined
   private readonly mediaClients = new Map<string, Client>()
   private readonly expandedRoots = new Map<string, boolean>()
   private readonly expandedFolders = new Map<string, boolean>()
@@ -284,6 +317,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.scheduleRefresh()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.listings.clear()
+        this.physicalSnapshot = undefined
         this.lastDocument = undefined
         for (const client of this.clients.values()) if (client.panel.active) this.revealDocument(client.uri)
         this.scheduleRefresh()
@@ -297,16 +331,27 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     clearTimeout(this.refreshTimer)
     this.refreshTimer = undefined
     this.listings.clear()
+    this.physicalSnapshot = undefined
   }
 
   private invalidate(uri: vscode.Uri): void {
+    // 已解析的普通根只受其自身或祖先的变化影响；别名或缺失根的目标
+    // 也可在尚未读入列表的折叠目录内消失或恢复。
+    const snapshot = this.physicalSnapshot
+    const physicalChanged = uri.scheme === 'file' && snapshot !== undefined &&
+      (vscode.workspace.workspaceFolders ?? []).some(({ uri: root }) => {
+        if (root.scheme !== 'file') return false
+        const canonical = snapshot.roots?.get(root.toString())
+        return !canonical || !sameUri(root, canonical) || contains(uri, root)
+      })
+    if (physicalChanged) this.physicalSnapshot = undefined
     const parentChanged = this.listings.delete(parentOf(uri).toString())
     const key = uri.toString()
     let directoryChanged = this.listings.delete(key)
     for (const dir of this.listings.keys()) {
       if (dir.startsWith(`${key}/`)) directoryChanged = this.listings.delete(dir) || directoryChanged
     }
-    if (parentChanged || directoryChanged) this.scheduleRefresh()
+    if (physicalChanged || parentChanged || directoryChanged) this.scheduleRefresh()
   }
 
   private scheduleRefresh(): void {
@@ -323,6 +368,23 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     }
   }
 
+  private physicalRootsForSnapshot(folders = vscode.workspace.workspaceFolders ?? []): PhysicalRoots {
+    const local = folders.filter(folder => folder.uri.scheme === 'file')
+    if (local.length < 2) return NO_PHYSICAL_ROOTS
+    const key = JSON.stringify(local.map(folder => folder.uri.toString()))
+    if (this.physicalSnapshot?.key !== key) {
+      const pending: { key: string; roots?: PhysicalRoots } = { key }
+      this.physicalSnapshot = pending
+      // 慢根可能还未展开：先显示文件树和安全动作，不等物理身份。
+      void readPhysicalRoots(local).then(roots => {
+        if (this.physicalSnapshot !== pending) return
+        pending.roots = roots
+        this.refresh()
+      })
+    }
+    return this.physicalSnapshot.roots ?? NO_PHYSICAL_ROOTS
+  }
+
   private async render(client: Client): Promise<void> {
     const generation = ++client.generation
     const snapshot: WorkspaceFilesSnapshot = {
@@ -335,25 +397,33 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       void client.panel.webview.postMessage(snapshot)
       return
     }
-    const targets = new Map<string, Target>()
+    const tabs = new Map<string, Target>()
     const group = this.groupOf(client)
-    for (const tab of group?.tabs ?? []) {
-      if (!isFileTab(tab)) continue
-      const { input } = tab
-      const editor = editorOf(tab)
-      const id = `tab:${editor}|${input.uri.toString()}`
-      const dir = parentOf(input.uri)
-      const detail = input.uri.scheme === 'untitled' ? undefined : vscode.workspace.asRelativePath(dir)
-      snapshot.tabs.push({ id, name: tab.label, detail, current: tab.isActive, isPreview: tab.isPreview, previewKind: previewKindOf(input.uri) })
-      targets.set(id, { kind: 'tab', editor, uri: input.uri })
+    if (group) {
+      let groupId = this.groupIds.get(group)
+      if (groupId === undefined) this.groupIds.set(group, groupId = ++this.nextGroupId)
+      for (const tab of group.tabs) {
+        if (!isFileTab(tab)) continue
+        const { input } = tab
+        const editor = editorOf(tab)
+        const id = `tab:${editor}|${input.uri.toString()}|group:${groupId}`
+        const dir = parentOf(input.uri)
+        const detail = input.uri.scheme === 'untitled' ? undefined : vscode.workspace.asRelativePath(dir)
+        snapshot.tabs.push({ id, name: tab.label, detail, current: tab.isActive, isPreview: tab.isPreview, previewKind: previewKindOf(input.uri) })
+        tabs.set(id, { kind: 'tab', editor, group, uri: input.uri })
+      }
     }
     const roots = vscode.workspace.workspaceFolders ?? []
     if (!client.loaded && roots.length) {
+      client.targets = tabs
       void client.panel.webview.postMessage({ ...snapshot, loading: true })
     }
+    const targets = new Map(tabs)
+    const physical = this.physicalRootsForSnapshot(roots)
     const trees = await Promise.all(roots.map(root =>
-      this.rows(root.uri, { kind: 'root', uri: root.uri, name: root.name }, 0, roots.length === 1, client.uri, targets)))
+      this.rows(root.uri, { kind: 'root', uri: root.uri, name: root.name }, 0, roots.length === 1, client.uri, targets, physical)))
     if (generation !== client.generation || this.clients.get(client.panel) !== client || !client.panel.visible) return
+    if (this.groupOf(client) !== group) return this.scheduleRefresh()
     snapshot.entries = trees.flat()
     snapshot.canCreate = roots.some(root => isWritable(root.uri))
     client.loaded = true
@@ -365,12 +435,12 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   }
 
   private async rows(root: vscode.Uri, target: TreeTarget, level: number, singleRoot: boolean,
-    current: vscode.Uri, targets: Map<string, Target>): Promise<WorkspaceFileEntry[]> {
+    current: vscode.Uri, targets: Map<string, Target>, physical: PhysicalRoots): Promise<WorkspaceFileEntry[]> {
     const { name, uri, kind } = target
     const key = uri.toString()
     const id = `tree:${root.toString()}|${key}`
     targets.set(id, target)
-    const row: WorkspaceFileEntry = { id, name, kind, level, actions: this.fileActions(target),
+    const row: WorkspaceFileEntry = { id, name, kind, level, actions: this.fileActions(target, physical),
       detail: vscode.workspace.asRelativePath(uri), current: kind === 'file' && sameUri(uri, current) }
     if (row.actions.includes(kind === 'file' ? 'rename' : 'createFile')) {
       const directory = kind === 'file' ? parentOf(uri) : uri
@@ -393,7 +463,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     }
     const nested = await Promise.all(children.map(([child, type]) => this.rows(root, {
       name: child, kind: type === vscode.FileType.Directory ? 'folder' : 'file', uri: vscode.Uri.joinPath(uri, child),
-    }, level + 1, singleRoot, current, targets)))
+    }, level + 1, singleRoot, current, targets, physical)))
     return [row, ...nested.flat()]
   }
 
@@ -420,7 +490,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   }
 
   private findTab(client: Client, target: Extract<Target, { kind: 'tab' }>): FileTab | undefined {
-    return this.groupOf(client)?.tabs.filter(isFileTab)
+    if (this.groupOf(client) !== target.group) return
+    return target.group.tabs.filter(isFileTab)
       .find(tab => editorOf(tab) === target.editor && sameUri(tab.input.uri, target.uri))
   }
 
@@ -467,6 +538,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     if (request.kind === 'workspaceFiles.resize') return this.resize(request)
     if (request.kind === 'workspaceFiles.refresh') {
       this.listings.clear()
+      this.physicalSnapshot = undefined
       this.refresh()
       return
     }
@@ -570,10 +642,10 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     return this.hostKind === vscode.ExtensionKind.UI && uri.scheme === 'file'
   }
 
-  private fileActions(target: TreeTarget): WorkspaceFileAction[] {
+  private fileActions(target: TreeTarget, physical?: PhysicalRoots): WorkspaceFileAction[] {
     if (!isWritable(target.uri)) return []
     const actions: WorkspaceFileAction[] = target.kind === 'file' ? [] : ['createFile', 'createFolder']
-    if (!containsWorkspaceRoot(target.uri)) {
+    if (!containsWorkspaceRoot(target.uri, target.kind === 'folder' ? physical : undefined)) {
       actions.push('rename')
       if (this.canUseTrash(target.uri)) actions.push('trash')
     }
@@ -581,7 +653,8 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   }
 
   private async manage(client: Client, id: string, target: TreeTarget): Promise<void> {
-    const options = this.fileActions(target).map(action => ({ label: t(`workspaceFiles.${action}`), action }))
+    const physical = target.kind === 'folder' ? this.physicalRootsForSnapshot() : undefined
+    const options = this.fileActions(target, physical).map(action => ({ label: t(`workspaceFiles.${action}`), action }))
     if (options.length === 0) return
     const selection = await vscode.window.showQuickPick(options, { title: t('workspaceFiles.manage', { name: target.name }) })
     if (selection) await this.runFileAction(client, id, selection.action)
@@ -590,7 +663,10 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   private async runFileAction(client: Client, id: string, action: WorkspaceFileAction): Promise<void> {
     if (!this.open || !client.panel.active || this.clients.get(client.panel) !== client) return
     const target = client.targets.get(id)
-    if (!target || target.kind === 'tab' || !this.fileActions(target).includes(action)) return
+    if (!target || target.kind === 'tab') return
+    const physical = target.kind === 'folder' && action !== 'createFile' && action !== 'createFolder'
+      ? this.physicalRootsForSnapshot() : undefined
+    if (!this.fileActions(target, physical).includes(action)) return
     switch (action) {
       case 'createFile': return this.create(client, target.uri, 'file')
       case 'createFolder': return this.create(client, target.uri, 'folder')
@@ -644,8 +720,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const uri = vscode.Uri.joinPath(dir, name)
     // 大小写改名交由宿主判定；仍不允许覆盖其他文件。
     if (name.toLowerCase() !== target.name.toLowerCase()) await this.requireMissing(uri, name)
+    const physical = target.kind === 'folder' ? await readPhysicalRoots() : undefined
     await verifyTreePath(target.uri, target.kind === 'file' ? vscode.FileType.File : vscode.FileType.Directory)
-    if (containsWorkspaceRoot(target.uri)) return
+    if (containsWorkspaceRoot(target.uri, physical)) return
     await this.applyRename(target.uri, uri)
   }
 
@@ -703,8 +780,9 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const answer = await vscode.window.showWarningMessage(t(target.kind === 'file'
       ? 'workspaceFiles.trashFilePrompt' : 'workspaceFiles.trashFolderPrompt', { name }), { modal: true }, trash)
     if (answer !== trash || !isWritable(uri) || containsWorkspaceRoot(uri)) return
+    const physical = target.kind === 'folder' ? await readPhysicalRoots() : undefined
     await verifyTreePath(uri, target.kind === 'file' ? vscode.FileType.File : vscode.FileType.Directory)
-    if (containsWorkspaceRoot(uri)) return
+    if (containsWorkspaceRoot(uri, physical)) return
     const hasChanges = (doc: { isDirty: boolean; uri: vscode.Uri }): boolean => doc.isDirty && contains(uri, doc.uri)
     const dirty = vscode.workspace.textDocuments.some(hasChanges) || vscode.workspace.notebookDocuments.some(hasChanges) ||
       vscode.window.tabGroups.all.some(group => group.tabs.some(tab =>

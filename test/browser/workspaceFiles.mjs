@@ -546,6 +546,14 @@ try {
     { kind: 'workspaceFiles.activate', id: child.id, mode: 'keep' },
     { kind: 'workspaceFiles.activate', id: folder.id },
   ], '双击只发一次保留请求，不先打开临时标签再切面板')
+  await send({ kind: 'keybindings.changed', overrides: { sidebarToggle: ['enter'] } })
+  await childRow.focus()
+  await page.keyboard.press('Enter')
+  await waitMessage({ kind: 'workspaceFiles.activate', id: child.id, mode: 'keep' })
+  await page.locator('.cm-content').focus()
+  await page.keyboard.press('Enter')
+  assert.equal(await page.evaluate(() => window.messages.some(m => m.kind === 'keybindings.execute' && m.id === 'sidebarToggle')), true,
+    '树内 Enter 保留文件，正文仍执行用户绑定')
   console.log('[PASS] 临时标签斜体、右对齐关闭按钮、中键关闭和双击保留')
 } finally {
   await browser.close()

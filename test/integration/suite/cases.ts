@@ -6683,8 +6683,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(group.tabs.some(tab => tab.input instanceof vscode.TabInputCustom &&
         tab.input.uri.toString() === first.toString()), '原标签应仍在同一编辑器组')
 
-      assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, second.toString(), {
-        kind: 'workspaceFiles.activate', id: `tab:${VIEW_TYPE}|${first.toString()}`,
+      assert(await vscode.commands.executeCommand(CMD.postToPanel, second.toString(), {
+        kind: 'workspaceFiles.test.tab', id: `tab:${VIEW_TYPE}|${first.toString()}`, action: 'activate',
       }), '已打开标签行应走实际 webview 消息入口')
       await poll('已打开列表切回原 Vsidian 标签', async () => {
         const active = vscode.window.tabGroups.activeTabGroup.activeTab?.input
@@ -6764,7 +6764,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await poll('保留当前临时标签', async () => tab(second)?.isPreview === false ? true : undefined)
       await waitViewState('侧栏临时乙.md', ({ paint }) => paint?.workspaceFiles?.previewTabPainted === false)
 
-      await send(second, { kind: 'workspaceFiles.closeTab', id: `tab:${VIEW_TYPE}|${second.toString()}` })
+      assert(await vscode.commands.executeCommand(CMD.postToPanel, second.toString(), {
+        kind: 'workspaceFiles.test.tab', id: `tab:${VIEW_TYPE}|${second.toString()}`, action: 'close',
+      }), '通过已打开条目的实际关闭按钮关闭标签')
       await poll('实际关闭所点标签且交互入口接管', async () => !tab(second) && tab(entry)?.isActive ? true : undefined)
       await waitViewState('侧栏交互夹具.md', v => v.paint?.workspaceFiles?.currentFilePainted === true)
       assert(Buffer.from(await vscode.workspace.fs.readFile(second)).toString() === text, '关闭不改变文件')
@@ -6816,8 +6818,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       opened = true
       await waitViewState(hostFile, v => v.paint?.workspaceFiles?.panelPainted === true)
       const id = `tab:notebook:${original.notebookType}|${original.uri.toString()}`
-      assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, parent.toString(), {
-        kind: 'workspaceFiles.activate', id,
+      assert(await vscode.commands.executeCommand(CMD.postToPanel, parent.toString(), {
+        kind: 'workspaceFiles.test.tab', id, action: 'activate',
       }), '使用 Notebook 条目的真实点击入口')
       await poll('从文件栏切回原 Notebook', async () => {
         const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input

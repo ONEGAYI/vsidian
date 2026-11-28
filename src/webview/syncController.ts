@@ -3262,7 +3262,8 @@ export class WebviewSyncController {
           const group = message.link === 'file-tree' ? '.vsidian-file-tree' : '.vsidian-file-opened'
           const items = this.workspaceFilesView?.element.querySelectorAll<HTMLElement>(`${group} .vsidian-file-entry`)
           const item = message.fileId === undefined ? items?.[message.index] :
-            Array.from(items ?? []).find(el => el.dataset.fileFocus === `activate:${message.fileId}`)
+            message.link === 'file-tab' ? this.workspaceFilesView?.tabButtonForTest(message.fileId) :
+              Array.from(items ?? []).find(el => el.dataset.fileFocus === `activate:${message.fileId}`)
           if (item) {
             if (message.action === 'enter') item.scrollIntoView({ block: 'nearest' })
             dispatchHoverEvent(item, message.action === 'enter', message.ctrlKey === true)
@@ -3768,6 +3769,10 @@ export class WebviewSyncController {
       }
       case 'workspaceFiles.test.contextMenu': {
         this.workspaceFilesView?.dispatchContextMenuForTest(message.id)
+        break
+      }
+      case 'workspaceFiles.test.tab': {
+        this.workspaceFilesView?.tabButtonForTest(message.id, message.action === 'close')?.click()
         break
       }
       case 'contextMenu.test.menuClick': {

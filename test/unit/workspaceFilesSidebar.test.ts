@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 const mock = vi.hoisted(() => ({
-  readDirectory: vi.fn(), stat: vi.fn(), createDirectory: vi.fn(), remove: vi.fn(),
+  readDirectory: vi.fn(), stat: vi.fn(), realpath: vi.fn(), createDirectory: vi.fn(), remove: vi.fn(),
   applyEdit: vi.fn(), createFile: vi.fn(), renameFile: vi.fn(), open: vi.fn(),
   showInputBox: vi.fn(), showQuickPick: vi.fn(), warn: vi.fn(), error: vi.fn(),
   textDocuments: [] as Array<{ uri: unknown; isDirty: boolean }>,
@@ -16,6 +16,11 @@ const mock = vi.hoisted(() => ({
   filesEnableTrash: true,
   tabGroups: [] as unknown[],
   showNotebook: vi.fn(), closeTab: vi.fn(),
+}))
+
+vi.mock('node:fs/promises', async (original) => ({
+  ...await original<typeof import('node:fs/promises')>(),
+  realpath: mock.realpath,
 }))
 
 vi.mock('vscode', async () => {
@@ -95,6 +100,7 @@ const makeSidebar = (hostKind = vscode.ExtensionKind.UI) => new WorkspaceFilesSi
 )
 let sidebar: WorkspaceFilesSidebar
 let created: (uri: vscode.Uri) => void
+let deleted: (uri: vscode.Uri) => void
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -116,6 +122,7 @@ beforeEach(() => {
     if (type === undefined) throw vscode.FileSystemError.FileNotFound(uri)
     return { type }
   })
+  mock.realpath.mockImplementation(async (path: string) => path)
   mock.readDirectory.mockImplementation(async (uri: vscode.Uri) => {
     const prefix = `${uri.path}/`
     return [...files].flatMap(([path, type]) => {
@@ -124,6 +131,7 @@ beforeEach(() => {
     })
   })
   mock.watchCreate.mockImplementation(callback => { created = callback })
+  mock.watchDelete.mockImplementation(callback => { deleted = callback })
   mock.applyEdit.mockResolvedValue(true)
   initial.open = false
   initial.layout = undefined
@@ -137,8 +145,9 @@ function mount(document: string | vscode.Uri = '/notes/start.md') {
   let snapshot: WorkspaceFilesSnapshot | undefined
   let layout: Extract<HostToWebview, { kind: 'workspaceFiles.layout' }>['layout'] | undefined
   let active = true
+  let column = 2
   const panel = {
-    get active() { return active }, visible: true, viewColumn: 2,
+    get active() { return active }, visible: true, get viewColumn() { return column },
     webview: { postMessage: (message: HostToWebview) => {
       if (message.kind === 'workspaceFiles.snapshot') snapshot = message
       if (message.kind === 'workspaceFiles.layout') layout = message.layout
@@ -153,6 +162,7 @@ function mount(document: string | vscode.Uri = '/notes/start.md') {
     })
   }
   return { ...client, loaded, snapshot: () => snapshot, layout: () => layout, setActive: (value: boolean) => { active = value },
+    setColumn: (value: number) => { column = value },
     id: async (name: string) => (await loaded()).entries.find(entry => entry.name === name)!.id }
 }
 
@@ -277,6 +287,50 @@ it('已打开列表取 VS Code 的临时状态，中键和关闭按钮命中当�
   expect(mock.closeTab.mock.calls[0]![0]).toBe(latest)
   client.request({ kind: 'workspaceFiles.closeTab', id: await client.id('start.md') })
   expect(mock.closeTab).toHaveBeenCalledTimes(1)
+})
+
+it('首次加载目录期间，已经显示的标签可以预览和关闭', async () => {
+  let finish!: (rows: [string, vscode.FileType][]) => void
+  mock.readDirectory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const input = new vscode.TabInputCustom(makeUri('/notes/start.md'), 'vsidian')
+  const tab = { input, label: 'start.md', isActive: true }
+  mock.tabGroups.push({ viewColumn: 2, tabs: [tab] })
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  try {
+    expect(client.snapshot()?.loading).toBe(true)
+    const id = client.snapshot()!.tabs[0]!.id
+    expect(await client.previewTarget(id)).toBe('/notes/start.md')
+    client.request({ kind: 'workspaceFiles.closeTab', id })
+    expect(mock.closeTab).toHaveBeenCalledWith(tab, false)
+  } finally {
+    finish?.([['start.md', fileType]])
+  }
+})
+
+it('换组期间或新组快照已更新后，旧行都不能关闭新组同 URI 的标签', async () => {
+  const original = { label: 'start.md', isPreview: true, input: new vscode.TabInputCustom(makeUri('/notes/start.md'), 'vsidian') }
+  const sameFile = { ...original, isPreview: false }
+  mock.tabGroups.push({ viewColumn: 2, tabs: [original] }, { viewColumn: 1, tabs: [sameFile] })
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const fromOldGroup = (await client.loaded()).tabs[0]!.id
+  client.setColumn(1)
+  client.request({ kind: 'workspaceFiles.closeTab', id: fromOldGroup })
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(mock.closeTab).not.toHaveBeenCalled()
+
+  client.viewChanged()
+  const fromNewGroup = await vi.waitFor(() => {
+    const latest = client.snapshot()!.tabs[0]!
+    expect(latest.id).not.toBe(fromOldGroup)
+    return latest.id
+  })
+  client.request({ kind: 'workspaceFiles.closeTab', id: fromOldGroup })
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(mock.closeTab).not.toHaveBeenCalled()
+  client.request({ kind: 'workspaceFiles.closeTab', id: fromNewGroup })
+  expect(mock.closeTab.mock.calls[0]![0]).toBe(sameFile)
 })
 
 it('新文件以请求指定的临时或保留方式打开；已有持久标签单击不降级', async () => {
@@ -432,6 +486,94 @@ it('包含已挂载工作区根的父目录只能新建，路径前缀相同的�
   await vi.waitFor(() => expect(mock.showQuickPick).toHaveBeenCalledTimes(2))
   expect(mock.showQuickPick.mock.calls[1]![0].map((item: { label: string }) => item.label))
     .toEqual(['workspaceFiles.createFile', 'workspaceFiles.createFolder', 'workspaceFiles.rename', 'workspaceFiles.trash'])
+})
+
+it('通过链接挂载的根也保护真实父目录，其他目录仍可管理', async () => {
+  mock.extraRoots.push('/project-link')
+  files.set('/project-link', dirType | vscode.FileType.SymbolicLink)
+  files.set('/notes/drafts/project', dirType)
+  files.set('/notes/drafts-archive', dirType)
+  mock.realpath.mockImplementation(async path => path === '/project-link' ? '/notes/drafts/project' : path)
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const rows = (await client.loaded()).entries
+  expect(rows.find(row => row.name === 'drafts')?.actions).toEqual(['createFile', 'createFolder'])
+  expect(rows.find(row => row.name === 'drafts-archive')?.actions).toEqual(['createFile', 'createFolder', 'rename', 'trash'])
+})
+
+it.each(['ENOENT', 'ENOTDIR', 'EACCES'])('另一个挂载根返回 %s 时区分已缺失与不可复核', async code => {
+  mock.extraRoots.push('/unavailable')
+  mock.realpath.mockImplementation(async path => {
+    if (path === '/unavailable') throw Object.assign(new Error(code), { code })
+    return path
+  })
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  await vi.waitFor(() => {
+    const row = client.snapshot()?.entries.find(entry => entry.name === 'drafts')
+    expect(row?.actions).toEqual(code === 'EACCES' ? ['createFile', 'createFolder'] : ['createFile', 'createFolder', 'rename', 'trash'])
+  })
+})
+
+it('折叠的慢根只暂缓目录重命名和回收，不阻塞浏览或新建', async () => {
+  mock.extraRoots.push('/slow')
+  files.set('/slow', dirType)
+  let finish!: (path: string) => void
+  mock.realpath.mockImplementation(async path => path === '/slow' ? new Promise(resolve => { finish = resolve }) : path)
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  try {
+    const rows = (await client.loaded()).entries
+    const drafts = rows.find(row => row.name === 'drafts')!
+    expect(rows.some(row => row.name === 'start.md')).toBe(true)
+    expect(drafts.actions).toEqual(['createFile', 'createFolder'])
+    client.request({ kind: 'workspaceFiles.manage', id: drafts.id })
+    await vi.waitFor(() => expect(mock.showQuickPick).toHaveBeenCalledTimes(1))
+  } finally {
+    finish('/slow')
+  }
+  await vi.waitFor(() => expect(client.snapshot()?.entries.find(row => row.name === 'drafts')?.actions)
+    .toEqual(['createFile', 'createFolder', 'rename', 'trash']))
+})
+
+it('链接根的目标从缺失到恢复再移出时，按文件事件更新父目录动作', async () => {
+  const project = '/notes/drafts/project'
+  mock.extraRoots.push('/project-link')
+  mock.realpath.mockImplementation(async path => {
+    if (path !== '/project-link') return path
+    if (!files.has(project)) throw Object.assign(new Error('not found'), { code: 'ENOENT' })
+    return project
+  })
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const actions = () => client.snapshot()?.entries.find(row => row.name === 'drafts')?.actions
+  await vi.waitFor(() => expect(actions()).toContain('rename'))
+  // drafts 仍折叠，物理根状态的变化与是否加载过这个目录的列表无关。
+  files.set(project, dirType)
+  created(makeUri(project))
+  await vi.waitFor(() => expect(actions()).toEqual(['createFile', 'createFolder']))
+  files.delete(project)
+  deleted(makeUri(project))
+  await vi.waitFor(() => expect(actions()).toEqual(['createFile', 'createFolder', 'rename', 'trash']))
+})
+
+it.each(['rename', 'trash'] as const)('等待 %s 确认时挂载链接根，不能移走它的真实父目录', async action => {
+  files.set('/notes/drafts/project', dirType)
+  files.set('/project-link', dirType | vscode.FileType.SymbolicLink)
+  mock.realpath.mockImplementation(async path => path === '/project-link' ? '/notes/drafts/project' : path)
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('drafts')
+  const prompt = action === 'rename' ? mock.showInputBox : mock.warn
+  prompt.mockImplementationOnce(async () => {
+    mock.extraRoots.push('/project-link')
+    return action === 'rename' ? 'renamed-drafts' : 'workspaceFiles.trash'
+  })
+  client.request({ kind: 'workspaceFiles.action', action, id })
+  await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(mock.renameFile).not.toHaveBeenCalled()
+  expect(mock.remove).not.toHaveBeenCalled()
 })
 
 it.each([
@@ -597,7 +739,7 @@ it('文件型 Notebook 出现在同组标签，并切回已打开的原编辑器
   const client = mount()
   client.request({ kind: 'workspaceFiles.toggle' })
   const row = (await client.loaded()).tabs.find(tab => tab.name === 'research.ipynb')!
-  expect(row.id).toBe(`tab:notebook:jupyter-notebook|${uri.toString()}`)
+  expect(row.id.startsWith(`tab:notebook:jupyter-notebook|${uri.toString()}|group:`)).toBe(true)
   client.request({ kind: 'workspaceFiles.activate', id: row.id })
   await vi.waitFor(() => expect(mock.showNotebook).toHaveBeenCalledExactlyOnceWith(model, { viewColumn: 2, preview: false }))
 })
