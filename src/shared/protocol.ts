@@ -70,12 +70,20 @@ export type TableEditOp =
   | 'insertColumnRight'
   | 'deleteColumn'
 
+export const WORKSPACE_FILE_ACTIONS = ['createFile', 'createFolder', 'rename', 'trash'] as const
+export type WorkspaceFileAction = (typeof WORKSPACE_FILE_ACTIONS)[number]
+export function isWorkspaceFileAction(value: unknown): value is WorkspaceFileAction {
+  return WORKSPACE_FILE_ACTIONS.some(action => action === value)
+}
+
 /** 左侧栏只回传本面板快照中的条目 ID；一切文件操作由宿主解析。 */
 export type WorkspaceFilesRequest =
   | { kind: 'workspaceFiles.toggle' }
   | { kind: 'workspaceFiles.refresh' }
   | { kind: 'workspaceFiles.collapseAll' }
-  | { kind: 'workspaceFiles.activate' | 'workspaceFiles.manage'; id: string }
+  | { kind: 'workspaceFiles.activate'; id: string; expanded?: boolean }
+  | { kind: 'workspaceFiles.manage'; id: string }
+  | { kind: 'workspaceFiles.action'; id: string; action: WorkspaceFileAction }
   | { kind: 'workspaceFiles.create'; entry: 'file' | 'folder' }
 
 export interface WorkspaceFileTab {
@@ -92,7 +100,7 @@ export interface WorkspaceFileEntry extends WorkspaceFileTab {
   level: number
   expanded?: boolean
   unreadable?: boolean
-  manageable: boolean
+  actions: WorkspaceFileAction[]
 }
 
 export interface WorkspaceFilesSnapshot {
@@ -514,6 +522,7 @@ export type HostToWebview =
    *  接管）。宿主测试无法向 webview 派发真实鼠标事件，以此通道验证真实
    *  宿主内的菜单装配 */
   | { kind: 'contextMenu.test.contextMenu'; pos: number }
+  | { kind: 'workspaceFiles.test.contextMenu'; id: string }
   /** 测试钩子（#183）：点击菜单中 command 对应的真实按钮（与用户点击同一
    *  处理器；command 取菜单项描述符的 command——含运行期注册项，通道为
    *  非空字符串校验） */
@@ -2999,7 +3008,7 @@ export interface ReadingFoldPaintProbe {
 
 export interface PaintProbe {
   /** 左侧栏的开关、顶栏、文件树操作与当前文件行的绘制层命中。 */
-  workspaceFiles?: { togglePainted: boolean; panelPainted: boolean; currentFilePainted: boolean; treeActionsPainted?: boolean }
+  workspaceFiles?: { togglePainted: boolean; panelPainted: boolean; currentFilePainted: boolean; treeActionsPainted?: boolean; menuPainted?: boolean }
   /** Live 文末：真实行盒、文字命中与下方留白（按需视口探针）。 */
   liveEnd?: { lineTopPx: number; endGapPx: number; textPainted: boolean; blankBelow: boolean }
   /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
@@ -4124,7 +4133,8 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       typeof v.workspaceFiles.togglePainted === 'boolean' &&
       typeof v.workspaceFiles.panelPainted === 'boolean' &&
       typeof v.workspaceFiles.currentFilePainted === 'boolean' &&
-      (v.workspaceFiles.treeActionsPainted === undefined || typeof v.workspaceFiles.treeActionsPainted === 'boolean'))) &&
+      (v.workspaceFiles.treeActionsPainted === undefined || typeof v.workspaceFiles.treeActionsPainted === 'boolean') &&
+      (v.workspaceFiles.menuPainted === undefined || typeof v.workspaceFiles.menuPainted === 'boolean'))) &&
     (v.liveEnd === undefined || (isObject(v.liveEnd) &&
       typeof v.liveEnd.lineTopPx === 'number' && Number.isFinite(v.liveEnd.lineTopPx) &&
       typeof v.liveEnd.endGapPx === 'number' && Number.isFinite(v.liveEnd.endGapPx) &&
@@ -4656,8 +4666,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'workspaceFiles.collapseAll':
       return true
     case 'workspaceFiles.activate':
+      return typeof v.id === 'string' && v.id.length > 0 && (v.expanded === undefined || typeof v.expanded === 'boolean')
     case 'workspaceFiles.manage':
       return typeof v.id === 'string' && v.id.length > 0
+    case 'workspaceFiles.action':
+      return typeof v.id === 'string' && v.id.length > 0 && isWorkspaceFileAction(v.action)
     case 'workspaceFiles.create':
       return v.entry === 'file' || v.entry === 'folder'
     case 'addonDocNav.request':
@@ -5511,9 +5524,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         Array.isArray(v.tabs) && v.tabs.every(isWorkspaceFileTab) && Array.isArray(v.entries) &&
         v.entries.every((row: unknown) => isObject(row) &&
           (row.kind === 'root' || row.kind === 'folder' || row.kind === 'file') &&
-          isNonNegativeInt(row.level) && typeof row.manageable === 'boolean' &&
+          isNonNegativeInt(row.level) && Array.isArray(row.actions) && row.actions.every(isWorkspaceFileAction) &&
           (row.expanded === undefined || typeof row.expanded === 'boolean') &&
           (row.unreadable === undefined || typeof row.unreadable === 'boolean') && isWorkspaceFileTab(row))
+    case 'workspaceFiles.test.contextMenu':
+      return typeof v.id === 'string' && v.id.length > 0
     case 'addonDocNav.result':
       // #543 T03 导航回执：结果形状守卫（shared/addonNavApi 单一事实源）
       return isPositiveInt(v.reqId) &&

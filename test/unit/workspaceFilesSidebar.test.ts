@@ -448,6 +448,60 @@ it('目录管理能在所选目录新建文件夹；文件改名走宿主 Worksp
   expect(mock.renameFile).toHaveBeenCalledWith(matchingUri('/notes/start.md'), matchingUri('/notes/renamed.md'), { overwrite: false })
 })
 
+it('文件树发布行级操作，右键命令用同一宿主流程直接新建于目标目录', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const entries = (await client.loaded()).entries
+  expect(entries.map(row => [row.kind, row.actions])).toEqual([
+    ['root', ['createFile', 'createFolder']],
+    ['folder', ['createFile', 'createFolder', 'rename', 'trash']],
+    ['file', ['rename', 'trash']],
+  ])
+  const request = { kind: 'workspaceFiles.action', id: await client.id('drafts'), action: 'createFolder' } as const
+  expect(isWebviewToHost(request)).toBe(true)
+  expect(isWebviewToHost({ ...request, action: 'delete' })).toBe(false)
+  mock.showInputBox.mockResolvedValueOnce('context-created')
+  client.request(request)
+  await vi.waitFor(() => expect(mock.createDirectory).toHaveBeenCalledExactlyOnceWith(
+    matchingUri('/notes/drafts/context-created'),
+  ))
+  expect(mock.showQuickPick).not.toHaveBeenCalled()
+})
+
+it('操作由当前宿主重验；旧菜单不能回收新挂载根的父目录', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const folder = (await client.loaded()).entries.find(row => row.name === 'drafts')!
+  expect(folder.actions).toContain('trash')
+  mock.extraRoots.push('/notes/drafts/project')
+  mock.warn.mockResolvedValue('workspaceFiles.trash')
+  client.request({ kind: 'workspaceFiles.action', id: folder.id, action: 'trash' })
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(mock.warn).not.toHaveBeenCalled()
+  expect(mock.remove).not.toHaveBeenCalled()
+})
+
+it('目录读取未返回时，旧菜单的展开动作不会把已展开的目录反转', async () => {
+  const client = mount()
+  client.request({ kind: 'workspaceFiles.toggle' })
+  const id = await client.id('drafts')
+  const list = mock.readDirectory.getMockImplementation()!
+  let finishRead!: () => void
+  const pendingRead = new Promise<void>(resolve => { finishRead = resolve })
+  mock.readDirectory.mockImplementation(async (uri: vscode.Uri) => {
+    if (uri.path === '/notes/drafts') await pendingRead
+    return list(uri)
+  })
+  client.request({ kind: 'workspaceFiles.activate', id })
+  await vi.waitFor(() => expect(mock.readDirectory).toHaveBeenCalledWith(matchingUri('/notes/drafts')))
+  expect(client.snapshot()?.entries.find(row => row.id === id)?.expanded).toBe(false)
+  client.request({ kind: 'workspaceFiles.activate', id, expanded: true })
+  finishRead()
+  await vi.waitFor(() => expect(client.snapshot()?.entries.map(row => row.name)).toContain('old.md'))
+  expect(client.snapshot()?.entries.find(row => row.id === id)?.expanded).toBe(true)
+  expect(isWebviewToHost({ kind: 'workspaceFiles.activate', id, expanded: 'false' })).toBe(false)
+})
+
 it('目录入回收站前检查未保存内容，确认后也不退回永久删除', async () => {
   const client = mount()
   client.request({ kind: 'workspaceFiles.toggle' })

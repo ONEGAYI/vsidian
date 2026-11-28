@@ -3728,6 +3728,7 @@ export function createTextEditorProvider(
             case 'workspaceFiles.collapseAll':
             case 'workspaceFiles.activate':
             case 'workspaceFiles.manage':
+            case 'workspaceFiles.action':
             case 'workspaceFiles.create':
               fileSidebar.request(message)
               return

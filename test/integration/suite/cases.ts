@@ -6667,9 +6667,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     try {
       await waitViewState('lf.md', v => v.paint?.workspaceFiles?.panelPainted === true &&
         v.paint.workspaceFiles.treeActionsPainted === true && v.paint.workspaceFiles.currentFilePainted && v.paint.textVisible)
-      assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, first.toString(), {
-        kind: 'workspaceFiles.activate', id: `tree:${root.toString()}|${second.toString()}`,
-      }), '工作区文件行应走实际 webview 消息入口')
+      assert(await vscode.commands.executeCommand(CMD.postToPanel, first.toString(), {
+        kind: 'workspaceFiles.test.contextMenu', id: `tree:${root.toString()}|${second.toString()}`,
+      }), '从目标树条目打开右键菜单')
+      await waitViewState('lf.md', v => v.paint?.workspaceFiles?.menuPainted === true)
+      assert(await vscode.commands.executeCommand(CMD.postToPanel, first.toString(), {
+        kind: 'contextMenu.test.menuClick', command: 'activate',
+      }), '点击实际菜单的打开按钮，文件操作走真实 webview 消息入口')
       await waitSessionReady('crlf.md')
       await waitViewState('crlf.md', v => v.paint?.workspaceFiles?.panelPainted === true &&
         v.paint.workspaceFiles.currentFilePainted)

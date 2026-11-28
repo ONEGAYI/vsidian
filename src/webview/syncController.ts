@@ -113,6 +113,7 @@ import {
   type OutlinkItemPayload,
   type OutlinksProbe,
   type PaintProbe,
+  type WorkspaceFileEntry,
   type ReadingSyntaxProbe,
   type SidebarProbe,
   type TypographyInheritSample,
@@ -149,7 +150,7 @@ import {
 import { onLocaleChanged, t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
 import { bindLocale, bindLocaleAttrs, bindLocaleFn, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
-import { WorkspaceFilesView } from './workspaceFilesView'
+import { buildWorkspaceFileMenu, WorkspaceFilesView } from './workspaceFilesView'
 import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
@@ -833,6 +834,7 @@ export class WebviewSyncController {
   /** 主编辑区顶栏的侧栏切换按钮（可访问名称随状态变化） */
   private sidebarToggleBtn: HTMLButtonElement | undefined
   private workspaceFilesView: WorkspaceFilesView | undefined
+  private workspaceFilesMenuEntry: WorkspaceFileEntry | undefined
   private workspaceFilesToggleBtn: HTMLButtonElement | undefined
   /** 侧栏是纯 webview 视图状态（与 viewMode 同类）：切换零写回、
    *  不入撤销栈、不触发出站消息；经 bridge state 持久化（重载恢复） */
@@ -1686,7 +1688,10 @@ export class WebviewSyncController {
     this.mainEl.appendChild(this.addonPanelDockEl)
     this.bodyEl = document.createElement('div')
     this.bodyEl.className = 'vsidian-body'
-    this.workspaceFilesView = new WorkspaceFilesView(message => this.bridge.postMessage(message))
+    this.workspaceFilesView = new WorkspaceFilesView(message => this.bridge.postMessage(message), {
+      open: (entry, anchor, x, y) => this.openWorkspaceFileMenu(entry, anchor, x, y),
+      isOpen: () => this.workspaceFilesMenuEntry !== undefined,
+    })
     this.bodyEl.appendChild(this.workspaceFilesView.element)
     this.bodyEl.appendChild(this.mainEl)
     this.bodyEl.appendChild(this.sidebarEl)
@@ -1707,6 +1712,11 @@ export class WebviewSyncController {
     // document 捕获先于 VS Code webview 预加载脚本的 window 冒泡转发。
     this.docKeydown = (e: KeyboardEvent) => {
       if (this.richPasteDialog?.isOpen()) return
+      if (this.workspaceFilesView?.ownsMenuKey(e)) {
+        // 树条目的菜单键由行接管，不让正文绑定在捕获阶段截断。
+        this.keybindingRouter.cancel()
+        return
+      }
       // Ctrl/Cmd 按下（非重复）：Live 悬停补触发——指针已在链接上时开浮层
       // （不 preventDefault/stopPropagation：修饰键本身不是键绑定，其余
       // 路由照常）
@@ -3345,6 +3355,16 @@ export class WebviewSyncController {
       case 'workspaceFiles.snapshot': {
         const files = this.workspaceFilesView
         const button = this.workspaceFilesToggleBtn
+        const menuEntry = this.workspaceFilesMenuEntry
+        if (menuEntry) {
+          const current = message.entries.find(entry => entry.id === menuEntry.id)
+          if (!message.open || !current || current.kind !== menuEntry.kind || current.name !== menuEntry.name ||
+            current.expanded !== menuEntry.expanded || current.actions.length !== menuEntry.actions.length ||
+            current.actions.some((action, index) => action !== menuEntry.actions[index])) {
+            if (!current && message.open) this.menuPrevFocus = button ?? null
+            this.closeContextMenu()
+          }
+        }
         if (!message.open && files?.element.contains(document.activeElement)) button?.focus()
         this.bodyEl?.classList.toggle('vsidian-file-sidebar-open', message.open)
         files?.apply(message)
@@ -3741,6 +3761,10 @@ export class WebviewSyncController {
         if (snapshot) {
           this.openContextMenu(snapshot, 24, 24, view)
         }
+        break
+      }
+      case 'workspaceFiles.test.contextMenu': {
+        this.workspaceFilesView?.dispatchContextMenuForTest(message.id)
         break
       }
       case 'contextMenu.test.menuClick': {
@@ -8359,7 +8383,6 @@ export class WebviewSyncController {
     const menu = buildMenuDom(buildContextMenuModel(snapshot, hints), {
       onCommand: (command) => this.runContextMenuCommand(command),
     })
-    this.contextMenuEl = menu
     this.contextMenuView = view
     this.contextMenuTarget = snapshot.blockTarget
     this.contextMenuSnapshot = snapshot
@@ -8376,6 +8399,26 @@ export class WebviewSyncController {
       scopeRoot: this.rootEl ?? document.body,
       docScope: liveHtmlDocScopeOf(view.state) ?? 'doc',
     }) ?? undefined
+    this.showViewportContextMenu(menu, clientX, clientY)
+  }
+
+  private openWorkspaceFileMenu(entry: WorkspaceFileEntry, anchor: HTMLButtonElement, clientX: number, clientY: number): void {
+    this.closeContextMenu()
+    this.closeOutlineMenu()
+    const menu = buildWorkspaceFileMenu(entry, action => {
+      if (this.contextMenuEl !== menu) return
+      this.closeContextMenu()
+      this.bridge.postMessage(action === 'activate'
+        ? { kind: 'workspaceFiles.activate', id: entry.id, ...(entry.kind === 'file' ? {} : { expanded: !entry.expanded }) }
+        : { kind: 'workspaceFiles.action', id: entry.id, action })
+    })
+    this.workspaceFilesMenuEntry = entry
+    document.body.appendChild(menu)
+    this.showViewportContextMenu(menu, clientX, clientY, anchor)
+  }
+
+  private showViewportContextMenu(menu: HTMLElement, clientX: number, clientY: number, anchor?: HTMLElement): void {
+    this.contextMenuEl = menu
     if (menu.scrollHeight > menu.clientHeight) {
       menu.style.overflowY = 'auto'
     }
@@ -8391,7 +8434,8 @@ export class WebviewSyncController {
     applySubmenuFlip(menu, window.innerWidth || 1200, undefined, window.innerHeight || 800)
     // 键盘导航起点：聚焦菜单容器（打开菜单接管方向键；关闭时还焦先前
     // 宿主——见 menuPrevFocus 注释）
-    this.captureMenuFocus()
+    if (anchor) this.menuPrevFocus = anchor
+    else this.captureMenuFocus()
     focusMenuDom(menu)
     // 关闭通道：菜单外 pointerdown（capture）与 Esc（与大纲菜单同模式）
     this.contextMenuDismissPointer = (e) => {
@@ -8426,6 +8470,7 @@ export class WebviewSyncController {
     }
     this.contextMenuEl?.remove()
     this.contextMenuEl = undefined
+    this.workspaceFilesMenuEntry = undefined
     // #658（T07）：预览探针与观察器随菜单关闭归零（无泄漏；幂等）
     this.calloutMenuPreview?.dispose()
     this.calloutMenuPreview = undefined
@@ -11216,11 +11261,13 @@ export class WebviewSyncController {
     const view = this.view
     const contentEl = view?.dom.querySelector<HTMLElement>('.cm-content')
     const files = this.workspaceFilesView
+    const fileMenu = this.workspaceFilesMenuEntry ? this.contextMenuEl : undefined
     const workspaceFiles: PaintProbe['workspaceFiles'] = {
       togglePainted: hitPaintedElement(this.workspaceFilesToggleBtn),
       panelPainted: hitPaintedElement(files?.header),
       currentFilePainted: hitPaintedElement(files?.currentFile()),
       treeActionsPainted: files?.treeActions.every(button => hitPaintedElement(button)) ?? false,
+      menuPainted: hitPaintedElement(fileMenu, fileMenu),
     }
     if (!view || !contentEl) {
       return {

@@ -1,8 +1,13 @@
-import type { WorkspaceFileEntry, WorkspaceFileTab, WorkspaceFilesRequest, WorkspaceFilesSnapshot } from '../shared/protocol'
+import {
+  isWorkspaceFileAction, WORKSPACE_FILE_ACTIONS, type WorkspaceFileAction,
+  type WorkspaceFileEntry, type WorkspaceFileTab, type WorkspaceFilesRequest, type WorkspaceFilesSnapshot,
+} from '../shared/protocol'
+import { buildMenuModel, PLAIN_MENU_LINE, type MenuItemDescriptor } from '../shared/contextMenu'
 import type { MessageKey } from '../shared/locales/en'
 import { t } from '../shared/i18n'
 import { bindLocale, bindLocaleAttrs, bindLocaleFn, refreshElementLocale } from './localeDom'
 import { closeHoverPopupIfAnchorWithin, hoverPreviewAnchorEnter, hoverPreviewAnchorLeave, repositionHoverPopupIfAnchorWithin } from './hoverPopup'
+import { buildMenuDom } from './contextMenuDom'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 // 16px 线框图标槽；目录用展开箭头单独表达开合态。
@@ -44,8 +49,39 @@ interface FileRow {
   detail?: HTMLSpanElement
   manage?: HTMLButtonElement
   status?: HTMLDivElement
-  tab: WorkspaceFileTab
+  tab: WorkspaceFileTab | WorkspaceFileEntry
   kind?: WorkspaceFileEntry['kind']
+}
+
+interface FileMenuHost {
+  open(entry: WorkspaceFileEntry, anchor: HTMLButtonElement, x: number, y: number): void
+  isOpen(): boolean
+}
+
+function isFileMenuKey(event: KeyboardEvent): boolean {
+  return !event.altKey && !event.ctrlKey && !event.metaKey &&
+    (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))
+}
+
+/** 文件菜单只消费宿主发来的能力，不进入正文/附加组件的菜单注册表。 */
+export function buildWorkspaceFileMenu(entry: WorkspaceFileEntry, onAction: (action: 'activate' | WorkspaceFileAction) => void): HTMLElement {
+  const descriptors: MenuItemDescriptor[] = [{
+    id: 'workspaceFiles.activate', command: 'activate', group: 'fileNavigation', order: 0,
+    labelKey: entry.kind === 'file' ? 'workspaceFiles.openFile'
+      : entry.expanded ? 'workspaceFiles.collapseFolder' : 'workspaceFiles.expandFolder',
+    when: () => true, enable: () => true,
+  }, ...WORKSPACE_FILE_ACTIONS.map((action, order): MenuItemDescriptor => ({
+    id: `workspaceFiles.${action}`, command: action, group: 'fileManagement', order,
+    labelKey: `workspaceFiles.${action}`, danger: action === 'trash',
+    when: () => entry.actions.includes(action), enable: () => true,
+  }))]
+  const menu = buildMenuDom(buildMenuModel(descriptors, {
+    zone: 'normal', hasSelection: false, blockTarget: null, line: PLAIN_MENU_LINE,
+  }), { onCommand: command => {
+    if (command === 'activate' || isWorkspaceFileAction(command)) onAction(command)
+  } })
+  menu.setAttribute('aria-label', t('workspaceFiles.manage', { name: entry.name }))
+  return menu
 }
 
 /** 只消费宿主已授权的条目；视图不拼路径、不推测当前文件或文件操作结果。 */
@@ -65,7 +101,7 @@ export class WorkspaceFilesView {
   private loading = false
   private revealedFile: string | undefined
 
-  constructor(private readonly send: (request: WorkspaceFilesRequest) => void) {
+  constructor(private readonly send: (request: WorkspaceFilesRequest) => void, private readonly menu: FileMenuHost) {
     this.element = document.createElement('aside')
     this.element.id = 'vsidian-file-sidebar'
     this.element.className = 'vsidian-file-sidebar'
@@ -160,13 +196,23 @@ export class WorkspaceFilesView {
     return this.tree.querySelector<HTMLButtonElement>('[aria-current="page"]')
   }
 
+  /** 宿主测试不能发送物理鼠标事件，派发到真实文件树按钮的同一入口。 */
+  dispatchContextMenuForTest(id: string): void {
+    this.treeRows.get(id)?.button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  }
+
   onPreviewModifierDown(): void {
     if (this.hovered) this.preview(this.hovered)
   }
 
+  ownsMenuKey(event: KeyboardEvent): boolean {
+    return !this.element.inert && isFileMenuKey(event) && event.target instanceof Element &&
+      this.tree.contains(event.target) && event.target.closest('.vsidian-file-row') !== null
+  }
+
   private preview(row: FileRow): void {
     const { id, name, previewKind } = row.tab
-    if (!previewKind || this.element.inert) return
+    if (!previewKind || this.element.inert || this.menu.isOpen()) return
     hoverPreviewAnchorEnter(row.button, {
       target: name, workspaceFile: { id, kind: previewKind, sidebar: this.element }, sourceStart: 0, sourceEnd: 0,
       openAction: () => this.send({ kind: 'workspaceFiles.activate', id }),
@@ -207,7 +253,7 @@ export class WorkspaceFilesView {
     row.element.remove()
   }
 
-  private makeRow(tab: WorkspaceFileTab, kind?: WorkspaceFileEntry['kind']): FileRow {
+  private makeRow(tab: WorkspaceFileTab | WorkspaceFileEntry, kind?: WorkspaceFileEntry['kind']): FileRow {
     const element = document.createElement('li')
     element.className = 'vsidian-file-row'
     const button = document.createElement('button')
@@ -230,6 +276,21 @@ export class WorkspaceFilesView {
     element.append(button)
     const row: FileRow = { element, button, name, kind, tab }
     button.addEventListener('click', () => this.send({ kind: 'workspaceFiles.activate', id: tab.id }))
+    if (kind !== undefined) {
+      const open = (event: MouseEvent | KeyboardEvent): void => {
+        if (this.element.inert || !('kind' in row.tab)) return
+        event.preventDefault()
+        event.stopPropagation()
+        closeHoverPopupIfAnchorWithin(this.element)
+        const rect = button.getBoundingClientRect()
+        const pointer = event instanceof MouseEvent && (event.clientX !== 0 || event.clientY !== 0)
+        this.menu.open(row.tab, button, pointer ? event.clientX : rect.left, pointer ? event.clientY : rect.bottom)
+      }
+      element.addEventListener('contextmenu', open)
+      element.addEventListener('keydown', event => {
+        if (isFileMenuKey(event)) open(event)
+      })
+    }
     const within = (event: MouseEvent) => event.relatedTarget instanceof Node && button.contains(event.relatedTarget)
     button.addEventListener('mouseover', event => {
       if (within(event)) return
@@ -244,7 +305,7 @@ export class WorkspaceFilesView {
     return row
   }
 
-  private updateRow(row: FileRow, tab: WorkspaceFileTab, entry?: WorkspaceFileEntry): void {
+  private updateRow(row: FileRow, tab: WorkspaceFileTab | WorkspaceFileEntry, entry?: WorkspaceFileEntry): void {
     const { element, button, name } = row
     if (row.tab.previewKind !== tab.previewKind) closeHoverPopupIfAnchorWithin(element)
     if (entry) element.style.paddingInlineStart = `${Math.min(entry.level, 8) * 12}px`
@@ -265,7 +326,7 @@ export class WorkspaceFilesView {
       row.detail?.remove()
       row.detail = undefined
     }
-    if (entry?.manageable) {
+    if (entry && entry.actions.length > 0) {
       if (!row.manage) {
         row.manage = actionButton('more', 'workspaceFiles.manage', () => this.send({ kind: 'workspaceFiles.manage', id: tab.id }), tab.name)
         row.manage.dataset.fileFocus = `manage:${tab.id}`

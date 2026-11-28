@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { PDF_HOVER_MAX_BYTES } from './hoverDocAccess'
 import { t } from '../shared/i18n'
 import type { MessageKey } from '../shared/locales/en'
-import type { WorkspaceFileEntry, WorkspaceFilesRequest, WorkspaceFilesSnapshot } from '../shared/protocol'
+import type { WorkspaceFileAction, WorkspaceFileEntry, WorkspaceFilesRequest, WorkspaceFilesSnapshot } from '../shared/protocol'
 import { classifyLocalRefContentKind } from '../shared/refContent'
 
 const OPEN_KEY = 'vsidian.workspaceFiles.open'
@@ -342,7 +342,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     const key = uri.toString()
     const id = `tree:${root.toString()}|${key}`
     targets.set(id, target)
-    const row: WorkspaceFileEntry = { id, name, kind, level, manageable: isWritable(uri),
+    const row: WorkspaceFileEntry = { id, name, kind, level, actions: this.fileActions(target),
       detail: vscode.workspace.asRelativePath(uri), current: kind === 'file' && sameUri(uri, current) }
     if (kind === 'file') {
       row.previewKind = previewKindOf(uri)
@@ -452,14 +452,20 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
   }
 
   private async perform(client: Client, request: Extract<WorkspaceFilesRequest,
-    { kind: 'workspaceFiles.activate' | 'workspaceFiles.manage' | 'workspaceFiles.create' }>): Promise<void> {
+    { kind: 'workspaceFiles.activate' | 'workspaceFiles.manage' | 'workspaceFiles.create' | 'workspaceFiles.action' }>): Promise<void> {
     if (request.kind === 'workspaceFiles.create') {
       const directory = await this.defaultDirectory(client)
       if (directory) await this.create(client, directory, request.entry)
       return
     }
+    if (request.kind === 'workspaceFiles.action') {
+      await this.runFileAction(client, request.id, request.action)
+      return
+    }
     const target = client.targets.get(request.id)
     if (!target) return
+    if (request.kind === 'workspaceFiles.activate' && request.expanded !== undefined &&
+        (target.kind === 'file' || target.kind === 'tab')) return
     if (target.kind === 'tab') {
       if (request.kind === 'workspaceFiles.activate') {
         // VS Code 可重建 Tab 对象；从同组实时标签按 URI 和编辑器类型重新定位。
@@ -470,7 +476,7 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     }
     if (!vscode.workspace.getWorkspaceFolder(target.uri)) return
     if (request.kind === 'workspaceFiles.manage') {
-      if (isWritable(target.uri)) await this.manage(client, target)
+      await this.manage(client, request.id, target)
     } else if (target.kind === 'file') {
       await verifyTreePath(target.uri, vscode.FileType.File)
       const tabs = this.groupOf(client)?.tabs.filter(isFileTab) ?? []
@@ -482,8 +488,10 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
       const key = target.uri.toString()
       const expansion = target.kind === 'root' ? this.expandedRoots : this.expandedFolders
       const expanded = expansion.get(key) ?? (target.kind === 'root' && vscode.workspace.workspaceFolders?.length === 1)
-      expansion.set(key, !expanded)
-      if (!expanded) this.listings.delete(key)
+      const next = request.expanded ?? !expanded
+      if (next === expanded) return
+      expansion.set(key, next)
+      if (next) this.listings.delete(key)
       this.refresh()
     }
   }
@@ -523,18 +531,33 @@ export class WorkspaceFilesSidebar implements vscode.Disposable {
     return this.hostKind === vscode.ExtensionKind.UI && uri.scheme === 'file'
   }
 
-  private async manage(client: Client, target: TreeTarget): Promise<void> {
-    const options: Array<{ label: string; action: () => Promise<void> }> = []
-    if (target.kind !== 'file') {
-      options.push({ label: t('workspaceFiles.createFile'), action: () => this.create(client, target.uri, 'file') },
-        { label: t('workspaceFiles.createFolder'), action: () => this.create(client, target.uri, 'folder') })
-    }
+  private fileActions(target: TreeTarget): WorkspaceFileAction[] {
+    if (!isWritable(target.uri)) return []
+    const actions: WorkspaceFileAction[] = target.kind === 'file' ? [] : ['createFile', 'createFolder']
     if (!containsWorkspaceRoot(target.uri)) {
-      options.push({ label: t('workspaceFiles.rename'), action: () => this.rename(target) })
-      if (this.canUseTrash(target.uri)) options.push({ label: t('workspaceFiles.trash'), action: () => this.trash(target) })
+      actions.push('rename')
+      if (this.canUseTrash(target.uri)) actions.push('trash')
     }
+    return actions
+  }
+
+  private async manage(client: Client, id: string, target: TreeTarget): Promise<void> {
+    const options = this.fileActions(target).map(action => ({ label: t(`workspaceFiles.${action}`), action }))
+    if (options.length === 0) return
     const selection = await vscode.window.showQuickPick(options, { title: t('workspaceFiles.manage', { name: target.name }) })
-    if (selection && client.panel.active && isWritable(target.uri)) await selection.action()
+    if (selection) await this.runFileAction(client, id, selection.action)
+  }
+
+  private async runFileAction(client: Client, id: string, action: WorkspaceFileAction): Promise<void> {
+    if (!this.open || !client.panel.active || this.clients.get(client.panel) !== client) return
+    const target = client.targets.get(id)
+    if (!target || target.kind === 'tab' || !this.fileActions(target).includes(action)) return
+    switch (action) {
+      case 'createFile': return this.create(client, target.uri, 'file')
+      case 'createFolder': return this.create(client, target.uri, 'folder')
+      case 'rename': return this.rename(target)
+      case 'trash': return this.trash(target)
+    }
   }
 
   private async promptName(dir: vscode.Uri, title: MessageKey, prompt: MessageKey, old?: string): Promise<string | undefined> {

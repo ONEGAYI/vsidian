@@ -8,10 +8,12 @@ const output = artifactPath(root, 'workspaceFiles/main.js')
 await build({ entryPoints: [path.join(root, 'test/browser/workspaceFilesFixture.ts')],
   bundle: true, outfile: output, format: 'iife', loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
 
-const folder = { id: 'folder', name: '资料', level: 1, kind: 'folder', expanded: false, manageable: true }
-const file = { id: 'current', name: '随记.md', level: 1, kind: 'file', current: true, manageable: true, previewKind: 'markdown' }
-const child = { id: 'child', name: '参考文献.md', level: 2, kind: 'file', manageable: true, previewKind: 'markdown' }
-const entries = [{ id: 'root', name: '笔记工作区', level: 0, kind: 'root', expanded: true, manageable: true }, folder, file]
+const createActions = ['createFile', 'createFolder']
+const fileActions = ['rename', 'trash']
+const folder = { id: 'folder', name: '资料', level: 1, kind: 'folder', expanded: false, actions: [...createActions, ...fileActions] }
+const file = { id: 'current', name: '随记.md', level: 1, kind: 'file', current: true, actions: fileActions, previewKind: 'markdown' }
+const child = { id: 'child', name: '参考文献.md', level: 2, kind: 'file', actions: fileActions, previewKind: 'markdown' }
+const entries = [{ id: 'root', name: '笔记工作区', level: 0, kind: 'root', expanded: true, actions: createActions }, folder, file]
 const tabs = [{ id: 'tab-current', name: '随记.md', current: true },
   { id: 'tab-other', name: '草稿.md', detail: '论文', current: false, previewKind: 'markdown' }]
 const browser = await chromium.launch({ headless: true, channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
@@ -23,7 +25,8 @@ try {
       --vscode-sideBar-background: #242424; --vscode-sideBar-foreground: #ddd;
       --vscode-panel-border: #393939; --vscode-list-activeSelectionBackground: #264f78;
       --vscode-list-activeSelectionForeground: #fff; --vscode-list-hoverBackground: #303030;
-      --vscode-focusBorder: #007fd4; --vscode-descriptionForeground: #a5a5a5; }
+      --vscode-focusBorder: #007fd4; --vscode-descriptionForeground: #a5a5a5;
+      --vscode-menu-background: #2e3033; --vscode-errorForeground: #f48771; }
     </style><div id="app"></div>`)
   await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: output })
@@ -100,12 +103,75 @@ try {
   await tree.getByRole('button', { name: '管理随记.md', exact: true }).click()
   assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.manage', id: 'current' })
 
+  const clickAt = await current.boundingBox()
+  const menuX = Math.round(clickAt.x + 34), menuY = Math.round(clickAt.y + clickAt.height / 2)
+  await page.mouse.click(menuX, menuY, { button: 'right' })
+  const fileMenu = page.getByRole('menu', { name: '管理随记.md' })
+  await fileMenu.waitFor({ state: 'visible', timeout: 1500 })
+  assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.manage', id: 'current' }, '右键只开菜单，不激活文件')
+  assert.deepEqual(await fileMenu.getByRole('menuitem').allTextContents(), ['打开', '重命名', '移到回收站'])
+  assert.deepEqual(await fileMenu.evaluate(menu => {
+    const box = menu.getBoundingClientRect()
+    const item = menu.querySelector('[data-vsidian-command="activate"]')
+    const first = item.getBoundingClientRect()
+    const hit = item.contains(document.elementFromPoint(first.x + first.width / 2, first.y + first.height / 2))
+    return { x: box.x, y: box.y, hit, radius: getComputedStyle(menu).borderRadius, bg: getComputedStyle(menu).backgroundColor,
+      danger: getComputedStyle(menu.querySelector('[data-vsidian-command="trash"]')).color }
+  }), { x: menuX, y: menuY, hit: true, radius: '5px', bg: 'rgb(46, 48, 51)', danger: 'rgb(244, 135, 113)' })
+  await page.screenshot({ path: path.join(path.dirname(output), 'files-context-menu.png'),
+    clip: { x: 0, y: 0, width: 850, height: 390 } })
+  await page.keyboard.press('ArrowDown')
+  assert.equal(await fileMenu.getByRole('menuitem', { name: '打开' }).evaluate(el => el === document.activeElement), true)
+  await page.keyboard.press('Escape')
+  assert.equal(await fileMenu.count(), 0)
+  assert.equal(await current.evaluate(el => el === document.activeElement), true, 'Esc 把焦点还给触发文件')
+  await send({ kind: 'keybindings.changed', overrides: { workspaceFilesToggle: ['shift+f10'] } })
+  await page.keyboard.press('Shift+F10')
+  await fileMenu.getByRole('menuitem', { name: '重命名' }).click({ timeout: 1500 })
+  assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.action', id: 'current', action: 'rename' })
+  assert.equal(await fileMenu.count(), 0)
+  await page.locator('.cm-content').focus()
+  await page.keyboard.press('Shift+F10')
+  assert.equal(await page.evaluate(() => window.messages.some(m => m.kind === 'keybindings.execute' && m.id === 'workspaceFilesToggle')), true,
+    '正文仍执行用户为 Shift+F10 绑定的操作')
+  await send({ kind: 'keybindings.changed', overrides: {} })
+
+  await dir.click({ button: 'right' })
+  const dirMenu = page.getByRole('menu', { name: '管理资料', exact: true })
+  assert.deepEqual(await dirMenu.getByRole('menuitem').allTextContents(), ['折叠文件夹', '新建文件', '新建文件夹', '重命名', '移到回收站'])
+  await dirMenu.getByRole('menuitem', { name: '折叠文件夹' }).click()
+  assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.activate', id: 'folder', expanded: false })
+  await dir.click({ button: 'right' })
+  await dirMenu.getByRole('menuitem', { name: '新建文件夹' }).click()
+  assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.action', id: 'folder', action: 'createFolder' })
+  await tree.getByRole('button', { name: '笔记工作区', exact: true }).click({ button: 'right' })
+  const rootMenu = page.getByRole('menu', { name: '管理笔记工作区' })
+  assert.deepEqual(await rootMenu.getByRole('menuitem').allTextContents(), ['折叠文件夹', '新建文件', '新建文件夹'])
+  await page.mouse.click(600, 160)
+  assert.equal(await rootMenu.count(), 0, '外点关闭菜单')
+
+  const withChild = [entries[0], { ...folder, expanded: true }, child, file]
+  await current.click({ button: 'right' })
+  await state(true, withChild)
+  assert.equal(await fileMenu.isVisible(), true, '未变化的条目刷新保留菜单')
+  await state(true, [...withChild.slice(0, -1), { ...file, actions: ['rename'] }])
+  assert.equal(await fileMenu.count(), 0, '过期操作快照关闭菜单')
+  await current.click({ button: 'right' })
+  assert.deepEqual(await fileMenu.getByRole('menuitem').allTextContents(), ['打开', '重命名'], '不支持回收站时无该项')
+  await state(true, withChild.slice(0, -1))
+  assert.equal(await fileMenu.count(), 0, '目标删除后没有可执行菜单')
+  await state(true, withChild)
+  console.log('[PASS] 文件树右键菜单：定位与主题绘制、键盘还焦、权限和目标变化')
+
   await rightToggle.click()
   await send({ kind: 'view.mode.set', mode: 'reading' })
   await page.locator('.vsidian-reading-block').first().waitFor({ state: 'visible' })
   assert.ok((await main.boundingBox()).width < initialWidth, '两栏应能同时打开')
   assert.deepEqual(await iconLine(rightToggle), { x: 11, width: '3px' })
   assert.equal(await current.isVisible(), true, '阅读模式同样能用左栏')
+  await current.click({ button: 'right' })
+  assert.equal(await fileMenu.isVisible(), true, '阅读模式只接管左侧文件树本身的右键')
+  await page.keyboard.press('Escape')
   await page.mouse.move(660, 240)
   await page.screenshot({ path: path.join(path.dirname(output), 'files-sidebar.png'),
     clip: { x: 0, y: 0, width: 1440, height: 420 } })
@@ -122,11 +188,19 @@ try {
   assert.equal(await refreshedFile.count(), 0)
   assert.equal(await left.getByRole('button', { name: /^草稿\.md/ }).isVisible(), true)
 
-  await page.setViewportSize({ width: 540, height: 780 })
+  await page.setViewportSize({ width: 540, height: 230 })
   assert.ok(await left.getByText('文件', { exact: true }).isVisible())
+  await current.click({ button: 'right', position: { x: 110, y: 12 }, timeout: 3000 })
+  assert.equal(await fileMenu.evaluate(menu => {
+    const box = menu.getBoundingClientRect()
+    const action = menu.querySelector('[data-vsidian-command="activate"]')
+    const hit = document.elementFromPoint(box.x + 16, action.getBoundingClientRect().y + 12)
+    return box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight && action.contains(hit)
+  }), true, '窄窗口边缘菜单仍可实际命中')
   await leftToggle.click()
   assert.deepEqual(await lastMessage(), { kind: 'workspaceFiles.toggle' })
   await state(false)
+  assert.equal(await fileMenu.count(), 0, '收起左栏后不留过期菜单')
   assert.equal(await leftToggle.getAttribute('aria-expanded'), 'false')
   assert.equal(await rightToggle.getAttribute('aria-expanded'), 'true', '关左栏不关右栏')
 
@@ -174,6 +248,10 @@ try {
   await page.waitForTimeout(450)
   assert.equal((await requests()).length, 0, '普通悬停只保留原有提示')
   const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
+  await target.focus()
+  await page.keyboard.press('Shift+F10')
+  await page.getByRole('menu', { name: '管理参考文献.md' }).waitFor({ state: 'visible', timeout: 1500 })
+  await page.keyboard.press('Escape')
   await page.keyboard.down(modifier)
   await popup.waitFor({ state: 'visible', timeout: 2500 }).catch(async error => {
     throw new Error(`文件树未打开预览；读请求 ${JSON.stringify(await requests())}`, { cause: error })
@@ -243,7 +321,7 @@ try {
     m.kind === 'workspaceFiles.activate' || m.kind === 'refEdit.bind' || m.kind === 'edit.request'), previews), [])
   console.log('[PASS] 两类条目 Ctrl 悬停复用只读卡片，刷新保留、折叠与 Esc 关闭')
 
-  const picture = { id: 'picture', name: '原图 #.png', kind: 'file', level: 1, previewKind: 'image', manageable: false }
+  const picture = { id: 'picture', name: '原图 #.png', kind: 'file', level: 1, previewKind: 'image', actions: [] }
   const display = 'https://local-resource.example/preview.png'
   await page.route(display, route => route.fulfill({ contentType: 'image/png', path: path.join(root, 'media', 'vsidian-icon.png') }))
   await state(true, [...entries, picture], withUntitled)
